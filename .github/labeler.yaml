@@ -1,0 +1,7 @@
+---
+documentation:
+  - changed-files:
+      - any-glob-to-any-file: "**/*.md"
+
+bug:
+  - head-branch: ["^fix", "fix"]
