@@ -26,13 +26,24 @@ change-title-escapes: '\<*_&'
 version-resolver:
   major:
     labels:
-      - "major"
+      - breaking
+      - major
+
   minor:
     labels:
-      - "minor"
+      - feature
+      - enhancement
+      - minor
+
   patch:
     labels:
-      - "patch"
+      - patch
+      - bug
+      - bugfix
+      - fix
+      - documentation
+      - chore
+
   default: patch
 
 template: |
