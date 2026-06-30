@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
-  ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History,
+  ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line,
@@ -14,17 +14,20 @@ import { storage } from "./api";
 ------------------------------------------------------------------- */
 const C = {
   canvas: "#ECEFEC", card: "#FFFFFF", ink: "#16211F", muted: "#65726E", line: "#DCE2DF",
-  a: "#DB6B3A", b: "#1F7A8C", gov: "#7A5BA6", save: "#2E7D52", softA: "#FBEEE6", softB: "#E6F1F3",
+  a: "#DB6B3A", b: "#1F7A8C", gov: "#7A5BA6", save: "#2E7D52", inc: "#2F6DB0", exp: "#C0443B", softA: "#FBEEE6", softB: "#E6F1F3",
 };
 
 const KEY = "open-family-finance:v1";
 
-// Categories are user-defined; each gets a stable auto color derived from its name.
+// User-defined labels get a stable auto color from a hash of the name.
+// Hue, saturation and lightness all vary, so distinct names rarely look alike.
 function categoryColor(name) {
   if (!name) return "#9aa5a1";
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-  return `hsl(${h}, 55%, 48%)`;
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) { h ^= name.charCodeAt(i); h = Math.imul(h, 16777619); }
+  h = h >>> 0;
+  const hue = h % 360, sat = 50 + ((h >>> 9) % 30), light = 42 + ((h >>> 17) % 14);
+  return `hsl(${hue}, ${sat}%, ${light}%)`;
 }
 
 const TXT = {
@@ -41,8 +44,8 @@ const DEFAULT_FIGURES = {
   method: "income",
   margePct: "0.5",
   partners: [
-    { id: "p1", name: "Partner 1", income: "", period: "month" },
-    { id: "p2", name: "Partner 2", income: "", period: "month" },
+    { id: "p1", name: "Partner 1", income: "", period: "month", note: "", url: "" },
+    { id: "p2", name: "Partner 2", income: "", period: "month", note: "", url: "" },
   ],
   govIncome: [],
   expenses: [],
@@ -100,11 +103,11 @@ function migrateFig(f) {
   const per = (p) => (p === "year" ? "year" : "month");
   return {
     method: f.method || "income", margePct: f.margePct ?? "0.5",
-    partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period) })),
-    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period) })),
-    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "" })),
-    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period) }))
-      : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month" }] : []),
+    partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "" })),
+    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "" })),
+    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "" })),
+    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "" }))
+      : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "" }] : []),
   };
 }
 function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [] }; }
@@ -213,9 +216,9 @@ export default function App() {
   const setListItem = (k, id, patch) => patchFig((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, ...patch } : x) }));
   const toggleItemPeriod = (k, id) => patchFig((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x) }));
   const removeListItem = (k, id) => patchFig((f) => ({ ...f, [k]: f[k].filter((x) => x.id !== id) }));
-  const addGov = () => patchFig((f) => ({ ...f, govIncome: [...f.govIncome, { id: uid(), label: "", amount: "", period: "month" }] }));
-  const addExpense = () => patchFig((f) => ({ ...f, expenses: [...f.expenses, { id: uid(), category: "", label: "", amount: "", period: "month", note: "" }] }));
-  const addSaving = () => patchFig((f) => ({ ...f, savings: [...f.savings, { id: uid(), label: "", amount: "", period: "month" }] }));
+  const addGov = () => patchFig((f) => ({ ...f, govIncome: [...f.govIncome, { id: uid(), label: "", amount: "", period: "month", note: "", url: "" }] }));
+  const addExpense = () => patchFig((f) => ({ ...f, expenses: [...f.expenses, { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "" }] }));
+  const addSaving = () => patchFig((f) => ({ ...f, savings: [...f.savings, { id: uid(), label: "", amount: "", period: "month", note: "", url: "" }] }));
   const resetMonth = () => { if (window.confirm(`Cijfers van ${monthLong(sel)} terugzetten naar het voorbeeld?`)) patchFig(() => clone(DEFAULT_FIGURES)); };
 
   const pA = cur.partners[0], pB = cur.partners[1];
@@ -303,11 +306,9 @@ export default function App() {
           )}
         </section>
 
-        <div className="layout">
-          <div className="col-left">
-            <ColTitle>Inkomsten</ColTitle>
+        <ColTitle>Inkomsten</ColTitle>
         {/* Income */}
-        <Collapsible id="inkomen" title="Inkomen" icon={<Wallet size={16} style={{ color: C.ink }} />} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec}>
+        <Collapsible id="inkomen" title="Inkomen" icon={<Wallet size={16} style={{ color: C.inc }} />} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec}>
           <div style={St.hint}>Tik op een naam om die te wijzigen — die geldt voor alle maanden.</div>
           {[pA, pB].map((p, i) => (
             <div style={St.itemWrap} key={p.id}>
@@ -315,6 +316,8 @@ export default function App() {
                 <span style={{ ...St.dot, background: i === 0 ? C.a : C.b }} />
                 <input aria-label={`Naam partner ${i + 1}`} value={p.name} placeholder={`Partner ${i + 1}`} onChange={(e) => setPartnerName(i, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
                 <AmountField value={p.income} period={p.period} onValue={(v) => setPartner(i, { income: v })} onPeriod={() => togglePartnerPeriod(i)} onCommit={(o, n) => logChange(`Inkomen · ${p.name || `Partner ${i + 1}`}`, o, n)} />
+                <NoteField value={p.note || ""} onChange={(v) => setPartner(i, { note: v })} />
+                <LinkField value={p.url || ""} onChange={(v) => setPartner(i, { url: v })} />
               </div>
               <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} dot />
             </div>
@@ -330,6 +333,8 @@ export default function App() {
                 <span style={{ ...St.dot, background: C.gov }} />
                 <input aria-label="Omschrijving" value={g.label} placeholder="Toeslag" onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
                 <AmountField value={g.amount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`Overheid · ${g.label || "toeslag"}`, o, n)} />
+                <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
+                <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
                 <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
               </div>
               <DerivedLine monthly={monthlyOf(g)} period={g.period} percent={pctOf(monthlyOf(g), calc.govTotal)} dot />
@@ -339,12 +344,9 @@ export default function App() {
           <SubTotal monthly={calc.govTotal} />
         </Collapsible>
 
-          </div>{/* col-left */}
-
-          <div className="col-right">
-            <ColTitle>Uitgaven &amp; sparen</ColTitle>
+        <ColTitle>Uitgaven &amp; sparen</ColTitle>
         {/* Expenses */}
-        <Collapsible id="uitgaven" title="Uitgaven" icon={<Receipt size={16} style={{ color: C.ink }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec}>
+        <Collapsible id="uitgaven" title="Uitgaven" icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec}>
           {cur.expenses.map((e) => (
             <div style={St.itemWrap} key={e.id}>
               <div style={St.expRow}>
@@ -353,6 +355,7 @@ export default function App() {
                 <input aria-label="Omschrijving" value={e.label} placeholder="Omschrijving" onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
                 <AmountField value={e.amount} period={e.period} onValue={(v) => setListItem("expenses", e.id, { amount: v })} onPeriod={() => toggleItemPeriod("expenses", e.id)} onCommit={(o, n) => logChange(`Uitgave · ${e.label || "naamloos"}`, o, n)} />
                 <NoteField value={e.note || ""} onChange={(v) => setListItem("expenses", e.id, { note: v })} />
+                <LinkField value={e.url || ""} onChange={(v) => setListItem("expenses", e.id, { url: v })} />
                 <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("expenses", e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
               </div>
               <DerivedLine monthly={monthlyOf(e)} period={e.period} percent={pctOf(monthlyOf(e), calc.expensesTotal)} />
@@ -364,11 +367,12 @@ export default function App() {
               <div style={St.catSummaryTitle}>Per categorie</div>
               {byCategory.map(([cat, val]) => (
                 <div style={St.catSummaryRow} key={cat}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                  <span style={St.catName}>
                     <span style={{ ...St.catDot, background: categoryColor(cat === "Overig" ? "" : cat) }} />
                     {cat}
                   </span>
-                  <span style={St.catSummaryVal}>{eur(val)} <span style={St.catYr}>· {eur(val * 12)} p/j</span></span>
+                  <span style={St.catMonthly}>{eur(val)}</span>
+                  <span style={St.catYr}>{eur(val * 12)} p/j</span>
                 </div>
               ))}
             </div>
@@ -381,9 +385,11 @@ export default function App() {
           {cur.savings.map((s) => (
             <div style={St.itemWrap} key={s.id}>
               <div style={St.row}>
-                <span style={{ ...St.dot, background: C.save }} />
+                <span style={{ ...St.dot, background: categoryColor(s.label) }} />
                 <input aria-label="Spaardoel" value={s.label} placeholder="Spaardoel" onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
                 <AmountField value={s.amount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`Sparen · ${s.label || "spaardoel"}`, o, n)} />
+                <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
+                <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
                 <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("savings", s.id)} style={St.iconBtn}><Trash2 size={16} /></button>
               </div>
               <DerivedLine monthly={monthlyOf(s)} period={s.period} percent={pctOf(monthlyOf(s), calc.savingsTotal)} dot />
@@ -393,11 +399,8 @@ export default function App() {
           <SubTotal monthly={calc.savingsTotal} />
         </Collapsible>
 
-          </div>{/* col-right */}
-        </div>{/* layout */}
-
         {/* History */}
-        <Collapsible id="verloop" title="Verloop" total={`${sortedMonths.length} mnd`} open={open.verloop} onToggle={toggleSec}>
+        <Collapsible id="verloop" title="Statistieken" total={`${sortedMonths.length} mnd`} open={open.verloop} onToggle={toggleSec}>
           {series.length < 2 ? (
             <div style={St.emptyHist}>
               <TrendingUp size={18} style={{ color: C.muted }} />
@@ -426,9 +429,9 @@ export default function App() {
                     <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
                     <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
                     <Tooltip {...tooltipProps} /><Legend {...legendProps} />
-                    <Line type="monotone" dataKey="Inkomen" stroke={C.ink} strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="Inkomen" stroke={C.inc} strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="Overheidsbijdrage" stroke={C.gov} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="Uitgaven" stroke={C.a} strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="Uitgaven" stroke={C.exp} strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="Sparen" stroke={C.save} strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
@@ -622,6 +625,34 @@ function MoneyInput({ value, onChange, onCommit }) {
   );
 }
 
+function LinkField({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const editingRef = useRef(false);
+  const timer = useRef(null);
+  const has = value && value.trim().length > 0;
+  const href = has ? (/^https?:\/\//i.test(value.trim()) ? value.trim() : `https://${value.trim()}`) : null;
+  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
+  return (
+    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+      <button type="button" aria-label="Link bij deze uitgave"
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
+        <Link2 size={16} />
+      </button>
+      {open && (
+        <span style={St.notePop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+          <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="https://…"
+            onFocus={() => { editingRef.current = true; }}
+            onBlur={() => { editingRef.current = false; setOpen(false); }}
+            style={St.noteInput} aria-label="URL" />
+          {href && <a href={href} target="_blank" rel="noopener noreferrer" style={St.noteLink}>Open link ↗</a>}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function NoteField({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const editingRef = useRef(false);
@@ -654,7 +685,7 @@ function NoteField({ value, onChange }) {
 ------------------------------------------------------------------- */
 const St = {
   page: { minHeight: "100vh", background: C.canvas, color: C.ink, fontFamily: "'Inter', system-ui, sans-serif", fontFeatureSettings: "'tnum' 1", padding: "24px 16px 56px" },
-  shell: { maxWidth: 1080, margin: "0 auto" },
+  shell: { maxWidth: 780, margin: "0 auto" },
 
   header: { padding: "8px 4px 16px" },
   eyebrow: { fontSize: 12, letterSpacing: "0.14em", color: C.muted, fontWeight: 600 },
@@ -730,13 +761,17 @@ const St = {
 
   catSummary: { marginTop: 14, background: C.canvas, borderRadius: 12, padding: "12px 14px" },
   catSummaryTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 8 },
-  catSummaryRow: { display: "flex", justifyContent: "space-between", fontSize: 13.5, padding: "3px 0" },
+  catSummaryRow: { display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "baseline", columnGap: 14, fontSize: 13.5, padding: "3px 0" },
+  catName: { display: "inline-flex", alignItems: "center", gap: 7, color: C.ink, minWidth: 0 },
+  catMonthly: { textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.ink, fontWeight: 600, whiteSpace: "nowrap" },
   catSummaryVal: { fontVariantNumeric: "tabular-nums", color: C.ink },
-  catYr: { color: C.muted, fontSize: 12 },
+  catYr: { color: C.muted, fontSize: 12, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" },
   catDot: { width: 10, height: 10, borderRadius: 999, flexShrink: 0 },
   hint: { fontSize: 12.5, color: C.muted, margin: "0 2px 10px", lineHeight: 1.4 },
   notePop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 230, maxWidth: "70vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,0.14)", padding: 8, zIndex: 30 },
   noteArea: { width: "100%", border: "none", outline: "none", resize: "vertical", fontFamily: "inherit", fontSize: 13, lineHeight: 1.45, color: C.ink, background: "transparent" },
+  noteInput: { width: "100%", border: "none", outline: "none", fontFamily: "inherit", fontSize: 13, color: C.ink, background: "transparent" },
+  noteLink: { display: "inline-block", marginTop: 8, fontSize: 12.5, color: C.b, fontWeight: 600, textDecoration: "none", borderTop: `1px solid ${C.line}`, paddingTop: 7, width: "100%" },
   logEmpty: { fontSize: 13.5, lineHeight: 1.5, color: C.muted, background: C.canvas, borderRadius: 12, padding: "14px 14px" },
   logList: { display: "flex", flexDirection: "column", gap: 2, maxHeight: 360, overflowY: "auto" },
   logRow: { display: "flex", gap: 12, alignItems: "baseline", padding: "7px 4px", borderBottom: `1px solid ${C.line}` },
