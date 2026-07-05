@@ -1,7 +1,20 @@
+/**
+ * Open Family Finance — the whole UI lives in this file.
+ *
+ * Reading guide (top to bottom):
+ *   Design tokens .... colors (C) and UI texts (TXT)
+ *   Helpers .......... numbers, currency (nl-NL) and month keys
+ *   Core calculation . computeTotals: the fair split
+ *   Data model ....... per-month figures + migration/normalization
+ *   App .............. state, mutations and page layout
+ *   Subcomponents .... fields, popovers, cards, icons
+ *   Styles ........... inline styles (St) and global CSS
+ */
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
+  ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line,
@@ -31,6 +44,7 @@ function categoryColor(name) {
 }
 
 const TXT = {
+  salary: "Vul het netto salaris per persoon in (wat er maandelijks op de rekening komt). Tik op een naam om die te wijzigen; die geldt voor alle maanden.",
   model: "Uitgaven plus sparen, min de overheidsbijdrage, is wat jullie samen financieren. Dat verdelen we naar inkomen, plus een kleine buffer.",
   fair: "Wie meer verdient, legt naar verhouding meer in. Na de overboeking houdt ieder hetzelfde percentage van het eigen salaris over.",
   gov: "Toeslagen (kinderbijslag e.d.) komen binnen op de gezamenlijke rekening en verlagen het bedrag dat jullie zelf moeten inleggen.",
@@ -55,6 +69,7 @@ const DEFAULT_FIGURES = {
 /* ----------------------------------------------------------------
    Helpers
 ------------------------------------------------------------------- */
+// — numbers & amounts —
 const num = (x) => { const v = parseFloat(String(x).replace(",", ".")); return isFinite(v) ? v : 0; };
 const round2 = (n) => Math.round(n * 100) / 100;
 const toMonthly = (amountStr, period) => num(amountStr) / (period === "year" ? 12 : 1);
@@ -64,12 +79,14 @@ const sumM = (arr) => arr.reduce((s, x) => s + monthlyOf(x), 0);
 const flip = (amountStr, fromPeriod) => String(round2(fromPeriod === "year" ? num(amountStr) / 12 : num(amountStr) * 12));
 const pctOf = (part, whole) => (whole > 0 ? part / whole : null);
 
+// — formatting (nl-NL) —
 const eur = (n) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(isFinite(n) ? n : 0);
 const eur0 = (n) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(isFinite(n) ? n : 0);
 const pct = (x) => `${Math.round(x * 100)}%`;
 const uid = () => Math.random().toString(36).slice(2, 9);
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
+// — month keys: "YYYY-MM" —
 const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 const keyToDate = (k) => { const [y, m] = k.split("-").map(Number); return new Date(y, m - 1, 1); };
 const shiftMonth = (k, delta) => { const d = keyToDate(k); d.setMonth(d.getMonth() + delta); return monthKey(d); };
@@ -77,6 +94,14 @@ const monthLong = (k) => new Intl.DateTimeFormat("nl-NL", { month: "long", year:
 const monthShort = (k) => { const d = keyToDate(k); const m = new Intl.DateTimeFormat("nl-NL", { month: "short" }).format(d); return d.getMonth() === 0 ? `${m} '${String(d.getFullYear()).slice(2)}` : m; };
 const dt = (ts) => new Intl.DateTimeFormat("nl-NL", { dateStyle: "short", timeStyle: "short" }).format(new Date(ts));
 
+/* ----------------------------------------------------------------
+   Core calculation — the fair split
+
+   coupleFunds = expenses + savings − government benefits
+   Each partner contributes a share of coupleFunds — proportional to
+   net income ("verhouding") or 50/50 ("equal") — plus a small safety
+   margin (margePct). leftover = own salary − own contribution.
+------------------------------------------------------------------- */
 function computeTotals(fig) {
   const a = monthlyInc(fig.partners[0]), b = monthlyInc(fig.partners[1]), total = a + b;
   const shareA = total > 0 ? a / total : 0.5, shareB = total > 0 ? b / total : 0.5;
@@ -98,6 +123,15 @@ function computeTotals(fig) {
   };
 }
 
+/* ----------------------------------------------------------------
+   Data model & persistence
+
+   State shape: { selectedMonth, months: { "YYYY-MM": figures }, log }
+   Month keys sort lexicographically = chronologically. Everything is
+   stored as one JSON blob under KEY (Postgres via /api; localStorage
+   in the standalone preview). migrate/normalize keep older saved
+   blobs compatible with the current shape.
+------------------------------------------------------------------- */
 function migrateFig(f) {
   if (!f) return clone(DEFAULT_FIGURES);
   const per = (p) => (p === "year" ? "year" : "month");
@@ -133,6 +167,7 @@ export default function App() {
   const saveTimer = useRef(null);
   const margeStart = useRef(null);
 
+  // ── Load once on mount, then autosave (debounced) ──
   useEffect(() => {
     let active = true;
     (async () => {
@@ -152,10 +187,13 @@ export default function App() {
     return () => clearTimeout(saveTimer.current);
   }, [data, loaded]);
 
+  // ── Derived state for the selected month ──
   const sel = data.selectedMonth;
   const cur = data.months[sel] || DEFAULT_FIGURES;
   const calc = useMemo(() => computeTotals(cur), [cur]);
   const sortedMonths = useMemo(() => Object.keys(data.months).sort(), [data.months]);
+  const pastMonths = useMemo(() => sortedMonths.filter((k) => k < sel), [sortedMonths, sel]);
+  const futureMonths = useMemo(() => sortedMonths.filter((k) => k > sel), [sortedMonths, sel]);
   const isCurrentRealMonth = sel === monthKey(new Date());
 
   const series = useMemo(() => sortedMonths.map((m) => {
@@ -181,11 +219,42 @@ export default function App() {
     return [...set].sort();
   }, [data.months]);
 
+  // History of one entry (matched by id) across all months, for the sparkline.
+  const entryHistory = (kind, id) => {
+    const out = [];
+    for (const m of sortedMonths) {
+      const it = ((data.months[m] && data.months[m][kind]) || []).find((x) => x.id === id);
+      if (!it) continue;
+      const v = toMonthly(kind === "partners" ? it.income : it.amount, it.period);
+      out.push({ month: m, label: monthShort(m), value: Math.round(v) });
+    }
+    return out;
+  };
+  // Compare the current value to the most recent earlier month that had an entered value.
+  const entryTrend = (kind, id, curVal) => {
+    if (!(curVal > 0)) return null;
+    const idx = sortedMonths.indexOf(sel);
+    for (let i = idx - 1; i >= 0; i--) {
+      const it = ((data.months[sortedMonths[i]] && data.months[sortedMonths[i]][kind]) || []).find((x) => x.id === id);
+      if (!it) continue;
+      const prev = toMonthly(kind === "partners" ? it.income : it.amount, it.period);
+      if (prev > 0) {
+        if (Math.abs(curVal - prev) < 0.005) return null;
+        return { dir: curVal > prev ? "up" : "down", prev, cur: curVal };
+      }
+    }
+    return null;
+  };
+
   const toggleSec = (id) => setOpen((o) => ({ ...o, [id]: !o[id] }));
 
+  // ── Month navigation: seed a new month from the nearest earlier one ──
   const goMonth = (delta) => setData((d) => {
     const next = shiftMonth(d.selectedMonth, delta); const months = { ...d.months };
-    if (!months[next]) months[next] = clone(d.months[d.selectedMonth]);
+    if (!months[next]) {
+      const earlier = Object.keys(months).filter((k) => k < next).sort();
+      months[next] = clone(earlier.length ? months[earlier[earlier.length - 1]] : DEFAULT_FIGURES);
+    }
     return { ...d, selectedMonth: next, months };
   });
   const deleteMonth = (m) => setData((d) => {
@@ -196,7 +265,11 @@ export default function App() {
     return { ...d, selectedMonth, months };
   });
 
+  // ── Mutations ──
+  // Local-by-default model: an edit changes only the selected month.
+  // (Empty/new months are seeded from the previous month — see goMonth.)
   const patchFig = (updater) => setData((d) => ({ ...d, months: { ...d.months, [d.selectedMonth]: updater(d.months[d.selectedMonth]) } }));
+
   const setPartner = (i, patch) => patchFig((f) => ({ ...f, partners: f.partners.map((p, idx) => idx === i ? { ...p, ...patch } : p) }));
   // Names belong to a person, not a month: change them in every month and persist.
   const setPartnerName = (i, name) => setData((d) => {
@@ -210,6 +283,30 @@ export default function App() {
     const entry = { id: uid(), ts: Date.now(), month: d.selectedMonth, label, old: String(oldV ?? ""), next: String(newV ?? "") };
     return { ...d, log: [entry, ...(d.log || [])].slice(0, 300) };
   });
+
+  // Copy one entry's value from the selected month to existing past/future months,
+  // bounded by the chosen months (inclusive). Only that entry's amount is changed
+  // in months where it exists; in months where it was removed it is re-added.
+  const copyEntryRange = (kind, id, pastKey, futureKey) => setData((d) => {
+    const s = d.selectedMonth;
+    const item = (d.months[s][kind] || []).find((x) => x.id === id);
+    if (!item) return d;
+    const field = kind === "partners" ? "income" : "amount";
+    const months = { ...d.months };
+    for (const k of Object.keys(months)) {
+      if (k === s) continue;
+      const inPast = pastKey && k >= pastKey && k < s;
+      const inFuture = futureKey && k > s && k <= futureKey;
+      if (!inPast && !inFuture) continue;
+      const list = months[k][kind] || [];
+      const exists = list.some((x) => x.id === id);
+      months[k] = { ...months[k], [kind]: exists
+        ? list.map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x)
+        : [...list, { ...item }] };
+    }
+    return { ...d, months };
+  });
+
   const togglePartnerPeriod = (i) => patchFig((f) => ({ ...f, partners: f.partners.map((p, idx) => idx === i ? { ...p, period: p.period === "year" ? "month" : "year", income: flip(p.income, p.period) } : p) }));
   const setMethod = (method) => patchFig((f) => ({ ...f, method }));
   const setMarge = (margePct) => patchFig((f) => ({ ...f, margePct }));
@@ -219,11 +316,12 @@ export default function App() {
   const addGov = () => patchFig((f) => ({ ...f, govIncome: [...f.govIncome, { id: uid(), label: "", amount: "", period: "month", note: "", url: "" }] }));
   const addExpense = () => patchFig((f) => ({ ...f, expenses: [...f.expenses, { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "" }] }));
   const addSaving = () => patchFig((f) => ({ ...f, savings: [...f.savings, { id: uid(), label: "", amount: "", period: "month", note: "", url: "" }] }));
-  const resetMonth = () => { if (window.confirm(`Cijfers van ${monthLong(sel)} terugzetten naar het voorbeeld?`)) patchFig(() => clone(DEFAULT_FIGURES)); };
+  const resetMonth = () => { if (window.confirm(`Cijfers van ${monthLong(sel)} terugzetten naar het voorbeeld? (alleen deze maand)`)) patchFig(() => clone(DEFAULT_FIGURES)); };
 
   const pA = cur.partners[0], pB = cur.partners[1];
   const nameA = pA.name || "Partner 1", nameB = pB.name || "Partner 2";
 
+  // ── Render ──
   return (
     <div style={St.page}>
       <style>{CSS}</style>
@@ -308,16 +406,20 @@ export default function App() {
 
         <ColTitle>Inkomsten</ColTitle>
         {/* Income */}
-        <Collapsible id="inkomen" title="Inkomen" icon={<Wallet size={16} style={{ color: C.inc }} />} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec}>
-          <div style={St.hint}>Tik op een naam om die te wijzigen — die geldt voor alle maanden.</div>
+        <Collapsible id="inkomen" title="Salaris" icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec}>
           {[pA, pB].map((p, i) => (
-            <div style={St.itemWrap} key={p.id}>
-              <div style={St.row}>
-                <span style={{ ...St.dot, background: i === 0 ? C.a : C.b }} />
-                <input aria-label={`Naam partner ${i + 1}`} value={p.name} placeholder={`Partner ${i + 1}`} onChange={(e) => setPartnerName(i, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
-                <AmountField value={p.income} period={p.period} onValue={(v) => setPartner(i, { income: v })} onPeriod={() => togglePartnerPeriod(i)} onCommit={(o, n) => logChange(`Inkomen · ${p.name || `Partner ${i + 1}`}`, o, n)} />
-                <NoteField value={p.note || ""} onChange={(v) => setPartner(i, { note: v })} />
-                <LinkField value={p.url || ""} onChange={(v) => setPartner(i, { url: v })} />
+            <div style={St.itemWrap} className="entryWrap" key={p.id}>
+              <div className="entry">
+                <span className="e-lead"><span style={{ ...St.dot, background: i === 0 ? C.a : C.b }} /></span>
+                <input className="e-desc" aria-label={`Naam partner ${i + 1}`} value={p.name} placeholder={`Partner ${i + 1}`} onChange={(e) => setPartnerName(i, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
+                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setPartner(i, { income: v })} onPeriod={() => togglePartnerPeriod(i)} onCommit={(o, n) => logChange(`Inkomen · ${p.name || `Partner ${i + 1}`}`, o, n)} /></span>
+                <span className="entryActions" style={St.rowActions}>
+                  <NoteField value={p.note || ""} onChange={(v) => setPartner(i, { note: v })} />
+                  <LinkField value={p.url || ""} onChange={(v) => setPartner(i, { url: v })} />
+                  <TrendIcon income trend={entryTrend("partners", p.id, monthlyInc(p))} />
+                  <SparkIcon history={entryHistory("partners", p.id)} />
+                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("partners", p.id, pk, fk)} />
+                </span>
               </div>
               <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} dot />
             </div>
@@ -328,14 +430,19 @@ export default function App() {
         {/* Government */}
         <Collapsible id="overheid" title="Overheidsbijdrage" icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid} onToggle={toggleSec}>
           {cur.govIncome.map((g) => (
-            <div style={St.itemWrap} key={g.id}>
-              <div style={St.row}>
-                <span style={{ ...St.dot, background: C.gov }} />
-                <input aria-label="Omschrijving" value={g.label} placeholder="Toeslag" onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
-                <AmountField value={g.amount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`Overheid · ${g.label || "toeslag"}`, o, n)} />
-                <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
-                <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
-                <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+            <div style={St.itemWrap} className="entryWrap" key={g.id}>
+              <div className="entry">
+                <span className="e-lead"><span style={{ ...St.dot, background: C.gov }} /></span>
+                <input className="e-desc" aria-label="Omschrijving" value={g.label} placeholder="Toeslag" onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
+                <span className="e-amount"><AmountField value={g.amount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`Overheid · ${g.label || "toeslag"}`, o, n)} /></span>
+                <span className="entryActions" style={St.rowActions}>
+                  <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
+                  <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
+                  <TrendIcon income trend={entryTrend("govIncome", g.id, monthlyOf(g))} />
+                  <SparkIcon history={entryHistory("govIncome", g.id)} />
+                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("govIncome", g.id, pk, fk)} />
+                  <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                </span>
               </div>
               <DerivedLine monthly={monthlyOf(g)} period={g.period} percent={pctOf(monthlyOf(g), calc.govTotal)} dot />
             </div>
@@ -344,19 +451,26 @@ export default function App() {
           <SubTotal monthly={calc.govTotal} />
         </Collapsible>
 
-        <ColTitle>Uitgaven &amp; sparen</ColTitle>
+        <ColTitle>Uitgaven</ColTitle>
         {/* Expenses */}
-        <Collapsible id="uitgaven" title="Uitgaven" icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec}>
+        <Collapsible id="uitgaven" title="Vaste lasten" icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec}>
           {cur.expenses.map((e) => (
-            <div style={St.itemWrap} key={e.id}>
-              <div style={St.expRow}>
-                <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || "geen categorie"} />
-                <input list="cats" aria-label="Categorie" value={e.category} placeholder="Categorie" onChange={(ev) => setListItem("expenses", e.id, { category: ev.target.value })} style={St.catInput} />
-                <input aria-label="Omschrijving" value={e.label} placeholder="Omschrijving" onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
-                <AmountField value={e.amount} period={e.period} onValue={(v) => setListItem("expenses", e.id, { amount: v })} onPeriod={() => toggleItemPeriod("expenses", e.id)} onCommit={(o, n) => logChange(`Uitgave · ${e.label || "naamloos"}`, o, n)} />
-                <NoteField value={e.note || ""} onChange={(v) => setListItem("expenses", e.id, { note: v })} />
-                <LinkField value={e.url || ""} onChange={(v) => setListItem("expenses", e.id, { url: v })} />
-                <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("expenses", e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+            <div style={St.itemWrap} className="entryWrap" key={e.id}>
+              <div className="entry exp">
+                <span className="e-lead">
+                  <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || "geen categorie"} />
+                  <input list="cats" aria-label="Categorie" value={e.category} placeholder="Categorie" onChange={(ev) => setListItem("expenses", e.id, { category: ev.target.value })} style={St.catInput} />
+                </span>
+                <input className="e-desc" aria-label="Omschrijving" value={e.label} placeholder="Omschrijving" onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
+                <span className="e-amount"><AmountField value={e.amount} period={e.period} onValue={(v) => setListItem("expenses", e.id, { amount: v })} onPeriod={() => toggleItemPeriod("expenses", e.id)} onCommit={(o, n) => logChange(`Uitgave · ${e.label || "naamloos"}`, o, n)} /></span>
+                <span className="entryActions" style={St.rowActions}>
+                  <NoteField value={e.note || ""} onChange={(v) => setListItem("expenses", e.id, { note: v })} />
+                  <LinkField value={e.url || ""} onChange={(v) => setListItem("expenses", e.id, { url: v })} />
+                  <TrendIcon income={false} trend={entryTrend("expenses", e.id, monthlyOf(e))} />
+                  <SparkIcon history={entryHistory("expenses", e.id)} />
+                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("expenses", e.id, pk, fk)} />
+                  <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("expenses", e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                </span>
               </div>
               <DerivedLine monthly={monthlyOf(e)} period={e.period} percent={pctOf(monthlyOf(e), calc.expensesTotal)} />
             </div>
@@ -383,14 +497,19 @@ export default function App() {
         {/* Savings goals */}
         <Collapsible id="sparen" title="Spaardoelen" icon={<PiggyBank size={16} style={{ color: C.save }} />} info={TXT.sav} total={eur(calc.savingsTotal)} open={open.sparen} onToggle={toggleSec}>
           {cur.savings.map((s) => (
-            <div style={St.itemWrap} key={s.id}>
-              <div style={St.row}>
-                <span style={{ ...St.dot, background: categoryColor(s.label) }} />
-                <input aria-label="Spaardoel" value={s.label} placeholder="Spaardoel" onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
-                <AmountField value={s.amount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`Sparen · ${s.label || "spaardoel"}`, o, n)} />
-                <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
-                <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
-                <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("savings", s.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+            <div style={St.itemWrap} className="entryWrap" key={s.id}>
+              <div className="entry">
+                <span className="e-lead"><span style={{ ...St.dot, background: categoryColor(s.label) }} /></span>
+                <input className="e-desc" aria-label="Spaardoel" value={s.label} placeholder="Spaardoel" onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
+                <span className="e-amount"><AmountField value={s.amount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`Sparen · ${s.label || "spaardoel"}`, o, n)} /></span>
+                <span className="entryActions" style={St.rowActions}>
+                  <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
+                  <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
+                  <TrendIcon income={false} trend={entryTrend("savings", s.id, monthlyOf(s))} />
+                  <SparkIcon history={entryHistory("savings", s.id)} />
+                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("savings", s.id, pk, fk)} />
+                  <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("savings", s.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                </span>
               </div>
               <DerivedLine monthly={monthlyOf(s)} period={s.period} percent={pctOf(monthlyOf(s), calc.savingsTotal)} dot />
             </div>
@@ -625,6 +744,104 @@ function MoneyInput({ value, onChange, onCommit }) {
   );
 }
 
+function TrendIcon({ trend, income }) {
+  const up = trend && trend.dir === "up";     // amount increased vs previous month
+  const down = trend && trend.dir === "down"; // amount decreased vs previous month
+  let Icon = Minus, color = C.muted, title = "Geen verandering t.o.v. de vorige maand";
+  if (up || down) {
+    Icon = up ? ArrowUp : ArrowDown;                  // arrow follows the number
+    const good = income ? up : down;                  // income: up is good · expenses/savings: down is good
+    color = good ? C.save : C.exp;                    // green = good, red = bad
+    title = `${up ? "Hoger" : "Lager"} dan de vorige maand (${eur(trend.prev)} → ${eur(trend.cur)})`;
+  }
+  return <span style={St.trendIcon} title={title}><Icon size={16} color={color} /></span>;
+}
+
+function Sparkline({ data }) {
+  const W = 212, H = 56, pad = 6;
+  if (!data || data.length < 2) return <div style={St.sparkEmpty}>Te weinig data — dit verschijnt zodra deze regel in meerdere maanden een bedrag heeft.</div>;
+  const vals = data.map((d) => d.value);
+  const min = Math.min(...vals), max = Math.max(...vals), span = (max - min) || 1;
+  const x = (i) => pad + (i * (W - 2 * pad)) / (data.length - 1);
+  const y = (v) => H - pad - ((v - min) * (H - 2 * pad)) / span;
+  const pts = data.map((d, i) => `${x(i)},${y(d.value)}`).join(" ");
+  const last = data[data.length - 1];
+  return (
+    <div>
+      <svg width={W} height={H} style={{ display: "block" }}>
+        <polyline fill="none" stroke={C.b} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" points={pts} />
+        {data.map((d, i) => <circle key={i} cx={x(i)} cy={y(d.value)} r={i === data.length - 1 ? 3 : 2} fill={i === data.length - 1 ? C.ink : C.b} />)}
+      </svg>
+      <div style={St.sparkCap}><span>{data[0].label} – {last.label}</span><span style={St.sparkVal}>{eur(last.value)}</span></div>
+    </div>
+  );
+}
+
+function CopyField({ pastMonths, futureMonths, onCopy }) {
+  const [open, setOpen] = useState(false);
+  const [past, setPast] = useState("");
+  const [future, setFuture] = useState("");
+  const editingRef = useRef(false);
+  const timer = useRef(null);
+  const has = pastMonths.length || futureMonths.length;
+  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 220); };
+  const apply = () => { onCopy(past || null, future || null); setOpen(false); setPast(""); setFuture(""); };
+  return (
+    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+      <button type="button" aria-label="Bedrag kopiëren naar andere maanden" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
+      {open && (
+        <span style={St.copyPop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+          <div style={St.copyTitle}>Bedrag kopiëren naar…</div>
+          {!has ? (
+            <div style={St.copyEmpty}>Er zijn nog geen andere maanden om naar te kopiëren.</div>
+          ) : (
+            <>
+              <label style={St.copyRow}>
+                <span style={St.copyLbl}>Verleden t/m</span>
+                <select value={past} onChange={(e) => setPast(e.target.value)} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }} style={St.copySel} disabled={!pastMonths.length}>
+                  <option value="">—</option>
+                  {pastMonths.slice().reverse().map((k) => <option key={k} value={k}>{monthLong(k)}</option>)}
+                </select>
+              </label>
+              <label style={St.copyRow}>
+                <span style={St.copyLbl}>Toekomst t/m</span>
+                <select value={future} onChange={(e) => setFuture(e.target.value)} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }} style={St.copySel} disabled={!futureMonths.length}>
+                  <option value="">—</option>
+                  {futureMonths.map((k) => <option key={k} value={k}>{monthLong(k)}</option>)}
+                </select>
+              </label>
+              <button type="button" onClick={apply} disabled={!past && !future} style={{ ...St.copyApply, opacity: (!past && !future) ? 0.5 : 1 }}>Kopiëren</button>
+            </>
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function SparkIcon({ history }) {
+  const [open, setOpen] = useState(false);
+  const timer = useRef(null);
+  const has = history && history.length >= 2;
+  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => setOpen(false), 200); };
+  return (
+    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+      <button type="button" aria-label="Prijsverloop" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
+        <LineChartIcon size={16} />
+      </button>
+      {open && (
+        <span style={St.notePop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+          <div style={St.sparkTitle}>Prijsverloop</div>
+          <Sparkline data={history} />
+        </span>
+      )}
+    </span>
+  );
+}
+
 function LinkField({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const editingRef = useRef(false);
@@ -743,7 +960,8 @@ const St = {
   headTotal: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 16, color: C.ink, fontVariantNumeric: "tabular-nums" },
 
   itemWrap: { marginBottom: 12 },
-  row: { display: "flex", alignItems: "center", gap: 10 },
+  row: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
+  rowActions: { display: "inline-flex", alignItems: "center", gap: 2, flexShrink: 0 },
   expRow: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
   dot: { width: 10, height: 10, borderRadius: 999, flexShrink: 0 },
   nameInput: { flex: 1, minWidth: 90, border: "none", borderBottom: `1px solid ${C.line}`, background: "transparent", padding: "8px 2px", fontSize: 15, color: C.ink, fontFamily: "inherit", outline: "none" },
@@ -772,6 +990,11 @@ const St = {
   noteArea: { width: "100%", border: "none", outline: "none", resize: "vertical", fontFamily: "inherit", fontSize: 13, lineHeight: 1.45, color: C.ink, background: "transparent" },
   noteInput: { width: "100%", border: "none", outline: "none", fontFamily: "inherit", fontSize: 13, color: C.ink, background: "transparent" },
   noteLink: { display: "inline-block", marginTop: 8, fontSize: 12.5, color: C.b, fontWeight: 600, textDecoration: "none", borderTop: `1px solid ${C.line}`, paddingTop: 7, width: "100%" },
+  trendIcon: { width: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  sparkTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 6 },
+  sparkCap: { display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 12, color: C.muted },
+  sparkVal: { fontVariantNumeric: "tabular-nums", color: C.ink, fontWeight: 600 },
+  sparkEmpty: { fontSize: 12.5, color: C.muted, lineHeight: 1.45 },
   logEmpty: { fontSize: 13.5, lineHeight: 1.5, color: C.muted, background: C.canvas, borderRadius: 12, padding: "14px 14px" },
   logList: { display: "flex", flexDirection: "column", gap: 2, maxHeight: 360, overflowY: "auto" },
   logRow: { display: "flex", gap: 12, alignItems: "baseline", padding: "7px 4px", borderBottom: `1px solid ${C.line}` },
@@ -804,8 +1027,16 @@ const St = {
   footer: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 4px 0", flexWrap: "wrap", gap: 10 },
   saveState: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: C.muted },
   resetBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: C.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" },
+  copyPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 232, maxWidth: "80vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", padding: 10, zIndex: 40 },
+  copyTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 8 },
+  copyRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 },
+  copyLbl: { fontSize: 13, color: C.ink },
+  copySel: { maxWidth: 134, fontSize: 13, padding: "5px 6px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.ink, fontFamily: "inherit" },
+  copyApply: { width: "100%", border: "none", background: C.b, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "8px 10px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", marginTop: 2 },
+  copyEmpty: { fontSize: 12.5, color: C.muted, lineHeight: 1.45 },
 };
 
+// Global CSS: fonts, input focus states, popovers and the mobile (≤560px) card layout.
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600;700&display=swap');
 * { box-sizing: border-box; }
@@ -819,5 +1050,20 @@ input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outli
 @keyframes sp { to { transform: rotate(360deg); } }
 .fade { animation: fade .4s ease both; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.entry { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.entry.exp { gap: 8px; }
+.entry .e-lead { display: contents; }
+.entry .e-desc { flex: 1; min-width: 90px; }
+.entry .e-amount { display: inline-flex; flex-shrink: 0; }
+.entry .entryActions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
+@media (max-width: 560px) {
+  .entryWrap { background: ${C.card}; border: 1px solid ${C.line}; border-radius: 12px; padding: 10px 12px; }
+  .entry { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "desc amount" "lead actions"; gap: 8px; align-items: center; }
+  .entry .e-desc { grid-area: desc; min-width: 0; font-weight: 700; }
+  .entry .e-amount { grid-area: amount; justify-self: end; }
+  .entry .e-lead { grid-area: lead; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .entry .entryActions { grid-area: actions; justify-self: end; margin-left: auto; }
+  .entryActions button { padding: 5px !important; }
+}
 @media (prefers-reduced-motion: reduce) { .fade, .spin { animation: none !important; } }
 `;
