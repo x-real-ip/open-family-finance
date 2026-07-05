@@ -1,2 +1,42 @@
-html, body, #root { margin: 0; min-height: 100%; }
-body { background: #ecefec; }
+:root {
+  color-scheme: light;
+  --canvas: #ECEFEC;
+  --card: #FFFFFF;
+  --ink: #16211F;
+  --muted: #65726E;
+  --line: #DCE2DF;
+  --focus: #1F7A8C;
+  --placeholder: #9aa5a1;
+  --a: #DB6B3A;
+  --b: #1F7A8C;
+  --gov: #7A5BA6;
+  --save: #2E7D52;
+  --inc: #2F6DB0;
+  --exp: #C0443B;
+  --soft-a: #FBEEE6;
+  --soft-b: #E6F1F3;
+  --bg: #ECEFEC;
+  --surface: #FFFFFF;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #141718;
+  --card: #1F2629;
+  --ink: #F4F6F5;
+  --muted: #9EA8A2;
+  --line: #2B363B;
+  --focus: #7CA8C3;
+  --placeholder: #7B8B8F;
+  --a: #F19A75;
+  --b: #7AC0F0;
+  --gov: #94BBA3;
+  --save: #7CD18E;
+  --inc: #74A6DD;
+  --exp: #E48D86;
+  --soft-a: #3A2A23;
+  --soft-b: #25313A;
+  --bg: #111517;
+  --surface: #1F2629;
+}
+html, body, #root { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); }
+body { background: var(--bg); }

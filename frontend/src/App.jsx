@@ -14,7 +14,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
-  ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon,
+  ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line,
@@ -26,8 +26,8 @@ import { storage } from "./api";
    Design tokens
 ------------------------------------------------------------------- */
 const C = {
-  canvas: "#ECEFEC", card: "#FFFFFF", ink: "#16211F", muted: "#65726E", line: "#DCE2DF",
-  a: "#DB6B3A", b: "#1F7A8C", gov: "#7A5BA6", save: "#2E7D52", inc: "#2F6DB0", exp: "#C0443B", softA: "#FBEEE6", softB: "#E6F1F3",
+  canvas: "var(--canvas)", card: "var(--card)", ink: "var(--ink)", muted: "var(--muted)", line: "var(--line)",
+  a: "var(--a)", b: "var(--b)", gov: "var(--gov)", save: "var(--save)", inc: "var(--inc)", exp: "var(--exp)", softA: "var(--soft-a)", softB: "var(--soft-b)",
 };
 
 const KEY = "open-family-finance:v1";
@@ -164,8 +164,33 @@ export default function App() {
   const [saved, setSaved] = useState(true);
   const [open, setOpen] = useState({ inkomen: true, overheid: true, uitgaven: true, sparen: true, verloop: true, log: false });
   const [showDetails, setShowDetails] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === "undefined") return "light";
+    const stored = window.localStorage.getItem("open-family-finance:theme");
+    if (stored === "dark" || stored === "light") return stored;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
   const saveTimer = useRef(null);
   const margeStart = useRef(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem("open-family-finance:theme");
+    if (stored === "dark" || stored === "light") return;
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = (event) => setTheme(event.matches ? "dark" : "light");
+    mql.addEventListener?.("change", onChange) ?? mql.addListener(onChange);
+    return () => { mql.removeEventListener?.("change", onChange) ?? mql.removeListener(onChange); };
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    window.localStorage.setItem("open-family-finance:theme", next);
+    setTheme(next);
+  };
 
   // ── Load once on mount, then autosave (debounced) ──
   useEffect(() => {
@@ -329,13 +354,20 @@ export default function App() {
 
       <div style={St.shell}>
         <header style={St.header}>
-          <h1 style={St.h1}>Open Family Finance</h1>
-          <p style={St.byline}>
-            created by{" "}
-            <a style={St.link} href="https://github.com/x-real-ip" target="_blank" rel="noopener noreferrer">x-real-ip</a>
-            {" · "}
-            <a style={St.link} href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer">source on GitHub</a>
-          </p>
+          <div style={St.headerTop}>
+            <div>
+              <h1 style={St.h1}>Open Family Finance</h1>
+              <p style={St.byline}>
+                created by{" "}
+                <a style={St.link} href="https://github.com/x-real-ip" target="_blank" rel="noopener noreferrer">x-real-ip</a>
+                {" · "}
+                <a style={St.link} href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer">source on GitHub</a>
+              </p>
+            </div>
+            <button type="button" onClick={toggleTheme} style={St.themeBtn} aria-label={`Schakel over naar ${theme === "dark" ? "licht" : "donker"} thema`}>
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? "Licht" : "Donker"}
+            </button>
+          </div>
         </header>
 
         {/* Month */}
@@ -905,6 +937,7 @@ const St = {
   shell: { maxWidth: 780, margin: "0 auto" },
 
   header: { padding: "8px 4px 16px" },
+  headerTop: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" },
   eyebrow: { fontSize: 12, letterSpacing: "0.14em", color: C.muted, fontWeight: 600 },
   titleRow: { display: "flex", alignItems: "center", gap: 10, marginTop: 6 },
   h1: { fontFamily: "'Inter', system-ui, sans-serif", fontSize: 32, lineHeight: 1.05, margin: 0, fontWeight: 800, letterSpacing: "-0.02em" },
@@ -1025,6 +1058,7 @@ const St = {
   bubble: { position: "absolute", top: "calc(100% + 8px)", width: 230, maxWidth: "70vw", background: C.ink, color: "#F4F6F5", fontSize: 12.5, lineHeight: 1.45, padding: "10px 12px", borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", zIndex: 30, fontWeight: 400, fontStyle: "normal" },
 
   footer: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 4px 0", flexWrap: "wrap", gap: 10 },
+  themeBtn: { display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid transparent", background: C.card, color: C.ink, padding: "8px 12px", borderRadius: 999, fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" },
   saveState: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: C.muted },
   resetBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: C.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" },
   copyPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 232, maxWidth: "80vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", padding: 10, zIndex: 40 },
