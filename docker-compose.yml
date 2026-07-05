@@ -29,6 +29,7 @@ services:
     build: ./frontend
     environment:
       BACKEND_URL: http://api:8080
+      API_TOKEN: ${API_TOKEN}
     ports:
       - "8080:80"
     depends_on:

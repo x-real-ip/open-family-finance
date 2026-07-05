@@ -3,9 +3,11 @@
  * but talks to the backend at /api. nginx (production) or the Vite proxy (local)
  * forwards /api to the backend service. No hosts are hardcoded.
  *
- * Optional: set VITE_API_TOKEN if the backend expects a bearer token.
+ * Optional bearer token: read at runtime from window.__ENV__ (see env.js),
+ * which is rendered from the API_TOKEN env var. Must match the backend's
+ * API_TOKEN.
  */
-const TOKEN = import.meta.env.VITE_API_TOKEN;
+const TOKEN = window.__ENV__?.API_TOKEN;
 
 async function req(method, path, body) {
   const headers = { "Content-Type": "application/json" };
