@@ -178,8 +178,10 @@ containing all months.
 
 ## Security
 
-- By default the API is **open**. Set `API_TOKEN` (backend) and build the
-  frontend with the same `VITE_API_TOKEN` for simple bearer protection.
+- By default the API is **open**. Set `API_TOKEN` on both the `api` and `web`
+  containers (same value) for simple bearer protection: the backend checks it
+  on incoming requests, and nginx renders it into `env.js` at container
+  startup so the frontend can send it — no separate build-time secret needed.
   Preferably put the app behind authentication on your gateway/ingress.
 - Never commit `.env` or real Secret values.
 
