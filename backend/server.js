@@ -1,3 +1,15 @@
+/**
+ * Open Family Finance — backend API.
+ *
+ * A tiny JSON-blob store on top of Postgres:
+ *   GET    /api/state/:key   -> { key, value } | 404
+ *   PUT    /api/state/:key   -> { key, value }   (body: { value })
+ *   DELETE /api/state/:key   -> { key, deleted }
+ *   GET    /api/health       -> { ok: true }
+ *
+ * Optional bearer auth: set API_TOKEN and send "Authorization: Bearer <token>".
+ * Startup retries the database connection, so boot order does not matter.
+ */
 import express from "express";
 import { pool, initDb } from "./db.js";
 
@@ -7,9 +19,12 @@ app.use(express.json({ limit: "5mb" }));
 const PORT = process.env.PORT || 8080;
 const TOKEN = process.env.API_TOKEN; // optional: simple bearer protection
 
-// Optional token check on all /api routes
+// Optional token check on all /api routes.
+// /api/health is exempt: Kubernetes probes send no Authorization header,
+// and the endpoint exposes no data.
 app.use("/api", (req, res, next) => {
   if (!TOKEN) return next();
+  if (req.path === "/health") return next();
   if (req.headers.authorization === `Bearer ${TOKEN}`) return next();
   res.status(401).json({ error: "unauthorized" });
 });
