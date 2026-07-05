@@ -1,149 +1,191 @@
-# OpenFamilyFinance
+# Open Family Finance
 
-Een open-source web-app om de gezamenlijke huishoudfinanciën van een gezin
-eerlijk te verdelen op basis van netto-inkomen. Pot (uitgaven + sparen) min de
-overheidsbijdrage wordt verdeeld naar inkomen, plus een kleine buffer-marge.
+*Read this in [Dutch / Nederlands](README.md).*
 
-**Geen persoonlijke cijfers in deze repo.** De code bevat alleen lege
-standaardwaarden. Je echte bedragen voer je in via de app en die worden
-opgeslagen in een PostgreSQL-database — niet in de broncode. Daarom kan deze
-repo veilig openbaar zijn.
+An open-source web app to split a family's shared household finances fairly,
+based on net income. Expenses plus savings, minus government benefits, is what
+you finance together; that amount is split in proportion to income, plus a
+small buffer margin.
+
+**No personal figures in this repo.** The code only contains empty defaults.
+You enter your real amounts in the app and they are stored in a PostgreSQL
+database — not in the source code. That is why this repo can safely be public.
 
 ## Stack
 
-- **Frontend:** React (JSX) + Vite, geserveerd door nginx.
+- **Frontend:** React (JSX) + Vite, served by nginx.
 - **Backend:** Node.js + Express + `pg`.
-- **Database:** PostgreSQL (state als JSONB).
+- **Database:** PostgreSQL (state as JSONB).
 
 ```
-OpenFamilyFinance/
-├── docker-compose.yml      # volledige stack lokaal
-├── .env.example            # naar .env kopiëren
-├── frontend/               # React + Vite (nginx in productie)
-│   ├── src/App.jsx         # de app (lege standaardwaarden)
-│   ├── src/api.js          # praat met /api
+open-family-finance/
+├── .github/workflows/      # CI: Docker build + push to GHCR
+│   └── build.yml
+├── docker-compose.yml      # full stack locally
+├── .env.example            # copy to .env
+├── frontend/               # React + Vite (nginx in production)
+│   ├── src/App.jsx         # the app (empty defaults)
+│   ├── src/api.js          # talks to /api
 │   └── default.conf.template
-├── backend/                # Express-API
+├── backend/                # Express API
 │   ├── server.js
 │   ├── db.js
 │   └── migrations/001_init.sql
-└── k8s/                    # Kubernetes-manifests
-    ├── postgres.yaml
-    ├── backend.yaml
-    ├── frontend.yaml
-    └── ingress.yaml
+└── k8s/                    # Kubernetes manifests
+    ├── postgres.yaml        # Secret + PVC + Postgres Deployment/Service
+    ├── secret.example.yaml  # Secret template (do not commit real values)
+    ├── configmap.yaml       # non-secret runtime config
+    ├── deployment.yaml      # frontend + backend in one pod + Service
+    └── httproute.yaml       # Gateway API HTTPRoute
 ```
 
-## Lokaal draaien (hele stack)
+## Run locally (full stack)
 
-Vereist: Docker + Docker Compose.
+Requires: Docker with Compose (Docker Desktop, or the `docker compose` plugin).
 
 ```bash
-cp .env.example .env          # pas wachtwoord aan
+cp .env.example .env          # change the password
 docker compose up --build
 ```
 
-Open http://localhost:8080. De database wordt automatisch aangemaakt en de
-tabel wordt bij het opstarten klaargezet.
+Open http://localhost:8080. The database is created automatically and the
+table is set up on startup.
 
-## Lokaal ontwikkelen (hot reload in VS Code)
+Stop with `Ctrl+C`. Clean up containers: `docker compose down`.
+Also wipe the database data: `docker compose down -v`.
 
-Draai de database (en eventueel de API) via Compose, en de frontend los met Vite:
+## Local development (hot reload in VS Code)
 
+Run the database and the API via Compose, and the frontend separately with
+Vite. That way you see changes in the browser instantly, without rebuilding.
+
+**Terminal 1 — database + backend:**
 ```bash
 cp .env.example .env
-docker compose up db api          # database + backend
-cd frontend && npm install && npm run dev
+docker compose up db api
 ```
 
-Open http://localhost:5173. Vite stuurt `/api` door naar de backend op poort
-8080 (zie `vite.config.js`), dezelfde URLs als in productie.
+**Terminal 2 — frontend (hot reload):**
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-Alleen aan de backend werken:
+Open http://localhost:5173. Vite forwards `/api` to the backend on port 3000
+(see `vite.config.js`). Changes in `frontend/src/` show up immediately.
+
+### Working on the backend only
+
+Run just the database via Compose and start the backend directly:
+
+**Terminal 1:**
+```bash
+docker compose up db
+```
+
+**Terminal 2:**
+```bash
+cd backend
+npm install
+PORT=3000 DATABASE_URL=postgres://off:verander-mij@localhost:5432/open-family-finance npm run dev
+```
+
+The backend restarts automatically on changes (Node `--watch`).
+You can then start the frontend with `npm run dev` in the `frontend/` folder
+in a third terminal, or test the API with curl:
 
 ```bash
-cd backend && npm install
-DATABASE_URL=postgres://off:verander-mij@localhost:5432/open-family-finance npm run dev
+curl http://localhost:3000/api/health
 ```
 
-## Container-images bouwen via GitHub Actions
+## Building container images with GitHub Actions
 
-De images worden automatisch gebouwd en gepusht naar **GitHub Container
-Registry (ghcr.io)** door de workflow in `.github/workflows/build.yml`:
+The images are built and pushed to **GitHub Container Registry (ghcr.io)**
+automatically by the workflow in `.github/workflows/build.yml`:
 
-- Bij elke push naar `main` → tags `latest` + de korte commit-SHA.
-- Bij een versietag (`git tag v1.0.0 && git push --tags`) → tag `1.0.0`.
-- Bij een pull request worden de images alleen gebouwd (niet gepusht), als test.
+- On every push to `main` → tags `latest` + the short commit SHA.
+- On a version tag (`git tag v1.0.0 && git push --tags`) → tag `1.0.0`.
+- On a pull request the images are only built (not pushed), as a test.
 
-Er zijn **geen extra secrets** nodig: de workflow logt in met de ingebouwde
-`GITHUB_TOKEN`. De images verschijnen als:
+**No extra secrets** are needed: the workflow logs in with the built-in
+`GITHUB_TOKEN`. The images appear as:
 
 ```
-ghcr.io/<jouw-github-account>/open-family-finance-web
-ghcr.io/<jouw-github-account>/open-family-finance-api
+ghcr.io/<your-github-account>/open-family-finance-web
+ghcr.io/<your-github-account>/open-family-finance-api
 ```
 
-Na de eerste push: zet de packages op **public** (GitHub → Packages →
-package → Package settings → Change visibility), of maak in je cluster een
-`imagePullSecret` aan zodat de pods de (private) images kunnen ophalen:
+After the first push: make the packages **public** (GitHub → Packages →
+package → Package settings → Change visibility), or create an
+`imagePullSecret` in your cluster so the pods can pull the (private) images:
 
 ```bash
 kubectl create secret docker-registry ghcr \
   --docker-server=ghcr.io \
-  --docker-username=<jouw-github-account> \
-  --docker-password=<personal-access-token-met-read:packages> \
+  --docker-username=<your-github-account> \
+  --docker-password=<personal-access-token-with-read:packages> \
   && kubectl patch serviceaccount default \
        -p '{"imagePullSecrets":[{"name":"ghcr"}]}'
 ```
 
-> Lokaal handmatig bouwen kan ook nog steeds, bijvoorbeeld om te testen:
+> Building locally by hand still works too, for example for testing:
 > `docker build -t ghcr.io/<account>/open-family-finance-web:dev ./frontend`.
-> Bouw je op ARM voor een amd64-cluster, gebruik dan `--platform linux/amd64`.
+> If you build on ARM for an amd64 cluster, use `--platform linux/amd64`.
 
 ## Kubernetes
 
-1. Pas `k8s/postgres.yaml` aan: zet een echt wachtwoord in het Secret en werk
-   `DATABASE_URL` bij. Gebruik bij voorkeur een secret-manager; commit geen
-   echte geheimen.
-2. Vervang `OWNER` in `k8s/backend.yaml` en `k8s/frontend.yaml` door je
-   GitHub-account (en kies eventueel een vaste versietag i.p.v. `latest`).
-3. Toepassen:
+Frontend and backend run together in **one pod**: nginx serves the app on
+`:80` and proxies `/api` internally to the api container on `localhost:8080`.
+Only port 80 is exposed, through a Service and a Gateway API `HTTPRoute`.
+
+1. Create the Secret: copy `k8s/secret.example.yaml`, set a real password and
+   update `DATABASE_URL` to match. Prefer a secret manager (sealed-secrets,
+   External Secrets, SOPS); never commit real secrets. Optionally set an
+   `API_TOKEN`.
+2. In `k8s/deployment.yaml`, pick your image registry/tag (default
+   `ghcr.io/x-real-ip/...:latest`; consider pinning a version tag). If the
+   images are private, enable `imagePullSecrets` (an example is in the file).
+3. In `k8s/httproute.yaml`, adjust the `parentRefs` (your Gateway) and
+   `hostnames` (your domain). Requires a Gateway API controller (Envoy
+   Gateway, Cilium, NGINX Gateway Fabric, Istio, ...).
+4. Apply:
 
    ```bash
    kubectl apply -f k8s/
    ```
 
-4. Benaderen via de ingress (pas de host aan), of snel testen:
+5. Quick test without a Gateway:
 
    ```bash
-   kubectl port-forward svc/open-family-finance-web 8080:80
+   kubectl port-forward svc/open-family-finance 8080:80
    ```
 
-De web-pod proxyt `/api` intern naar de backend-service, dus de ingress hoeft
-alleen naar `open-family-finance-web` te wijzen.
+The pod is ready as soon as Postgres is up; the backend retries the database
+connection on startup, so boot order does not matter.
 
 ## API
 
-| Methode | Pad                  | Omschrijving            |
-|---------|----------------------|-------------------------|
-| GET     | `/api/health`        | Status + db-check       |
-| GET     | `/api/state/:key`    | State ophalen (of 404)  |
-| PUT     | `/api/state/:key`    | State opslaan (upsert)  |
-| DELETE  | `/api/state/:key`    | State verwijderen       |
+| Method  | Path                 | Description              |
+|---------|----------------------|--------------------------|
+| GET     | `/api/health`        | Status + db check        |
+| GET     | `/api/state/:key`    | Fetch state (or 404)     |
+| PUT     | `/api/state/:key`    | Save state (upsert)      |
+| DELETE  | `/api/state/:key`    | Delete state             |
 
-De app gebruikt één sleutel (`open-family-finance:v1`) voor het hele document
-met alle maanden.
+The app uses a single key (`open-family-finance:v1`) for the whole document
+containing all months.
 
-## Beveiliging
+## Security
 
-- Standaard is de API **open**. Zet `API_TOKEN` (backend) en bouw de frontend
-  met hetzelfde `VITE_API_TOKEN` voor een simpele bearer-bescherming. Zet de app
-  bij voorkeur achter authenticatie op je ingress.
-- Commit nooit `.env` of echte Secret-waarden.
+- By default the API is **open**. Set `API_TOKEN` (backend) and build the
+  frontend with the same `VITE_API_TOKEN` for simple bearer protection.
+  Preferably put the app behind authentication on your gateway/ingress.
+- Never commit `.env` or real Secret values.
 
-## Volgende stappen
+## Next steps
 
-- Genormaliseerd databaseschema (aparte tabellen voor maanden, posten,
-  spaardoelen) in plaats van één JSONB-document.
-- Echte authenticatie en meerdere huishoudens.
-- De Raisin-spaarprojectie en de privé-rekeningen uit de oorspronkelijke sheet.
+- A normalized database schema (separate tables for months, entries, savings
+  goals) instead of a single JSONB document.
+- Real authentication and multiple households.
+- The savings projection and private accounts from the original spreadsheet.
