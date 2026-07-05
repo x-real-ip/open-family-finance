@@ -2,10 +2,13 @@ name: Build & push images
 
 on:
   push:
-    branches: [main]
-    tags: ["v*"]
+    branches:
+      - "**"
+    tags:
+      - "v*"
   pull_request:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 env:
@@ -14,9 +17,11 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       packages: write
+
     strategy:
       matrix:
         include:
@@ -24,6 +29,7 @@ jobs:
             context: ./frontend
           - name: api
             context: ./backend
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,10 +51,19 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/open-family-finance-${{ matrix.name }}
           tags: |
-            type=ref,event=branch
+            # Branch tag (niet voor main)
+            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
+
+            # PR tags
             type=ref,event=pr
+
+            # Git release tags
             type=semver,pattern={{version}}
+
+            # Immutable tag
             type=sha,format=short
+
+            # Alleen main krijgt latest
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build & push
@@ -59,8 +74,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Only the web image declares/uses this ARG; harmless for api.
-          # Set the repo secret VITE_API_TOKEN if the backend has API_TOKEN set.
           build-args: |
             VITE_API_TOKEN=${{ secrets.VITE_API_TOKEN }}
           cache-from: type=gha
