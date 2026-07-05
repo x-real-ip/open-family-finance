@@ -59,5 +59,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Only the web image declares/uses this ARG; harmless for api.
+          # Set the repo secret VITE_API_TOKEN if the backend has API_TOKEN set.
+          build-args: |
+            VITE_API_TOKEN=${{ secrets.VITE_API_TOKEN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
