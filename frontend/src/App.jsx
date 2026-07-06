@@ -181,9 +181,9 @@ function migrateFig(f) {
   return {
     method: f.method || "income", margePct: f.margePct ?? "0.5",
     partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "" })),
-    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "" })),
-    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "" })),
-    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "" }))
+    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", formula: g.formula || undefined })),
+    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", formula: e.formula || undefined })),
+    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", formula: s.formula || undefined }))
       : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "" }] : []),
   };
 }
@@ -276,9 +276,9 @@ export default function App() {
 
   const byCategory = useMemo(() => {
     const map = {};
-    for (const e of cur.expenses) map[e.category || "Overig"] = (map[e.category || "Overig"] || 0) + monthlyOf(e);
+    for (const e of cur.expenses) map[e.category || "Overig"] = (map[e.category || "Overig"] || 0) + monthlyOf(e, cur);
     return Object.entries(map).sort((x, y) => y[1] - x[1]);
-  }, [cur.expenses]);
+  }, [cur]);
 
   // Existing category names across all months, for autocomplete suggestions.
   const categories = useMemo(() => {
@@ -949,7 +949,8 @@ function LinkField({ value, onChange }) {
   const has = value && value.trim().length > 0;
   const href = has ? (/^https?:\/\//i.test(value.trim()) ? value.trim() : `https://${value.trim()}`) : null;
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) { onSave(); setOpen(false); } }, 200); };
+  // Note: saving happens live via onChange; closing only hides the popover.
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
   return (
     <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
       <button type="button" aria-label="Link bij deze uitgave"
