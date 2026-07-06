@@ -361,9 +361,6 @@ export default function App() {
     return { ...d, months };
   });
 
-  // Only-this-month escape hatch (used by resetMonth).
-  const patchFig = (updater) => setData((d) => ({ ...d, months: { ...d.months, [d.selectedMonth]: updater(d.months[d.selectedMonth]) } }));
-
   const setPartner = (i, patch) => {
     const key = cur.partners[i]?.id || `p${i + 1}`;
     editForward((f) => ({ ...f, partners: f.partners.map((p, idx) => idx === i ? { ...p, ...patch } : p) }), key);
@@ -429,8 +426,29 @@ export default function App() {
   const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "" });
   const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "" });
   const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "" });
-  const resetMonth = () => { if (window.confirm(`Cijfers van ${monthLong(sel)} terugzetten naar het voorbeeld? (alleen deze maand)`)) patchFig(() => clone(DEFAULT_FIGURES)); };
-
+  // Reset the selected month: take over the figures of the nearest earlier
+  // month and clear this month's overrides, so it follows the baseline again.
+  // Without an earlier month it falls back to the empty defaults.
+  const resetMonth = () => {
+    const earlier = sortedMonths.filter((k) => k < sel);
+    const hasEarlier = earlier.length > 0;
+    const msg = hasEarlier
+      ? `Cijfers van ${monthLong(sel)} terugzetten naar die van ${monthLong(earlier[earlier.length - 1])}? Handmatige aanpassingen in deze maand vervallen.`
+      : `Cijfers van ${monthLong(sel)} terugzetten naar het lege voorbeeld? (er is geen eerdere maand om van over te nemen)`;
+    if (!window.confirm(msg)) return;
+    setData((d) => {
+      const s = d.selectedMonth;
+      const keys = Object.keys(d.months).filter((k) => k < s).sort();
+      const source = keys.length ? d.months[keys[keys.length - 1]] : null;
+      const fresh = clone(source || DEFAULT_FIGURES);
+      fresh.overrides = {};
+      if (!source) {
+        // Keep the (global) partner names when falling back to the defaults.
+        fresh.partners = fresh.partners.map((p, i) => ({ ...p, name: d.months[s]?.partners?.[i]?.name || p.name }));
+      }
+      return { ...d, months: { ...d.months, [s]: fresh } };
+    });
+  };
   const pA = cur.partners[0], pB = cur.partners[1];
   const nameA = pA.name || "Partner 1", nameB = pB.name || "Partner 2";
 
