@@ -1274,7 +1274,10 @@ input::placeholder { color: #9aa5a1; }
 input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outline: 2px solid ${C.b}; outline-offset: 2px; border-radius: 6px; }
 .spin { animation: sp 1s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
-.fade { animation: fade .4s ease both; }
+/* fill-mode "backwards" (niet "both"): een animatie die toegepast blijft op
+   transform/opacity maakt van het element permanent een eigen stacking context,
+   waardoor popovers (z-index) onder latere secties/kaarten vallen. */
+.fade { animation: fade .4s ease backwards; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .entry { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .entry.exp { gap: 8px; }
