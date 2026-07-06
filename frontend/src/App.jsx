@@ -368,9 +368,17 @@ export default function App() {
       if (!inPast && !inFuture) continue;
       const list = months[k][kind] || [];
       const exists = list.some((x) => x.id === id);
-      months[k] = { ...months[k], [kind]: exists
-        ? list.map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x)
-        : [...list, { ...item }] };
+      // If the item we're copying is formula-driven, copy the formula to the target
+      // months but do not overwrite other entries' amounts (source entries remain unchanged).
+      if (kind !== "partners" && item.formula) {
+        months[k] = { ...months[k], [kind]: exists
+          ? list.map((x) => x.id === id ? { ...x, formula: item.formula, period: item.period } : x)
+          : [...list, { ...item }] };
+      } else {
+        months[k] = { ...months[k], [kind]: exists
+          ? list.map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x)
+          : [...list, { ...item }] };
+      }
     }
     return { ...d, months };
   });
@@ -941,7 +949,7 @@ function LinkField({ value, onChange }) {
   const has = value && value.trim().length > 0;
   const href = has ? (/^https?:\/\//i.test(value.trim()) ? value.trim() : `https://${value.trim()}`) : null;
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) { onSave(); setOpen(false); } }, 200); };
   return (
     <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
       <button type="button" aria-label="Link bij deze uitgave"
@@ -1165,7 +1173,7 @@ const St = {
   catYr: { color: C.muted, fontSize: 12, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" },
   catDot: { width: 10, height: 10, borderRadius: 999, flexShrink: 0 },
   hint: { fontSize: 12.5, color: C.muted, margin: "0 2px 10px", lineHeight: 1.4 },
-  notePop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 230, maxWidth: "70vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,0.14)", padding: 8, zIndex: 30 },
+  notePop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 360, maxWidth: "90vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: 12, zIndex: 40 },
   noteArea: { width: "100%", border: "none", outline: "none", resize: "vertical", fontFamily: "inherit", fontSize: 13, lineHeight: 1.45, color: C.ink, background: "transparent" },
   noteInput: { width: "100%", border: "none", outline: "none", fontFamily: "inherit", fontSize: 13, color: C.ink, background: "transparent" },
   noteLink: { display: "inline-block", marginTop: 8, fontSize: 12.5, color: C.b, fontWeight: 600, textDecoration: "none", borderTop: `1px solid ${C.line}`, paddingTop: 7, width: "100%" },
@@ -1207,7 +1215,7 @@ const St = {
   themeBtn: { display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid transparent", background: C.card, color: C.ink, padding: "8px 12px", borderRadius: 999, fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" },
   saveState: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: C.muted },
   resetBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: C.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" },
-  copyPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 232, maxWidth: "80vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", padding: 10, zIndex: 40 },
+  copyPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 360, maxWidth: "90vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: 12, zIndex: 50 },
   copyTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 8 },
   copyRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 },
   copyLbl: { fontSize: 13, color: C.ink },
