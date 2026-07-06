@@ -9,6 +9,13 @@
  *   App .............. state, mutations and page layout
  *   Subcomponents .... fields, popovers, cards, icons
  *   Styles ........... inline styles (St) and global CSS
+ *
+ * Forward propagation:
+ *   An edit in a month is applied to that month AND to every future
+ *   month that has no manual override for the same entry. Each month
+ *   keeps an `overrides` map ({ [entryId]: true }); editing an entry
+ *   in a month marks it overridden there, so later edits to earlier
+ *   months no longer touch it. Special keys: "__method", "__marge".
  */
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
@@ -65,6 +72,7 @@ const DEFAULT_FIGURES = {
   govIncome: [],
   expenses: [],
   savings: [],
+  overrides: {},
 };
 
 /* ----------------------------------------------------------------
@@ -185,6 +193,7 @@ function migrateFig(f) {
     expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", formula: e.formula || undefined })),
     savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", formula: s.formula || undefined }))
       : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "" }] : []),
+    overrides: (f.overrides && typeof f.overrides === "object") ? { ...f.overrides } : {},
   };
 }
 function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [] }; }
@@ -334,11 +343,31 @@ export default function App() {
   });
 
   // ── Mutations ──
-  // Local-by-default model: an edit changes only the selected month.
-  // (Empty/new months are seeded from the previous month — see goMonth.)
+  // Forward-propagation model: an edit changes the selected month AND
+  // every future month that has no manual override for the same key.
+  // The edited month itself is marked overridden, so it keeps its value
+  // when an even earlier month is changed later on.
+  const markOverride = (f, key) => ({ ...f, overrides: { ...(f.overrides || {}), [key]: true } });
+
+  const editForward = (updater, overrideKey) => setData((d) => {
+    const s = d.selectedMonth;
+    const months = { ...d.months };
+    months[s] = markOverride(updater(months[s]), overrideKey);
+    for (const k of Object.keys(months)) {
+      if (k <= s) continue;
+      if (months[k].overrides && months[k].overrides[overrideKey]) continue;
+      months[k] = updater(months[k]);
+    }
+    return { ...d, months };
+  });
+
+  // Only-this-month escape hatch (used by resetMonth).
   const patchFig = (updater) => setData((d) => ({ ...d, months: { ...d.months, [d.selectedMonth]: updater(d.months[d.selectedMonth]) } }));
 
-  const setPartner = (i, patch) => patchFig((f) => ({ ...f, partners: f.partners.map((p, idx) => idx === i ? { ...p, ...patch } : p) }));
+  const setPartner = (i, patch) => {
+    const key = cur.partners[i]?.id || `p${i + 1}`;
+    editForward((f) => ({ ...f, partners: f.partners.map((p, idx) => idx === i ? { ...p, ...patch } : p) }), key);
+  };
   // Names belong to a person, not a month: change them in every month and persist.
   const setPartnerName = (i, name) => setData((d) => {
     const months = {};
@@ -355,6 +384,8 @@ export default function App() {
   // Copy one entry's value from the selected month to existing past/future months,
   // bounded by the chosen months (inclusive). Only that entry's amount is changed
   // in months where it exists; in months where it was removed it is re-added.
+  // Note: copying overwrites manual overrides in the target months on purpose —
+  // it is an explicit action — but does not mark the targets as overridden.
   const copyEntryRange = (kind, id, pastKey, futureKey) => setData((d) => {
     const s = d.selectedMonth;
     const item = (d.months[s][kind] || []).find((x) => x.id === id);
@@ -372,26 +403,32 @@ export default function App() {
       // months but do not overwrite other entries' amounts (source entries remain unchanged).
       if (kind !== "partners" && item.formula) {
         months[k] = { ...months[k], [kind]: exists
-          ? list.map((x) => x.id === id ? { ...x, formula: item.formula, period: item.period } : x)
-          : [...list, { ...item }] };
+          ? list.map((x) => x.id === id ? { ...x, formula: clone(item.formula), period: item.period } : x)
+          : [...list, clone(item)] };
       } else {
         months[k] = { ...months[k], [kind]: exists
           ? list.map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x)
-          : [...list, { ...item }] };
+          : [...list, clone(item)] };
       }
     }
     return { ...d, months };
   });
 
-  const togglePartnerPeriod = (i) => patchFig((f) => ({ ...f, partners: f.partners.map((p, idx) => idx === i ? { ...p, period: p.period === "year" ? "month" : "year", income: flip(p.income, p.period) } : p) }));
-  const setMethod = (method) => patchFig((f) => ({ ...f, method }));
-  const setMarge = (margePct) => patchFig((f) => ({ ...f, margePct }));
-  const setListItem = (k, id, patch) => patchFig((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, ...patch } : x) }));
-  const toggleItemPeriod = (k, id) => patchFig((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x) }));
-  const removeListItem = (k, id) => patchFig((f) => ({ ...f, [k]: f[k].filter((x) => x.id !== id) }));
-  const addGov = () => patchFig((f) => ({ ...f, govIncome: [...f.govIncome, { id: uid(), label: "", amount: "", period: "month", note: "", url: "" }] }));
-  const addExpense = () => patchFig((f) => ({ ...f, expenses: [...f.expenses, { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "" }] }));
-  const addSaving = () => patchFig((f) => ({ ...f, savings: [...f.savings, { id: uid(), label: "", amount: "", period: "month", note: "", url: "" }] }));
+  const togglePartnerPeriod = (i) => {
+    const key = cur.partners[i]?.id || `p${i + 1}`;
+    editForward((f) => ({ ...f, partners: f.partners.map((p, idx) => idx === i ? { ...p, period: p.period === "year" ? "month" : "year", income: flip(p.income, p.period) } : p) }), key);
+  };
+  const setMethod = (method) => editForward((f) => ({ ...f, method }), "__method");
+  const setMarge = (margePct) => editForward((f) => ({ ...f, margePct }), "__marge");
+  const setListItem = (k, id, patch) => editForward((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, ...clone(patch) } : x) }), id);
+  const toggleItemPeriod = (k, id) => editForward((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x) }), id);
+  const removeListItem = (k, id) => editForward((f) => ({ ...f, [k]: f[k].filter((x) => x.id !== id) }), id);
+  const addListItem = (kind, item) => editForward((f) => (
+    (f[kind] || []).some((x) => x.id === item.id) ? f : { ...f, [kind]: [...(f[kind] || []), clone(item)] }
+  ), item.id);
+  const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "" });
+  const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "" });
+  const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "" });
   const resetMonth = () => { if (window.confirm(`Cijfers van ${monthLong(sel)} terugzetten naar het voorbeeld? (alleen deze maand)`)) patchFig(() => clone(DEFAULT_FIGURES)); };
 
   const pA = cur.partners[0], pB = cur.partners[1];
