@@ -96,11 +96,22 @@ const computeFormulaAmount = (entry, monthData) => {
   if (!entry?.formula || !monthData) return null;
   const source = findEntryById(monthData, entry.formula.sourceId);
   const sourceMonthly = source ? monthlyOf(source, monthData, new Set([entry.id])) : 0;
-  const factor = num(entry.formula.factor);
-  let result = 0;
-  if (entry.formula.op === "minus") result = sourceMonthly - factor;
-  else if (entry.formula.op === "times") result = sourceMonthly * factor;
-  else if (entry.formula.op === "divide") result = factor === 0 ? 0 : sourceMonthly / factor;
+  // Support a sequential list of operations (`ops`) or fall back to the legacy single op/factor
+  const ops = entry.formula.ops ?? (entry.formula.op ? [{ op: entry.formula.op, factor: entry.formula.factor }] : []);
+  let result = sourceMonthly;
+  if (ops.length === 0) {
+    // No operations specified — return the source amount
+    result = sourceMonthly;
+  } else {
+    for (const step of ops) {
+      const op = step.op;
+      const factor = num(step.factor);
+      if (op === "minus") result = result - factor;
+      else if (op === "times") result = result * factor;
+      else if (op === "divide") result = factor === 0 ? 0 : result / factor;
+      else if (op === "plus") result = result + factor;
+    }
+  }
   return entry.period === "year" ? result * 12 : result;
 };
 const entryAmount = (entry, monthData) => {
@@ -954,8 +965,12 @@ function LinkField({ value, onChange }) {
 function FormulaField({ entry, monthData, onChange }) {
   const [open, setOpen] = useState(false);
   const [sourceId, setSourceId] = useState(entry.formula?.sourceId || "");
-  const [op, setOp] = useState(entry.formula?.op || "minus");
-  const [factor, setFactor] = useState(entry.formula?.factor ?? "0");
+  // ops: sequential operations [{op: 'minus'|'times'|'divide'|'plus', factor: '12'}]
+  const [ops, setOps] = useState(() => {
+    if (entry.formula?.ops) return entry.formula.ops.map((s) => ({ op: s.op, factor: String(s.factor ?? "0") }));
+    if (entry.formula?.op) return [{ op: entry.formula.op, factor: String(entry.formula.factor ?? "0") }];
+    return [];
+  });
   const editingRef = useRef(false);
   const timer = useRef(null);
   const has = Boolean(entry.formula);
@@ -973,17 +988,19 @@ function FormulaField({ entry, monthData, onChange }) {
     }
   }
   const selected = entries.find((e) => e.id === sourceId);
-  const preview = computeFormulaAmount({ ...entry, formula: { sourceId, op, factor } }, monthData);
+  const preview = computeFormulaAmount({ ...entry, formula: { sourceId, ops } }, monthData);
   const onSave = () => {
     if (!sourceId) return;
-    onChange({ formula: { sourceId, op, factor } });
+    onChange({ formula: { sourceId, ops } });
   };
   const onRemove = () => {
-    setSourceId(""); setOp("minus"); setFactor("0"); onChange({ formula: undefined });
+    setSourceId(""); setOps([]); onChange({ formula: undefined });
   };
-  const updateSource = (value) => { setSourceId(value); setOpen(true); onChange({ formula: { sourceId: value, op, factor } }); };
-  const updateOp = (value) => { setOp(value); onChange({ formula: { sourceId, op: value, factor } }); };
-  const updateFactor = (value) => { setFactor(value); onChange({ formula: { sourceId, op, factor: value } }); };
+  const updateSource = (value) => { setSourceId(value); setOpen(true); onChange({ formula: { sourceId: value, ops } }); };
+  const updateOpAt = (idx, newOp) => { const n = ops.slice(); n[idx] = { ...n[idx], op: newOp }; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
+  const updateFactorAt = (idx, newFactor) => { const n = ops.slice(); n[idx] = { ...n[idx], factor: newFactor }; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
+  const addOp = () => { const n = [...ops, { op: "minus", factor: "0" }]; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
+  const removeOpAt = (idx) => { const n = ops.slice(); n.splice(idx, 1); setOps(n); onChange({ formula: { sourceId, ops: n } }); };
   return (
     <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
       <button type="button" aria-label="Koppel aan een andere entry" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
@@ -999,18 +1016,22 @@ function FormulaField({ entry, monthData, onChange }) {
               {entries.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
           </label>
-          <label style={St.copyRow}>
-            <span style={St.copyLbl}>Bewerking</span>
-            <select value={op} onChange={(e) => updateOp(e.target.value)} style={St.copySel}>
-              <option value="minus">min</option>
-              <option value="times">keer</option>
-              <option value="divide">gedeeld door</option>
-            </select>
-          </label>
-          <label style={St.copyRow}>
-            <span style={St.copyLbl}>Factor</span>
-            <input value={factor} onChange={(e) => updateFactor(e.target.value.replace(/[^0-9.,]/g, ""))} style={{ ...St.copySel, width: 80 }} inputMode="decimal" />
-          </label>
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ marginBottom: 6, fontSize: 13, color: C.muted }}>Bewerkingen (voert ze in volgorde uit op de bron)</div>
+            {ops.map((step, idx) => (
+              <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                <select value={step.op} onChange={(e) => updateOpAt(idx, e.target.value)} style={St.copySel}>
+                  <option value="minus">min</option>
+                  <option value="plus">plus</option>
+                  <option value="times">keer</option>
+                  <option value="divide">gedeeld door</option>
+                </select>
+                <input value={step.factor} onChange={(e) => updateFactorAt(idx, e.target.value.replace(/[^0-9.,-]/g, ""))} style={{ ...St.copySel, width: 110 }} inputMode="decimal" />
+                <button type="button" onClick={() => removeOpAt(idx)} style={{ ...St.copyApply, background: C.exp }}>Verwijder</button>
+              </div>
+            ))}
+            <button type="button" onClick={addOp} style={{ ...St.copyApply, marginTop: 4 }}>Voeg bewerking toe</button>
+          </div>
           <div style={{ marginTop: 10, fontSize: 13, color: C.muted }}>
             {selected ? `Bron: ${selected.label}` : "Kies eerst een bronregel"}
           </div>
