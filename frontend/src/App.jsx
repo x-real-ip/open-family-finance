@@ -15,6 +15,7 @@ import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
   ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
+  Calculator,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line,
@@ -73,9 +74,51 @@ const DEFAULT_FIGURES = {
 const num = (x) => { const v = parseFloat(String(x).replace(",", ".")); return isFinite(v) ? v : 0; };
 const round2 = (n) => Math.round(n * 100) / 100;
 const toMonthly = (amountStr, period) => num(amountStr) / (period === "year" ? 12 : 1);
-const monthlyOf = (x) => toMonthly(x.amount, x.period);
+const monthlyOf = (x, monthData, visited = new Set()) => {
+  if (x?.formula && monthData) {
+    if (visited.has(x.id)) return 0;
+    const amount = computeFormulaAmount(x, monthData);
+    return toMonthly(amount, x.period);
+  }
+  return toMonthly(x.amount, x.period);
+};
 const monthlyInc = (p) => toMonthly(p.income, p.period);
-const sumM = (arr) => arr.reduce((s, x) => s + monthlyOf(x), 0);
+const entryKinds = ["govIncome", "expenses", "savings"];
+const findEntryById = (monthData, id) => {
+  if (!monthData || !id) return null;
+  for (const kind of entryKinds) {
+    const item = (monthData[kind] || []).find((x) => x.id === id);
+    if (item) return item;
+  }
+  return null;
+};
+const computeFormulaAmount = (entry, monthData) => {
+  if (!entry?.formula || !monthData) return null;
+  const source = findEntryById(monthData, entry.formula.sourceId);
+  const sourceMonthly = source ? monthlyOf(source, monthData, new Set([entry.id])) : 0;
+  // Support a sequential list of operations (`ops`) or fall back to the legacy single op/factor
+  const ops = entry.formula.ops ?? (entry.formula.op ? [{ op: entry.formula.op, factor: entry.formula.factor }] : []);
+  let result = sourceMonthly;
+  if (ops.length === 0) {
+    // No operations specified — return the source amount
+    result = sourceMonthly;
+  } else {
+    for (const step of ops) {
+      const op = step.op;
+      const factor = num(step.factor);
+      if (op === "minus") result = result - factor;
+      else if (op === "times") result = result * factor;
+      else if (op === "divide") result = factor === 0 ? 0 : result / factor;
+      else if (op === "plus") result = result + factor;
+    }
+  }
+  return entry.period === "year" ? result * 12 : result;
+};
+const entryAmount = (entry, monthData) => {
+  const formulaAmount = computeFormulaAmount(entry, monthData);
+  return formulaAmount != null ? formulaAmount : num(entry.amount);
+};
+const sumM = (arr, monthData) => arr.reduce((s, x) => s + monthlyOf(x, monthData), 0);
 const flip = (amountStr, fromPeriod) => String(round2(fromPeriod === "year" ? num(amountStr) / 12 : num(amountStr) * 12));
 const pctOf = (part, whole) => (whole > 0 ? part / whole : null);
 
@@ -105,8 +148,8 @@ const dt = (ts) => new Intl.DateTimeFormat("nl-NL", { dateStyle: "short", timeSt
 function computeTotals(fig) {
   const a = monthlyInc(fig.partners[0]), b = monthlyInc(fig.partners[1]), total = a + b;
   const shareA = total > 0 ? a / total : 0.5, shareB = total > 0 ? b / total : 0.5;
-  const expensesTotal = sumM(fig.expenses), savingsTotal = sumM(fig.savings);
-  const potTotal = expensesTotal + savingsTotal, govTotal = sumM(fig.govIncome);
+  const expensesTotal = sumM(fig.expenses, fig), savingsTotal = sumM(fig.savings, fig);
+  const potTotal = expensesTotal + savingsTotal, govTotal = sumM(fig.govIncome, fig);
   const coupleFunds = Math.max(0, potTotal - govTotal);
   const marge = num(fig.margePct) / 100;
   let baseA, baseB;
@@ -250,7 +293,7 @@ export default function App() {
     for (const m of sortedMonths) {
       const it = ((data.months[m] && data.months[m][kind]) || []).find((x) => x.id === id);
       if (!it) continue;
-      const v = toMonthly(kind === "partners" ? it.income : it.amount, it.period);
+      const v = kind === "partners" ? monthlyInc(it) : monthlyOf(it, data.months[m]);
       out.push({ month: m, label: monthShort(m), value: Math.round(v) });
     }
     return out;
@@ -325,9 +368,17 @@ export default function App() {
       if (!inPast && !inFuture) continue;
       const list = months[k][kind] || [];
       const exists = list.some((x) => x.id === id);
-      months[k] = { ...months[k], [kind]: exists
-        ? list.map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x)
-        : [...list, { ...item }] };
+      // If the item we're copying is formula-driven, copy the formula to the target
+      // months but do not overwrite other entries' amounts (source entries remain unchanged).
+      if (kind !== "partners" && item.formula) {
+        months[k] = { ...months[k], [kind]: exists
+          ? list.map((x) => x.id === id ? { ...x, formula: item.formula, period: item.period } : x)
+          : [...list, { ...item }] };
+      } else {
+        months[k] = { ...months[k], [kind]: exists
+          ? list.map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x)
+          : [...list, { ...item }] };
+      }
     }
     return { ...d, months };
   });
@@ -461,24 +512,29 @@ export default function App() {
 
         {/* Government */}
         <Collapsible id="overheid" title="Overheidsbijdrage" icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid} onToggle={toggleSec}>
-          {cur.govIncome.map((g) => (
-            <div style={St.itemWrap} className="entryWrap" key={g.id}>
-              <div className="entry">
-                <span className="e-lead"><span style={{ ...St.dot, background: C.gov }} /></span>
-                <input className="e-desc" aria-label="Omschrijving" value={g.label} placeholder="Toeslag" onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
-                <span className="e-amount"><AmountField value={g.amount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`Overheid · ${g.label || "toeslag"}`, o, n)} /></span>
-                <span className="entryActions" style={St.rowActions}>
-                  <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
-                  <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
-                  <TrendIcon income trend={entryTrend("govIncome", g.id, monthlyOf(g))} />
-                  <SparkIcon history={entryHistory("govIncome", g.id)} />
-                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("govIncome", g.id, pk, fk)} />
-                  <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
-                </span>
+          {cur.govIncome.map((g) => {
+            const formulaActive = Boolean(g.formula);
+            const displayAmount = formulaActive ? String(round2(entryAmount(g, cur))) : g.amount;
+            return (
+              <div style={St.itemWrap} className="entryWrap" key={g.id}>
+                <div className="entry">
+                  <span className="e-lead"><span style={{ ...St.dot, background: C.gov }} /></span>
+                  <input className="e-desc" aria-label="Omschrijving" value={g.label} placeholder="Toeslag" onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
+                  <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`Overheid · ${g.label || "toeslag"}`, o, n)} disabled={formulaActive} /></span>
+                  <span className="entryActions" style={St.rowActions}>
+                    <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
+                    <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
+                    <FormulaField entry={g} monthData={cur} onChange={(patch) => setListItem("govIncome", g.id, patch)} />
+                    <TrendIcon income trend={entryTrend("govIncome", g.id, monthlyOf(g, cur))} />
+                    <SparkIcon history={entryHistory("govIncome", g.id)} />
+                    <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("govIncome", g.id, pk, fk)} />
+                    <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                  </span>
+                </div>
+                <DerivedLine monthly={monthlyOf(g, cur)} period={g.period} percent={pctOf(monthlyOf(g, cur), calc.govTotal)} dot />
               </div>
-              <DerivedLine monthly={monthlyOf(g)} period={g.period} percent={pctOf(monthlyOf(g), calc.govTotal)} dot />
-            </div>
-          ))}
+            );
+          })}
           <button type="button" onClick={addGov} style={St.addBtn}><Plus size={16} /> Toeslag toevoegen</button>
           <SubTotal monthly={calc.govTotal} />
         </Collapsible>
@@ -486,27 +542,32 @@ export default function App() {
         <ColTitle>Uitgaven</ColTitle>
         {/* Expenses */}
         <Collapsible id="uitgaven" title="Vaste lasten" icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec}>
-          {cur.expenses.map((e) => (
-            <div style={St.itemWrap} className="entryWrap" key={e.id}>
-              <div className="entry exp">
-                <span className="e-lead">
-                  <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || "geen categorie"} />
-                  <input list="cats" aria-label="Categorie" value={e.category} placeholder="Categorie" onChange={(ev) => setListItem("expenses", e.id, { category: ev.target.value })} style={St.catInput} />
-                </span>
-                <input className="e-desc" aria-label="Omschrijving" value={e.label} placeholder="Omschrijving" onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
-                <span className="e-amount"><AmountField value={e.amount} period={e.period} onValue={(v) => setListItem("expenses", e.id, { amount: v })} onPeriod={() => toggleItemPeriod("expenses", e.id)} onCommit={(o, n) => logChange(`Uitgave · ${e.label || "naamloos"}`, o, n)} /></span>
-                <span className="entryActions" style={St.rowActions}>
-                  <NoteField value={e.note || ""} onChange={(v) => setListItem("expenses", e.id, { note: v })} />
-                  <LinkField value={e.url || ""} onChange={(v) => setListItem("expenses", e.id, { url: v })} />
-                  <TrendIcon income={false} trend={entryTrend("expenses", e.id, monthlyOf(e))} />
-                  <SparkIcon history={entryHistory("expenses", e.id)} />
-                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("expenses", e.id, pk, fk)} />
-                  <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("expenses", e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
-                </span>
+          {cur.expenses.map((e) => {
+            const formulaActive = Boolean(e.formula);
+            const displayAmount = formulaActive ? String(round2(entryAmount(e, cur))) : e.amount;
+            return (
+              <div style={St.itemWrap} className="entryWrap" key={e.id}>
+                <div className="entry exp">
+                  <span className="e-lead">
+                    <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || "geen categorie"} />
+                    <input list="cats" aria-label="Categorie" value={e.category} placeholder="Categorie" onChange={(ev) => setListItem("expenses", e.id, { category: ev.target.value })} style={St.catInput} />
+                  </span>
+                  <input className="e-desc" aria-label="Omschrijving" value={e.label} placeholder="Omschrijving" onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
+                  <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setListItem("expenses", e.id, { amount: v })} onPeriod={() => toggleItemPeriod("expenses", e.id)} onCommit={(o, n) => logChange(`Uitgave · ${e.label || "naamloos"}`, o, n)} disabled={formulaActive} /></span>
+                  <span className="entryActions" style={St.rowActions}>
+                    <NoteField value={e.note || ""} onChange={(v) => setListItem("expenses", e.id, { note: v })} />
+                    <LinkField value={e.url || ""} onChange={(v) => setListItem("expenses", e.id, { url: v })} />
+                    <FormulaField entry={e} monthData={cur} onChange={(patch) => setListItem("expenses", e.id, patch)} />
+                    <TrendIcon income={false} trend={entryTrend("expenses", e.id, monthlyOf(e, cur))} />
+                    <SparkIcon history={entryHistory("expenses", e.id)} />
+                    <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("expenses", e.id, pk, fk)} />
+                    <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("expenses", e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                  </span>
+                </div>
+                <DerivedLine monthly={monthlyOf(e, cur)} period={e.period} percent={pctOf(monthlyOf(e, cur), calc.expensesTotal)} />
               </div>
-              <DerivedLine monthly={monthlyOf(e)} period={e.period} percent={pctOf(monthlyOf(e), calc.expensesTotal)} />
-            </div>
-          ))}
+            );
+          })}
           <button type="button" onClick={addExpense} style={St.addBtn}><Plus size={16} /> Uitgave toevoegen</button>
           {byCategory.length > 0 && (
             <div style={St.catSummary}>
@@ -528,24 +589,29 @@ export default function App() {
 
         {/* Savings goals */}
         <Collapsible id="sparen" title="Spaardoelen" icon={<PiggyBank size={16} style={{ color: C.save }} />} info={TXT.sav} total={eur(calc.savingsTotal)} open={open.sparen} onToggle={toggleSec}>
-          {cur.savings.map((s) => (
-            <div style={St.itemWrap} className="entryWrap" key={s.id}>
-              <div className="entry">
-                <span className="e-lead"><span style={{ ...St.dot, background: categoryColor(s.label) }} /></span>
-                <input className="e-desc" aria-label="Spaardoel" value={s.label} placeholder="Spaardoel" onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
-                <span className="e-amount"><AmountField value={s.amount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`Sparen · ${s.label || "spaardoel"}`, o, n)} /></span>
-                <span className="entryActions" style={St.rowActions}>
-                  <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
-                  <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
-                  <TrendIcon income={false} trend={entryTrend("savings", s.id, monthlyOf(s))} />
-                  <SparkIcon history={entryHistory("savings", s.id)} />
-                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("savings", s.id, pk, fk)} />
-                  <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("savings", s.id)} style={St.iconBtn}><Trash2 size={16} /></button>
-                </span>
+          {cur.savings.map((s) => {
+            const formulaActive = Boolean(s.formula);
+            const displayAmount = formulaActive ? String(round2(entryAmount(s, cur))) : s.amount;
+            return (
+              <div style={St.itemWrap} className="entryWrap" key={s.id}>
+                <div className="entry">
+                  <span className="e-lead"><span style={{ ...St.dot, background: categoryColor(s.label) }} /></span>
+                  <input className="e-desc" aria-label="Spaardoel" value={s.label} placeholder="Spaardoel" onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
+                  <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`Sparen · ${s.label || "spaardoel"}`, o, n)} disabled={formulaActive} /></span>
+                  <span className="entryActions" style={St.rowActions}>
+                    <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
+                    <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
+                    <FormulaField entry={s} monthData={cur} onChange={(patch) => setListItem("savings", s.id, patch)} />
+                    <TrendIcon income={false} trend={entryTrend("savings", s.id, monthlyOf(s, cur))} />
+                    <SparkIcon history={entryHistory("savings", s.id)} />
+                    <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("savings", s.id, pk, fk)} />
+                    <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("savings", s.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                  </span>
+                </div>
+                <DerivedLine monthly={monthlyOf(s, cur)} period={s.period} percent={pctOf(monthlyOf(s, cur), calc.savingsTotal)} dot />
               </div>
-              <DerivedLine monthly={monthlyOf(s)} period={s.period} percent={pctOf(monthlyOf(s), calc.savingsTotal)} dot />
-            </div>
-          ))}
+            );
+          })}
           <button type="button" onClick={addSaving} style={St.addBtn}><Plus size={16} /> Spaardoel toevoegen</button>
           <SubTotal monthly={calc.savingsTotal} />
         </Collapsible>
@@ -668,11 +734,11 @@ function PeriodPill({ period, onToggle }) {
   );
 }
 
-function AmountField({ value, period, onValue, onPeriod, onCommit }) {
+function AmountField({ value, period, onValue, onPeriod, onCommit, disabled }) {
   return (
     <div style={St.amountField}>
       <PeriodPill period={period} onToggle={onPeriod} />
-      <MoneyInput value={value} onChange={onValue} onCommit={onCommit} />
+      <MoneyInput value={value} onChange={onValue} onCommit={onCommit} disabled={disabled} />
     </div>
   );
 }
@@ -762,7 +828,7 @@ function SplitBar({ label, fracA, nameA, nameB }) {
   );
 }
 
-function MoneyInput({ value, onChange, onCommit }) {
+function MoneyInput({ value, onChange, onCommit, disabled }) {
   const startRef = useRef(null);
   return (
     <div style={St.money}>
@@ -771,7 +837,9 @@ function MoneyInput({ value, onChange, onCommit }) {
         onFocus={() => { startRef.current = value; }}
         onChange={(e) => onChange(e.target.value.replace(/[^0-9.,]/g, ""))}
         onBlur={() => { if (onCommit && startRef.current !== value) onCommit(startRef.current, value); }}
-        style={St.moneyInput} aria-label="Bedrag" />
+        style={{ ...St.moneyInput, opacity: disabled ? 0.6 : 1, cursor: disabled ? "not-allowed" : "text" }}
+        aria-label="Bedrag"
+        disabled={disabled} />
     </div>
   );
 }
@@ -881,7 +949,7 @@ function LinkField({ value, onChange }) {
   const has = value && value.trim().length > 0;
   const href = has ? (/^https?:\/\//i.test(value.trim()) ? value.trim() : `https://${value.trim()}`) : null;
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) { onSave(); setOpen(false); } }, 200); };
   return (
     <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
       <button type="button" aria-label="Link bij deze uitgave"
@@ -896,6 +964,92 @@ function LinkField({ value, onChange }) {
             onBlur={() => { editingRef.current = false; setOpen(false); }}
             style={St.noteInput} aria-label="URL" />
           {href && <a href={href} target="_blank" rel="noopener noreferrer" style={St.noteLink}>Open link ↗</a>}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function FormulaField({ entry, monthData, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [sourceId, setSourceId] = useState(entry.formula?.sourceId || "");
+  // ops: sequential operations [{op: 'minus'|'times'|'divide'|'plus', factor: '12'}]
+  const [ops, setOps] = useState(() => {
+    if (entry.formula?.ops) return entry.formula.ops.map((s) => ({ op: s.op, factor: String(s.factor ?? "0") }));
+    if (entry.formula?.op) return [{ op: entry.formula.op, factor: String(entry.formula.factor ?? "0") }];
+    return [];
+  });
+  const editingRef = useRef(false);
+  const timer = useRef(null);
+  const has = Boolean(entry.formula);
+  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
+  const entries = [];
+  for (const kind of entryKinds) {
+    for (const item of monthData[kind] || []) {
+      if (item.id === entry.id) continue;
+      const label = kind === "govIncome" ? (item.label || "Toeslag")
+        : kind === "expenses" ? `${item.category || "Uitgave"}${item.label ? ` · ${item.label}` : ""}`
+        : kind === "savings" ? (item.label || "Spaardoel")
+        : item.label || item.id;
+      entries.push({ id: item.id, label, kind });
+    }
+  }
+  const selected = entries.find((e) => e.id === sourceId);
+  const preview = computeFormulaAmount({ ...entry, formula: { sourceId, ops } }, monthData);
+  const onSave = () => {
+    if (!sourceId) return;
+    onChange({ formula: { sourceId, ops } });
+  };
+  const onRemove = () => {
+    setSourceId(""); setOps([]); onChange({ formula: undefined });
+  };
+  const updateSource = (value) => { setSourceId(value); setOpen(true); onChange({ formula: { sourceId: value, ops } }); };
+  const updateOpAt = (idx, newOp) => { const n = ops.slice(); n[idx] = { ...n[idx], op: newOp }; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
+  const updateFactorAt = (idx, newFactor) => { const n = ops.slice(); n[idx] = { ...n[idx], factor: newFactor }; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
+  const addOp = () => { const n = [...ops, { op: "minus", factor: "0" }]; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
+  const removeOpAt = (idx) => { const n = ops.slice(); n.splice(idx, 1); setOps(n); onChange({ formula: { sourceId, ops: n } }); };
+  return (
+    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+      <button type="button" aria-label="Koppel aan een andere entry" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
+        <Calculator size={16} />
+      </button>
+      {open && (
+        <span style={St.notePop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+          <div style={St.copyTitle}>Entry koppelen</div>
+          <label style={St.copyRow}>
+            <span style={St.copyLbl}>Bronregel</span>
+            <select value={sourceId} onChange={(e) => updateSource(e.target.value)} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }} style={St.copySel}>
+              <option value="">— kies een regel —</option>
+              {entries.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+          </label>
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ marginBottom: 6, fontSize: 13, color: C.muted }}>Bewerkingen (voert ze in volgorde uit op de bron)</div>
+            {ops.map((step, idx) => (
+              <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                <select value={step.op} onChange={(e) => updateOpAt(idx, e.target.value)} style={St.copySel}>
+                  <option value="minus">min</option>
+                  <option value="plus">plus</option>
+                  <option value="times">keer</option>
+                  <option value="divide">gedeeld door</option>
+                </select>
+                <input value={step.factor} onChange={(e) => updateFactorAt(idx, e.target.value.replace(/[^0-9.,-]/g, ""))} style={{ ...St.copySel, width: 110 }} inputMode="decimal" />
+                <button type="button" onClick={() => removeOpAt(idx)} style={{ ...St.copyApply, background: C.exp }}>Verwijder</button>
+              </div>
+            ))}
+            <button type="button" onClick={addOp} style={{ ...St.copyApply, marginTop: 4 }}>Voeg bewerking toe</button>
+          </div>
+          <div style={{ marginTop: 10, fontSize: 13, color: C.muted }}>
+            {selected ? `Bron: ${selected.label}` : "Kies eerst een bronregel"}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600 }}>
+            Preview: {preview != null ? eur(preview) : "—"}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 10 }}>
+            <button type="button" onClick={onSave} style={{ ...St.copyApply, opacity: sourceId ? 1 : 0.5 }} disabled={!sourceId}>Opslaan</button>
+            {has && <button type="button" onClick={onRemove} style={{ ...St.copyApply, background: C.exp }}>Verwijder</button>}
+          </div>
         </span>
       )}
     </span>
@@ -1019,7 +1173,7 @@ const St = {
   catYr: { color: C.muted, fontSize: 12, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" },
   catDot: { width: 10, height: 10, borderRadius: 999, flexShrink: 0 },
   hint: { fontSize: 12.5, color: C.muted, margin: "0 2px 10px", lineHeight: 1.4 },
-  notePop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 230, maxWidth: "70vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,0.14)", padding: 8, zIndex: 30 },
+  notePop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 360, maxWidth: "90vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: 12, zIndex: 40 },
   noteArea: { width: "100%", border: "none", outline: "none", resize: "vertical", fontFamily: "inherit", fontSize: 13, lineHeight: 1.45, color: C.ink, background: "transparent" },
   noteInput: { width: "100%", border: "none", outline: "none", fontFamily: "inherit", fontSize: 13, color: C.ink, background: "transparent" },
   noteLink: { display: "inline-block", marginTop: 8, fontSize: 12.5, color: C.b, fontWeight: 600, textDecoration: "none", borderTop: `1px solid ${C.line}`, paddingTop: 7, width: "100%" },
@@ -1061,7 +1215,7 @@ const St = {
   themeBtn: { display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid transparent", background: C.card, color: C.ink, padding: "8px 12px", borderRadius: 999, fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" },
   saveState: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: C.muted },
   resetBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: C.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" },
-  copyPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 232, maxWidth: "80vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,0.16)", padding: 10, zIndex: 40 },
+  copyPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 360, maxWidth: "90vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: 12, zIndex: 50 },
   copyTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 8 },
   copyRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 },
   copyLbl: { fontSize: 13, color: C.ink },
