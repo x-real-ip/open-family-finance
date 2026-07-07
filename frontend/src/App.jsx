@@ -790,7 +790,7 @@ function InfoDot({ text, align = "left" }) {
     <span style={{ position: "relative", display: "inline-flex", verticalAlign: "middle" }}>
       <button type="button" aria-label="Uitleg"
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} style={St.infoBtn}>i</button>
+        onPointerEnter={(e) => { if (e.pointerType === "mouse") setOpen(true); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") setOpen(false); }} style={St.infoBtn}>i</button>
       {open && <span style={{ ...St.bubble, ...(align === "right" ? { right: 0 } : { left: 0 }) }} onClick={(e) => e.stopPropagation()}>{text}</span>}
     </span>
   );
@@ -958,10 +958,10 @@ function CopyField({ pastMonths, futureMonths, onCopy }) {
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 220); };
   const apply = () => { onCopy(past || null, future || null); setOpen(false); setPast(""); setFuture(""); };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Bedrag kopiëren naar andere maanden" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
       {open && (
-        <span style={St.copyPop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={St.copyPop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.copyTitle}>Bedrag kopiëren naar…</div>
           {!has ? (
             <div style={St.copyEmpty}>Er zijn nog geen andere maanden om naar te kopiëren.</div>
@@ -1005,10 +1005,10 @@ function MonthCopyField({ pastMonths, onCopy }) {
   const clearAll = () => setSelected([]);
   const apply = () => { if (selected.length) { onCopy(selected); setOpen(false); setSelected([]); } };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Huidige maand kopiëren naar eerdere maanden" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
       {open && (
-        <span style={{ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" }} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={{ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.copyTitle}>Maand kopiëren naar…</div>
           {!has ? (
             <div style={St.copyEmpty}>Er zijn geen eerdere maanden om naartoe te kopiëren.</div>
@@ -1042,13 +1042,13 @@ function SparkIcon({ history }) {
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => setOpen(false), 200); };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Prijsverloop" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <LineChartIcon size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.sparkTitle}>Prijsverloop</div>
           <Sparkline data={history} />
         </span>
@@ -1067,14 +1067,14 @@ function LinkField({ value, onChange }) {
   // Note: saving happens live via onChange; closing only hides the popover.
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Link bij deze uitgave"
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <Link2 size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="https://…"
             onFocus={() => { editingRef.current = true; }}
             onBlur={() => { editingRef.current = false; setOpen(false); }}
@@ -1126,12 +1126,12 @@ function FormulaField({ entry, monthData, onChange }) {
   const addOp = () => { const n = [...ops, { op: "minus", factor: "0" }]; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
   const removeOpAt = (idx) => { const n = ops.slice(); n.splice(idx, 1); setOps(n); onChange({ formula: { sourceId, ops: n } }); };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Koppel aan een andere entry" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <Calculator size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.copyTitle}>Entry koppelen</div>
           <label style={St.copyRow}>
             <span style={St.copyLbl}>Bronregel</span>
@@ -1180,14 +1180,14 @@ function NoteField({ value, onChange }) {
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Notitie bij deze uitgave"
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <MessageSquare size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3}
             placeholder="Notitie bij deze uitgave…"
             onFocus={() => { editingRef.current = true; }}
