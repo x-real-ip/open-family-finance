@@ -801,6 +801,8 @@ const legendProps = { wrapperStyle: { fontSize: 12, fontFamily: "Inter, sans-ser
 
 function InfoDot({ text, align = "left" }) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  useClickOutside(rootRef, open, () => setOpen(false));
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex", verticalAlign: "middle" }}>
       <button type="button" aria-label="Uitleg"
