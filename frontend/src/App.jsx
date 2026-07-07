@@ -151,6 +151,22 @@ function useClickOutside(ref, active, onClose) {
     };
   }, [active, onClose, ref]);
 }
+const mobilePopupStyle = (base) => {
+  if (typeof window === "undefined" || window.innerWidth > 640) return base;
+  return {
+    ...base,
+    position: "fixed",
+    left: 10,
+    right: 10,
+    top: "auto",
+    bottom: 20,
+    width: "auto",
+    maxWidth: "calc(100% - 20px)",
+    boxSizing: "border-box",
+    margin: "0 auto",
+    zIndex: 100,
+  };
+};
 
 // — month keys: "YYYY-MM" —
 const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -808,7 +824,7 @@ function InfoDot({ text, align = "left" }) {
       <button type="button" aria-label="Uitleg"
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         onPointerEnter={(e) => { if (e.pointerType === "mouse") setOpen(true); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") setOpen(false); }} style={St.infoBtn}>i</button>
-      {open && <span style={{ ...St.bubble, ...(align === "right" ? { right: 0 } : { left: 0 }) }} onClick={(e) => e.stopPropagation()}>{text}</span>}
+      {open && <span style={mobilePopupStyle({ ...St.bubble, ...(align === "right" ? { right: 0 } : { left: 0 }) })} onClick={(e) => e.stopPropagation()}>{text}</span>}
     </span>
   );
 }
@@ -980,7 +996,7 @@ function CopyField({ pastMonths, futureMonths, onCopy }) {
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Bedrag kopiëren naar andere maanden" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
       {open && (
-        <span style={St.copyPop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
+        <span style={mobilePopupStyle(St.copyPop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.copyTitle}>Bedrag kopiëren naar…</div>
           {!has ? (
             <div style={St.copyEmpty}>Er zijn nog geen andere maanden om naar te kopiëren.</div>
@@ -1029,7 +1045,7 @@ function MonthCopyField({ pastMonths, onCopy }) {
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Huidige maand kopiëren naar eerdere maanden" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
       {open && (
-        <span style={{ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
+        <span style={mobilePopupStyle({ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" })} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.copyTitle}>Maand kopiëren naar…</div>
           {!has ? (
             <div style={St.copyEmpty}>Er zijn geen eerdere maanden om naartoe te kopiëren.</div>
@@ -1071,7 +1087,7 @@ function SparkIcon({ history }) {
         <LineChartIcon size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
+        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.sparkTitle}>Prijsverloop</div>
           <Sparkline data={history} />
         </span>
@@ -1099,7 +1115,7 @@ function LinkField({ value, onChange }) {
         <Link2 size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
+        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="https://…"
             onFocus={() => { editingRef.current = true; }}
             onBlur={() => { editingRef.current = false; setOpen(false); }}
@@ -1158,7 +1174,7 @@ function FormulaField({ entry, monthData, onChange }) {
         <Calculator size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
+        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.copyTitle}>Entry koppelen</div>
           <label style={St.copyRow}>
             <span style={St.copyLbl}>Bronregel</span>
@@ -1216,7 +1232,7 @@ function NoteField({ value, onChange }) {
         <MessageSquare size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
+        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3}
             placeholder="Notitie bij deze uitgave…"
             onFocus={() => { editingRef.current = true; }}
