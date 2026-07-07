@@ -411,6 +411,18 @@ export default function App() {
     return { ...d, months };
   });
 
+  const copyMonthToPast = (targetMonths) => setData((d) => {
+    const s = d.selectedMonth;
+    const source = d.months[s];
+    if (!source || !targetMonths?.length) return d;
+    const months = { ...d.months };
+    for (const k of targetMonths) {
+      if (k === s || !months[k]) continue;
+      months[k] = clone(source);
+    }
+    return { ...d, months };
+  });
+
   const togglePartnerPeriod = (i) => {
     const key = cur.partners[i]?.id || `p${i + 1}`;
     editForward((f) => ({ ...f, partners: f.partners.map((p, idx) => idx === i ? { ...p, period: p.period === "year" ? "month" : "year", income: flip(p.income, p.period) } : p) }), key);
