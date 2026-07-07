@@ -375,19 +375,24 @@ export default function App() {
 
   // ── Mutations ──
   // Forward-propagation model: an edit changes the selected month AND
-  // every future month that has no manual override for the same key.
+  // every future month that has no manual override for the same key,
+  // but only when the selected month is the real current month or later.
+  // Edits in actual past months only apply to that month.
   // The edited month itself is marked overridden, so it keeps its value
   // when an even earlier month is changed later on.
   const markOverride = (f, key) => ({ ...f, overrides: { ...(f.overrides || {}), [key]: true } });
 
   const editForward = (updater, overrideKey) => setData((d) => {
     const s = d.selectedMonth;
+    const currentRealMonth = monthKey(new Date());
     const months = { ...d.months };
     months[s] = markOverride(updater(months[s]), overrideKey);
-    for (const k of Object.keys(months)) {
-      if (k <= s) continue;
-      if (months[k].overrides && months[k].overrides[overrideKey]) continue;
-      months[k] = updater(months[k]);
+    if (s >= currentRealMonth) {
+      for (const k of Object.keys(months)) {
+        if (k <= s) continue;
+        if (months[k].overrides && months[k].overrides[overrideKey]) continue;
+        months[k] = updater(months[k]);
+      }
     }
     return { ...d, months };
   });
