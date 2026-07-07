@@ -1008,7 +1008,7 @@ function MonthCopyField({ pastMonths, onCopy }) {
     <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
       <button type="button" aria-label="Huidige maand kopiëren naar eerdere maanden" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
       {open && (
-        <span style={St.copyPop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={{ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" }} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
           <div style={St.copyTitle}>Maand kopiëren naar…</div>
           {!has ? (
             <div style={St.copyEmpty}>Er zijn geen eerdere maanden om naartoe te kopiëren.</div>
