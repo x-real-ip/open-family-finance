@@ -136,6 +136,21 @@ const eur0 = (n) => new Intl.NumberFormat("nl-NL", { style: "currency", currency
 const pct = (x) => `${Math.round(x * 100)}%`;
 const uid = () => Math.random().toString(36).slice(2, 9);
 const clone = (o) => JSON.parse(JSON.stringify(o));
+function useClickOutside(ref, active, onClose) {
+  useEffect(() => {
+    if (!active) return;
+    const onPointerDown = (event) => {
+      if (!ref.current || ref.current.contains(event.target)) return;
+      onClose();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown, { passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown, { passive: true });
+    };
+  }, [active, onClose, ref]);
+}
 
 // — month keys: "YYYY-MM" —
 const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -786,11 +801,13 @@ const legendProps = { wrapperStyle: { fontSize: 12, fontFamily: "Inter, sans-ser
 
 function InfoDot({ text, align = "left" }) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  useClickOutside(rootRef, open, () => setOpen(false));
   return (
-    <span style={{ position: "relative", display: "inline-flex", verticalAlign: "middle" }}>
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex", verticalAlign: "middle" }}>
       <button type="button" aria-label="Uitleg"
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} style={St.infoBtn}>i</button>
+        onPointerEnter={(e) => { if (e.pointerType === "mouse") setOpen(true); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") setOpen(false); }} style={St.infoBtn}>i</button>
       {open && <span style={{ ...St.bubble, ...(align === "right" ? { right: 0 } : { left: 0 }) }} onClick={(e) => e.stopPropagation()}>{text}</span>}
     </span>
   );
@@ -953,15 +970,17 @@ function CopyField({ pastMonths, futureMonths, onCopy }) {
   const [future, setFuture] = useState("");
   const editingRef = useRef(false);
   const timer = useRef(null);
+  const rootRef = useRef(null);
   const has = pastMonths.length || futureMonths.length;
+  useClickOutside(rootRef, open, () => setOpen(false));
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 220); };
   const apply = () => { onCopy(past || null, future || null); setOpen(false); setPast(""); setFuture(""); };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Bedrag kopiëren naar andere maanden" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
       {open && (
-        <span style={St.copyPop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={St.copyPop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.copyTitle}>Bedrag kopiëren naar…</div>
           {!has ? (
             <div style={St.copyEmpty}>Er zijn nog geen andere maanden om naar te kopiëren.</div>
@@ -995,7 +1014,9 @@ function MonthCopyField({ pastMonths, onCopy }) {
   const [selected, setSelected] = useState([]);
   const editingRef = useRef(false);
   const timer = useRef(null);
+  const rootRef = useRef(null);
   const has = pastMonths.length > 0;
+  useClickOutside(rootRef, open, () => setOpen(false));
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 220); };
   const toggleMonth = (key) => {
@@ -1005,10 +1026,10 @@ function MonthCopyField({ pastMonths, onCopy }) {
   const clearAll = () => setSelected([]);
   const apply = () => { if (selected.length) { onCopy(selected); setOpen(false); setSelected([]); } };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Huidige maand kopiëren naar eerdere maanden" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
       {open && (
-        <span style={{ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" }} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={{ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.copyTitle}>Maand kopiëren naar…</div>
           {!has ? (
             <div style={St.copyEmpty}>Er zijn geen eerdere maanden om naartoe te kopiëren.</div>
@@ -1038,17 +1059,19 @@ function MonthCopyField({ pastMonths, onCopy }) {
 function SparkIcon({ history }) {
   const [open, setOpen] = useState(false);
   const timer = useRef(null);
+  const rootRef = useRef(null);
+  useClickOutside(rootRef, open, () => setOpen(false));
   const has = history && history.length >= 2;
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => setOpen(false), 200); };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Prijsverloop" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <LineChartIcon size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.sparkTitle}>Prijsverloop</div>
           <Sparkline data={history} />
         </span>
@@ -1061,20 +1084,22 @@ function LinkField({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const editingRef = useRef(false);
   const timer = useRef(null);
+  const rootRef = useRef(null);
+  useClickOutside(rootRef, open, () => setOpen(false));
   const has = value && value.trim().length > 0;
   const href = has ? (/^https?:\/\//i.test(value.trim()) ? value.trim() : `https://${value.trim()}`) : null;
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
   // Note: saving happens live via onChange; closing only hides the popover.
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Link bij deze uitgave"
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <Link2 size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="https://…"
             onFocus={() => { editingRef.current = true; }}
             onBlur={() => { editingRef.current = false; setOpen(false); }}
@@ -1088,6 +1113,8 @@ function LinkField({ value, onChange }) {
 
 function FormulaField({ entry, monthData, onChange }) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  useClickOutside(rootRef, open, () => setOpen(false));
   const [sourceId, setSourceId] = useState(entry.formula?.sourceId || "");
   // ops: sequential operations [{op: 'minus'|'times'|'divide'|'plus', factor: '12'}]
   const [ops, setOps] = useState(() => {
@@ -1126,12 +1153,12 @@ function FormulaField({ entry, monthData, onChange }) {
   const addOp = () => { const n = [...ops, { op: "minus", factor: "0" }]; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
   const removeOpAt = (idx) => { const n = ops.slice(); n.splice(idx, 1); setOps(n); onChange({ formula: { sourceId, ops: n } }); };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Koppel aan een andere entry" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <Calculator size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.copyTitle}>Entry koppelen</div>
           <label style={St.copyRow}>
             <span style={St.copyLbl}>Bronregel</span>
@@ -1176,18 +1203,20 @@ function NoteField({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const editingRef = useRef(false);
   const timer = useRef(null);
+  const rootRef = useRef(null);
+  useClickOutside(rootRef, open, () => setOpen(false));
   const has = value && value.trim().length > 0;
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
   return (
-    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label="Notitie bij deze uitgave"
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <MessageSquare size={16} />
       </button>
       {open && (
-        <span style={St.notePop} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+        <span style={St.notePop} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3}
             placeholder="Notitie bij deze uitgave…"
             onFocus={() => { editingRef.current = true; }}
@@ -1289,7 +1318,7 @@ const St = {
   catYr: { color: C.muted, fontSize: 12, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" },
   catDot: { width: 10, height: 10, borderRadius: 999, flexShrink: 0 },
   hint: { fontSize: 12.5, color: C.muted, margin: "0 2px 10px", lineHeight: 1.4 },
-  notePop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 360, maxWidth: "90vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: 12, zIndex: 40 },
+  notePop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: "min(360px, 90vw)", maxWidth: "90vw", boxSizing: "border-box", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: 12, zIndex: 40 },
   noteArea: { width: "100%", border: "none", outline: "none", resize: "vertical", fontFamily: "inherit", fontSize: 13, lineHeight: 1.45, color: C.ink, background: "transparent" },
   noteInput: { width: "100%", border: "none", outline: "none", fontFamily: "inherit", fontSize: 13, color: C.ink, background: "transparent" },
   noteLink: { display: "inline-block", marginTop: 8, fontSize: 12.5, color: C.b, fontWeight: 600, textDecoration: "none", borderTop: `1px solid ${C.line}`, paddingTop: 7, width: "100%" },
@@ -1331,7 +1360,7 @@ const St = {
   themeBtn: { display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid transparent", background: C.card, color: C.ink, padding: "8px 12px", borderRadius: 999, fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" },
   saveState: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: C.muted },
   resetBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: C.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" },
-  copyPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 360, maxWidth: "90vw", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: 12, zIndex: 50 },
+  copyPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: "min(360px, 90vw)", maxWidth: "90vw", boxSizing: "border-box", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: 12, zIndex: 50 },
   copyTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 8 },
   copyRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 },
   copyLbl: { fontSize: 13, color: C.ink },
