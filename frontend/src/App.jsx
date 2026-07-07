@@ -411,6 +411,18 @@ export default function App() {
     return { ...d, months };
   });
 
+  const copyMonthToPast = (targetMonths) => setData((d) => {
+    const s = d.selectedMonth;
+    const source = d.months[s];
+    if (!source || !targetMonths?.length) return d;
+    const months = { ...d.months };
+    for (const k of targetMonths) {
+      if (k === s || !months[k]) continue;
+      months[k] = clone(source);
+    }
+    return { ...d, months };
+  });
+
   const togglePartnerPeriod = (i) => {
     const key = cur.partners[i]?.id || `p${i + 1}`;
     editForward((f) => ({ ...f, partners: f.partners.map((p, idx) => idx === i ? { ...p, period: p.period === "year" ? "month" : "year", income: flip(p.income, p.period) } : p) }), key);
@@ -753,9 +765,12 @@ export default function App() {
 
         <footer style={St.footer}>
           <span style={St.saveState}>
-            {!loaded ? (<><Loader2 size={14} className="spin" /> Laden…</>) : saved ? (<><Check size={14} style={{ color: C.save }} /> Opgeslagen</>) : (<><Loader2 size={14} className="spin" /> Opslaan…</>)}
+            {!loaded ? (<><Loader2 size={14} className="spin" /> Laden…</>) : saved ? (<><Check size={14} style={{ color: C.save }} /> Opgeslagen</>) : (<><Loader2 size={14} className="spin" /> Opslaan…</>) }
           </span>
-          <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> Deze maand herstellen</button>
+          <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+            <MonthCopyField pastMonths={pastMonths} onCopy={copyMonthToPast} />
+            <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> Deze maand herstellen</button>
+          </div>
         </footer>
       </div>
     </div>
@@ -967,6 +982,51 @@ function CopyField({ pastMonths, futureMonths, onCopy }) {
                 </select>
               </label>
               <button type="button" onClick={apply} disabled={!past && !future} style={{ ...St.copyApply, opacity: (!past && !future) ? 0.5 : 1 }}>Kopiëren</button>
+            </>
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function MonthCopyField({ pastMonths, onCopy }) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState([]);
+  const editingRef = useRef(false);
+  const timer = useRef(null);
+  const has = pastMonths.length > 0;
+  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 220); };
+  const toggleMonth = (key) => {
+    setSelected((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
+  };
+  const selectAll = () => setSelected(pastMonths.slice());
+  const clearAll = () => setSelected([]);
+  const apply = () => { if (selected.length) { onCopy(selected); setOpen(false); setSelected([]); } };
+  return (
+    <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={openNow} onMouseLeave={closeSoon}>
+      <button type="button" aria-label="Huidige maand kopiëren naar eerdere maanden" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
+      {open && (
+        <span style={{ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" }} onMouseEnter={openNow} onMouseLeave={closeSoon} onClick={(e) => e.stopPropagation()}>
+          <div style={St.copyTitle}>Maand kopiëren naar…</div>
+          {!has ? (
+            <div style={St.copyEmpty}>Er zijn geen eerdere maanden om naartoe te kopiëren.</div>
+          ) : (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+                <button type="button" onClick={selectAll} style={{ ...St.copyApply, flex: 1 }}>Alles</button>
+                <button type="button" onClick={clearAll} style={{ ...St.copyApply, background: C.exp, flex: 1 }}>Niets</button>
+              </div>
+              <div style={{ maxHeight: 240, overflowY: "auto", marginBottom: 10 }}>
+                {pastMonths.slice().reverse().map((k) => (
+                  <label key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <input type="checkbox" checked={selected.includes(k)} onChange={() => toggleMonth(k)} />
+                    <span style={{ fontSize: 13 }}>{monthLong(k)}</span>
+                  </label>
+                ))}
+              </div>
+              <button type="button" onClick={apply} disabled={!selected.length} style={{ ...St.copyApply, opacity: selected.length ? 1 : 0.5 }}>Kopiëren</button>
             </>
           )}
         </span>
