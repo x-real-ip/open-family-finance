@@ -631,7 +631,7 @@ export default function App() {
         </Collapsible>
 
         {/* Government */}
-        <Collapsible id="overheid" title="Overheidsbijdrage" icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid} onToggle={toggleSec}>
+        <Collapsible id="overheid" title="Overheidsbijdrage" icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid} onToggle={toggleSec} style={St.sectionIncome}>
           {cur.govIncome.map((g) => {
             const formulaActive = Boolean(g.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(g, cur))) : g.amount;
@@ -708,7 +708,7 @@ export default function App() {
         </Collapsible>
 
         {/* Savings goals */}
-        <Collapsible id="sparen" title="Spaardoelen" icon={<PiggyBank size={16} style={{ color: C.save }} />} info={TXT.sav} total={eur(calc.savingsTotal)} open={open.sparen} onToggle={toggleSec}>
+        <Collapsible id="sparen" title="Spaardoelen" icon={<PiggyBank size={16} style={{ color: C.save }} />} info={TXT.sav} total={eur(calc.savingsTotal)} open={open.sparen} onToggle={toggleSec} style={St.sectionExpenses}>
           {cur.savings.map((s) => {
             const formulaActive = Boolean(s.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(s, cur))) : s.amount;
