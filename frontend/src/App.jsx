@@ -506,7 +506,7 @@ export default function App() {
       <style>{CSS}</style>
       <datalist id="cats">{categories.map((c) => <option key={c} value={c} />)}</datalist>
 
-      <div style={St.shell}>
+      <div style={St.shell} className="shell">
         <header style={St.header}>
           <div style={St.headerTop}>
             <div>
@@ -1254,7 +1254,7 @@ function NoteField({ value, onChange }) {
 ------------------------------------------------------------------- */
 const St = {
   page: { minHeight: "100vh", background: C.canvas, color: C.ink, fontFamily: "'Inter', system-ui, sans-serif", fontFeatureSettings: "'tnum' 1", padding: "24px 16px 56px" },
-  shell: { maxWidth: 780, margin: "0 auto" },
+  shell: { maxWidth: 780, width: "100%", margin: "0 auto" },
 
   header: { padding: "8px 4px 16px" },
   headerTop: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" },
@@ -1397,6 +1397,10 @@ const CSS = `
 .layout { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
 @media (min-width: 900px) {
   .layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+  .shell { max-width: 960px; }
+}
+@media (min-width: 1200px) {
+  .shell { max-width: 1140px; }
 }
 input::placeholder { color: #9aa5a1; }
 input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outline: 2px solid ${C.b}; outline-offset: 2px; border-radius: 6px; }
