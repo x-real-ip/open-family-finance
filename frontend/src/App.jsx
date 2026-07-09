@@ -585,6 +585,10 @@ export default function App() {
             <div style={St.details}>
               <Bd label="Uitgaven" value={calc.expensesTotal} />
               <Bd label="Sparen" value={calc.savingsTotal} />
+              <div style={St.detailSubtotal}>
+                <span style={St.detailSubtotalLabel}>Subtotaal uitgaven + sparen</span>
+                <span style={St.detailSubtotalValue}>{eur(calc.expensesTotal + calc.savingsTotal)}</span>
+              </div>
               <Bd label="− Overheidsbijdrage" value={calc.govTotal} sign="− " color={C.gov} />
               <Bd label="= Samen te financieren" value={calc.coupleFunds} strong />
               <Bd label={`+ Buffer (marge ${num(cur.margePct)}%)`} value={calc.buffer} sign="+ " muted />
@@ -1307,6 +1311,9 @@ const St = {
 
   leftLabel: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18, marginBottom: 10, fontSize: 13, color: C.muted, fontWeight: 600 },
   fairInline: { display: "inline-flex", alignItems: "center", gap: 6, color: C.ink },
+  detailSubtotal: { display: "flex", justifyContent: "space-between", alignItems: "center", margin: "8px 0", paddingTop: 10, borderTop: `1px solid ${C.line}`, fontSize: 13.5, color: C.ink, fontWeight: 600 },
+  detailSubtotalLabel: { color: C.muted },
+  detailSubtotalValue: { fontVariantNumeric: "tabular-nums", color: C.ink },
   leftoverGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
   leftoverCard: { border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 13px" },
   leftoverTop: { display: "flex", alignItems: "center", gap: 7, marginBottom: 6 },
