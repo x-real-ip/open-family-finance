@@ -1253,8 +1253,8 @@ function NoteField({ value, onChange }) {
    Styles
 ------------------------------------------------------------------- */
 const St = {
-  page: { minHeight: "100vh", background: C.canvas, color: C.ink, fontFamily: "'Inter', system-ui, sans-serif", fontFeatureSettings: "'tnum' 1", padding: "24px 16px 56px" },
-  shell: { maxWidth: 780, width: "100%", margin: "0 auto" },
+  page: { minHeight: "100vh", background: C.canvas, color: C.ink, fontFamily: "'Inter', system-ui, sans-serif", fontFeatureSettings: "'tnum' 1", padding: "24px 20px 56px" },
+  shell: { maxWidth: 1120, width: "100%", margin: "0 auto" },
 
   header: { padding: "8px 4px 16px" },
   headerTop: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" },
