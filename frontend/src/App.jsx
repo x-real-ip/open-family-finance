@@ -605,7 +605,7 @@ export default function App() {
 
         <ColTitle>Inkomsten</ColTitle>
         {/* Income */}
-        <Collapsible id="inkomen" title="Salaris" icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec}>
+        <Collapsible id="inkomen" title="Salaris" icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec} style={St.sectionIncome}>
           {[pA, pB].map((p, i) => (
             <div style={St.itemWrap} className="entryWrap" key={p.id}>
               <div className="entry">
@@ -657,7 +657,7 @@ export default function App() {
 
         <ColTitle>Uitgaven</ColTitle>
         {/* Expenses */}
-        <Collapsible id="uitgaven" title="Vaste lasten" icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec}>
+        <Collapsible id="uitgaven" title="Vaste lasten" icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec} style={St.sectionExpenses}>
           {cur.expenses.map((e) => {
             const formulaActive = Boolean(e.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(e, cur))) : e.amount;
@@ -882,9 +882,9 @@ function SubTotal({ monthly }) {
   );
 }
 
-function Collapsible({ id, title, icon, info, total, open, onToggle, children }) {
+function Collapsible({ id, title, icon, info, total, open, onToggle, children, style }) {
   return (
-    <section style={St.section} className="fade">
+    <section style={{ ...St.section, ...style }} className="fade">
       <div role="button" tabIndex={0} aria-expanded={open}
         onClick={() => onToggle(id)}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(id); } }}
@@ -1322,6 +1322,8 @@ const St = {
   margeLabel: { fontSize: 13, color: C.muted },
 
   section: { background: C.card, borderRadius: 18, padding: "16px 18px", border: `1px solid ${C.line}`, marginBottom: 12 },
+  sectionIncome: { background: "rgba(46, 125, 82, 0.08)", border: `1px solid rgba(46, 125, 82, 0.18)` },
+  sectionExpenses: { background: "rgba(192, 68, 59, 0.08)", border: `1px solid rgba(192, 68, 59, 0.18)` },
   collapseHead: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", outline: "none" },
   collapseBody: { marginTop: 14 },
   h2: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 19, fontWeight: 700, margin: 0, display: "inline-flex", alignItems: "center", gap: 6 },
