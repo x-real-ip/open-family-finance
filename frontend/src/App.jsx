@@ -365,6 +365,15 @@ export default function App() {
     }
     return { ...d, selectedMonth: next, months };
   });
+  const goCurrent = () => setData((d) => {
+    const current = monthKey(new Date());
+    const months = { ...d.months };
+    if (!months[current]) {
+      const earlier = Object.keys(months).filter((k) => k < current).sort();
+      months[current] = clone(earlier.length ? months[earlier[earlier.length - 1]] : DEFAULT_FIGURES);
+    }
+    return { ...d, selectedMonth: current, months };
+  });
   const deleteMonth = (m) => setData((d) => {
     if (Object.keys(d.months).length <= 1) return d;
     const months = { ...d.months }; delete months[m];
@@ -531,6 +540,10 @@ export default function App() {
             <span style={St.monthLabel}>{monthLong(sel)}</span>
             {isCurrentRealMonth && <span style={St.nowTag}>nu</span>}
           </div>
+          <select value={sel} onChange={(e) => setData((d) => ({ ...d, selectedMonth: e.target.value }))} style={St.monthSelect} aria-label="Kies een maand">
+            {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
+          </select>
+          <button type="button" onClick={goCurrent} style={St.currentBtn} aria-label="Ga naar huidige maand">Huidige maand</button>
           <button type="button" onClick={() => goMonth(1)} style={St.navBtn} aria-label="Volgende maand"><ChevronRight size={18} /></button>
         </div>
 
@@ -1265,11 +1278,13 @@ const St = {
   link: { color: C.b, fontWeight: 600, textDecoration: "none", borderBottom: `1px solid ${C.b}40` },
   colTitle: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: "-0.01em", color: C.ink, margin: "4px 2px 14px" },
 
-  monthNav: { display: "flex", alignItems: "center", justifyContent: "center", gap: 16, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 6, marginBottom: 14 },
+  monthNav: { display: "flex", alignItems: "center", justifyContent: "center", gap: 16, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 6, marginBottom: 14, flexWrap: "wrap" },
   navBtn: { border: "none", background: C.canvas, color: C.ink, cursor: "pointer", width: 38, height: 38, borderRadius: 10, display: "inline-flex", alignItems: "center", justifyContent: "center" },
   monthLabelWrap: { display: "flex", alignItems: "center", gap: 8 },
   monthLabel: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 17, fontWeight: 700, textTransform: "capitalize" },
   nowTag: { fontSize: 11, fontWeight: 700, color: C.save, background: "#E4F0E9", padding: "2px 7px", borderRadius: 999 },
+  monthSelect: { minWidth: 180, border: "1px solid " + C.line, borderRadius: 10, padding: "10px 12px", background: C.canvas, color: C.ink, fontSize: 13, cursor: "pointer" },
+  currentBtn: { border: "none", background: C.canvas, color: C.ink, cursor: "pointer", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 700, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" },
 
   hero: { background: C.card, borderRadius: 20, padding: 20, border: `1px solid ${C.line}`, marginBottom: 14 },
   methodRow: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 10, flexWrap: "wrap" },
