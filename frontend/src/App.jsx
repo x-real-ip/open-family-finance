@@ -583,14 +583,22 @@ export default function App() {
           </button>
           {showDetails && (
             <div style={St.details}>
-              <Bd label="Uitgaven" value={calc.expensesTotal} />
-              <Bd label="Sparen" value={calc.savingsTotal} />
-              <div style={St.detailSubtotal}>
-                <span style={St.detailSubtotalLabel}>Subtotaal uitgaven + sparen</span>
-                <span style={St.detailSubtotalValue}>{eur(calc.expensesTotal + calc.savingsTotal)}</span>
+              <div style={St.detailsHeader}>Onder hoe is dit berekend</div>
+              <div style={St.detailSection}>
+                <Bd label="Uitgaven" value={calc.expensesTotal} />
+                <Bd label="Sparen" value={calc.savingsTotal} />
+                <div style={St.detailSubtotal}>
+                  <span style={St.detailSubtotalLabel}>Subtotaal uitgaven + sparen</span>
+                  <span style={St.detailSubtotalValue}>{eur(calc.expensesTotal + calc.savingsTotal)}</span>
+                </div>
               </div>
-              <Bd label="− Overheidsbijdrage" value={calc.govTotal} sign="− " color={C.gov} />
-              <Bd label="= Samen te financieren" value={calc.coupleFunds} strong />
+              <div style={St.detailSection}>
+                <Bd label="− Overheidsbijdrage" value={calc.govTotal} sign="− " color={C.gov} />
+              </div>
+              <div style={St.detailResult}>
+                <span>= Samen te financieren</span>
+                <span>{eur(calc.coupleFunds)}</span>
+              </div>
               <Bd label={`+ Buffer (marge ${num(cur.margePct)}%)`} value={calc.buffer} sign="+ " muted />
               <div style={St.margeRow}>
                 <span style={St.margeLabel}>Buffer-marge per overboeking</span>
@@ -1282,13 +1290,13 @@ const St = {
   link: { color: C.b, fontWeight: 600, textDecoration: "none", borderBottom: `1px solid ${C.b}40` },
   colTitle: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: "-0.01em", color: C.ink, margin: "4px 2px 14px" },
 
-  monthNav: { display: "flex", alignItems: "center", justifyContent: "center", gap: 16, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 6, marginBottom: 14, flexWrap: "wrap" },
+  monthNav: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: "10px 14px", marginBottom: 14, flexWrap: "wrap" },
   navBtn: { border: "none", background: C.canvas, color: C.ink, cursor: "pointer", width: 38, height: 38, borderRadius: 10, display: "inline-flex", alignItems: "center", justifyContent: "center" },
-  monthLabelWrap: { display: "flex", alignItems: "center", gap: 8 },
+  monthLabelWrap: { display: "flex", alignItems: "center", gap: 8, minWidth: 220, flex: "1 1 220px" },
   monthLabel: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 17, fontWeight: 700, textTransform: "capitalize" },
   nowTag: { fontSize: 11, fontWeight: 700, color: C.save, background: "#E4F0E9", padding: "2px 7px", borderRadius: 999 },
-  monthSelect: { minWidth: 180, border: "1px solid " + C.line, borderRadius: 10, padding: "10px 12px", background: C.canvas, color: C.ink, fontSize: 13, cursor: "pointer" },
-  currentBtn: { border: "none", background: C.canvas, color: C.ink, cursor: "pointer", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 700, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" },
+  monthSelect: { minWidth: 180, flex: "1 1 260px", border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 12px", background: C.canvas, color: C.ink, fontSize: 13, cursor: "pointer", outline: "none" },
+  currentBtn: { minWidth: 140, border: "none", background: C.canvas, color: C.ink, cursor: "pointer", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 700, boxShadow: "0 1px 2px rgba(0,0,0,0.08)", whiteSpace: "nowrap" },
 
   hero: { background: C.card, borderRadius: 20, padding: 20, border: `1px solid ${C.line}`, marginBottom: 14 },
   methodRow: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 10, flexWrap: "wrap" },
@@ -1311,9 +1319,12 @@ const St = {
 
   leftLabel: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18, marginBottom: 10, fontSize: 13, color: C.muted, fontWeight: 600 },
   fairInline: { display: "inline-flex", alignItems: "center", gap: 6, color: C.ink },
+  detailsHeader: { fontSize: 14, fontWeight: 700, marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: C.muted },
+  detailSection: { paddingBottom: 12, marginBottom: 12, borderBottom: `1px solid ${C.line}` },
   detailSubtotal: { display: "flex", justifyContent: "space-between", alignItems: "center", margin: "8px 0", paddingTop: 10, borderTop: `1px solid ${C.line}`, fontSize: 13.5, color: C.ink, fontWeight: 600 },
   detailSubtotalLabel: { color: C.muted },
   detailSubtotalValue: { fontVariantNumeric: "tabular-nums", color: C.ink },
+  detailResult: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0 0", borderTop: `1px solid ${C.line}`, fontSize: 15, fontWeight: 700, color: C.ink },
   leftoverGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
   leftoverCard: { border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 13px" },
   leftoverTop: { display: "flex", alignItems: "center", gap: 7, marginBottom: 6 },
