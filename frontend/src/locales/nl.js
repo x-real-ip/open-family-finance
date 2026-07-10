@@ -87,7 +87,6 @@ export default {
     link: "Link",
     source: "Bron",
     nowTag: "nu",
-    toDivide: "te verdelen",
     logEmpty: "Nog geen wijzigingen vastgelegd. Aanpassingen aan bedragen verschijnen hier met datum, tijd, het gewijzigde veld en de oude en nieuwe waarde.",
     months: "{count} mnd",
     makesOver: "maakt over · {value} p/j",

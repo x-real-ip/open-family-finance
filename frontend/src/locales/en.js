@@ -87,7 +87,6 @@ export default {
     link: "Link",
     source: "Source",
     nowTag: "now",
-    toDivide: "to divide",
     logEmpty: "Not enough changes recorded yet. Value changes appear here with date, time, field, old and new value.",
     months: "{count} months",
     makesOver: "makes over · {value} p/y",

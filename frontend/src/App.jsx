@@ -25,7 +25,7 @@ import {
   Calculator, Github,
 } from "lucide-react";
 import {
-  ResponsiveContainer, BarChart, Bar, LineChart, Line,
+  ResponsiveContainer, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 import { storage } from "./api";
@@ -242,7 +242,7 @@ export default function App() {
   const [data, setData] = useState(freshData);
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(true);
-  const [open, setOpen] = useState({ inkomen: true, overheid: true, uitgaven: true, sparen: true, verloop: true, log: false });
+  const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, verloop: true, log: false });
   const [showDetails, setShowDetails] = useState(false);
   const [theme, setTheme] = useState(() => {
     if (typeof window === "undefined") return "light";
@@ -539,6 +539,9 @@ export default function App() {
           </select>
           <button type="button" onClick={goCurrent} style={St.currentBtn} aria-label={TXT.currentMonth}>{TXT.currentMonth}</button>
           <button type="button" onClick={() => goMonth(1)} style={St.navBtn} aria-label={TXT.nextMonth}><ChevronRight size={18} /></button>
+          {sortedMonths.length > 1 && (
+            <button type="button" onClick={() => deleteMonth(sel)} style={St.navBtn} aria-label={`${TXT.deleteMonth} · ${monthLong(sel)}`}><Trash2 size={16} /></button>
+          )}
         </div>
 
         {/* Distribution (result) — full width */}
@@ -608,6 +611,47 @@ export default function App() {
             </div>
           )}
         </section>
+
+        {/* Statistics */}
+        <Collapsible id="verloop" title={TXT.statistics} total={t(LANG, "months", { count: sortedMonths.length })} open={open.verloop} onToggle={toggleSec}>
+          {series.length < 2 ? (
+            <div style={St.emptyHist}>
+              <TrendingUp size={18} style={{ color: C.muted }} />
+              <span>{TXT.noSeries}</span>
+            </div>
+          ) : (
+            <>
+              <ChartTitle>{TXT.incomePerMonth}</ChartTitle>
+              <div style={St.chartBox}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={series} margin={{ top: 6, right: 4, left: -14, bottom: 0 }}>
+                    <CartesianGrid stroke={C.line} vertical={false} />
+                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
+                    <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
+                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
+                    <Bar dataKey="inlegA" name={nameA} fill={C.a} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="inlegB" name={nameB} fill={C.b} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <ChartTitle>{TXT.monthTotals}</ChartTitle>
+              <div style={St.chartBox}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={series} margin={{ top: 6, right: 8, left: -14, bottom: 0 }}>
+                    <CartesianGrid stroke={C.line} vertical={false} />
+                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
+                    <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
+                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
+                    <Bar dataKey="income" name={TXT.incomes} fill={C.inc} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="gov" name={TXT.government} fill={C.gov} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="expenses" name={TXT.expenses} fill={C.exp} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="savings" name={TXT.savings} fill={C.save} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </>
+          )}
+        </Collapsible>
 
         <ColTitle>{TXT.incomes}</ColTitle>
         {/* Income */}
@@ -736,63 +780,6 @@ export default function App() {
           })}
           <button type="button" onClick={addSaving} style={St.addBtn}><Plus size={16} /> {TXT.addSaving}</button>
           <SubTotal monthly={calc.savingsTotal} />
-        </Collapsible>
-
-        {/* History */}
-        <Collapsible id="verloop" title={TXT.statistics} total={t(LANG, "months", { count: sortedMonths.length })} open={open.verloop} onToggle={toggleSec}>
-          {series.length < 2 ? (
-            <div style={St.emptyHist}>
-              <TrendingUp size={18} style={{ color: C.muted }} />
-              <span>{TXT.noSeries}</span>
-            </div>
-          ) : (
-            <>
-              <ChartTitle>{TXT.incomePerMonth}</ChartTitle>
-              <div style={St.chartBox}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={series} margin={{ top: 6, right: 4, left: -14, bottom: 0 }}>
-                    <CartesianGrid stroke={C.line} vertical={false} />
-                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
-                    <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
-                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
-                    <Bar dataKey="inlegA" name={nameA} fill={C.a} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="inlegB" name={nameB} fill={C.b} radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <ChartTitle>{TXT.monthTotals}</ChartTitle>
-              <div style={St.chartBox}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={series} margin={{ top: 6, right: 8, left: -14, bottom: 0 }}>
-                    <CartesianGrid stroke={C.line} vertical={false} />
-                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
-                    <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
-                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
-                    <Line type="monotone" dataKey="income" name={TXT.incomes} stroke={C.inc} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="gov" name={TXT.government} stroke={C.gov} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="expenses" name={TXT.expenses} stroke={C.exp} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="savings" name={TXT.savings} stroke={C.save} strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </>
-          )}
-          <div style={St.monthList}>
-            {sortedMonths.slice().reverse().map((m) => {
-              const t = computeTotals(data.months[m]); const active = m === sel;
-              return (
-                <div key={m} style={{ ...St.monthItem, ...(active ? St.monthItemActive : {}) }}>
-                  <button type="button" onClick={() => setData((d) => ({ ...d, selectedMonth: m }))} style={St.monthItemBtn}>
-                    <span style={St.monthItemName}>{monthLong(m)}</span>
-                    <span style={St.monthItemPot}>{eur0(t.coupleFunds)} {TXT.toDivide}</span>
-                  </button>
-                  {sortedMonths.length > 1 && (
-                    <button type="button" aria-label={`${TXT.deleteMonth} · ${monthLong(m)}`} onClick={() => deleteMonth(m)} style={St.iconBtn}><Trash2 size={15} /></button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
         </Collapsible>
 
         {/* Change log */}
@@ -1396,13 +1383,6 @@ const St = {
   chartTitle: { fontSize: 13, fontWeight: 600, color: C.muted, margin: "6px 2px 8px" },
   chartBox: { width: "100%", height: 220, marginBottom: 18 },
   emptyHist: { display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13.5, lineHeight: 1.5, color: C.muted, background: C.canvas, borderRadius: 12, padding: "14px 14px" },
-
-  monthList: { marginTop: 6, borderTop: `1px solid ${C.line}`, paddingTop: 10 },
-  monthItem: { display: "flex", alignItems: "center", gap: 4, borderRadius: 10, paddingRight: 4 },
-  monthItemActive: { background: C.canvas },
-  monthItemBtn: { flex: 1, display: "flex", alignItems: "center", justifyContent: "space-between", border: "none", background: "transparent", cursor: "pointer", padding: "9px 10px", fontFamily: "inherit", color: C.ink },
-  monthItemName: { fontSize: 14, fontWeight: 600, textTransform: "capitalize" },
-  monthItemPot: { fontSize: 12.5, color: C.muted, fontVariantNumeric: "tabular-nums" },
 
   infoBtn: { width: 18, height: 18, borderRadius: 999, border: `1px solid ${C.line}`, background: C.card, color: C.muted, fontSize: 11, fontWeight: 700, fontStyle: "italic", lineHeight: 1, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, fontFamily: "Georgia, serif" },
   bubble: { position: "absolute", top: "calc(100% + 8px)", width: 230, maxWidth: "70vw", background: C.card, color: C.ink, fontSize: 12.5, lineHeight: 1.45, padding: "10px 12px", borderRadius: 10, boxShadow: "0 6px 20px rgba(0,0,0,0.18)", zIndex: 30, fontWeight: 400, fontStyle: "normal" },
