@@ -3,8 +3,7 @@ export default {
   currencyLocale: "nl-NL",
   text: {
     appTitle: "Open Family Finance",
-    bylineCreatedBy: "gemaakt door",
-    sourceOnGitHub: "source op GitHub",
+    sourceOnGitHub: "Bron op GitHub",
     themeLight: "Licht",
     themeDark: "Donker",
     previousMonth: "Vorige maand",

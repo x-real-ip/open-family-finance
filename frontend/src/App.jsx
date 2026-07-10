@@ -22,7 +22,7 @@ import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
   ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
-  Calculator,
+  Calculator, Github,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line,
@@ -518,15 +518,7 @@ export default function App() {
       <div style={St.shell} className="shell">
         <header style={St.header}>
           <div style={St.headerTop}>
-            <div>
-              <h1 style={St.h1}>{TXT.appTitle}</h1>
-              <p style={St.byline}>
-                {TXT.bylineCreatedBy}{" "}
-                <a style={St.link} href="https://github.com/x-real-ip" target="_blank" rel="noopener noreferrer">x-real-ip</a>
-                {" · "}
-                <a style={St.link} href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer">{TXT.sourceOnGitHub}</a>
-              </p>
-            </div>
+            <h1 style={St.h1}>{TXT.appTitle}</h1>
             <button type="button" onClick={toggleTheme} style={St.themeBtn} aria-label={t(LANG, "themeToggle", { theme: theme === "dark" ? TXT.themeLight : TXT.themeDark })}>
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? TXT.themeLight : TXT.themeDark}
             </button>
@@ -831,6 +823,9 @@ export default function App() {
           <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
             <MonthCopyField pastMonths={pastMonths} onCopy={copyMonthToPast} />
             <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>
+            <a href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer" style={St.githubLink} aria-label={TXT.sourceOnGitHub} title={TXT.sourceOnGitHub}>
+              <Github size={16} />
+            </a>
           </div>
         </footer>
       </div>
@@ -1286,8 +1281,6 @@ const St = {
   eyebrow: { fontSize: 12, letterSpacing: "0.14em", color: C.muted, fontWeight: 600 },
   titleRow: { display: "flex", alignItems: "center", gap: 10, marginTop: 6 },
   h1: { fontFamily: "'Inter', system-ui, sans-serif", fontSize: 32, lineHeight: 1.05, margin: 0, fontWeight: 800, letterSpacing: "-0.02em" },
-  byline: { margin: "6px 0 0", fontSize: 13, color: C.muted },
-  link: { color: C.b, fontWeight: 600, textDecoration: "none", borderBottom: `1px solid ${C.b}40` },
   colTitle: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: "-0.01em", color: C.ink, margin: "4px 2px 14px" },
 
   monthNav: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: "10px 14px", marginBottom: 14, flexWrap: "wrap" },
@@ -1416,6 +1409,7 @@ const St = {
   themeBtn: { display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid transparent", background: C.card, color: C.ink, padding: "8px 12px", borderRadius: 999, fontSize: 13, fontWeight: 600, cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" },
   saveState: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: C.muted },
   resetBtn: { display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", color: C.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" },
+  githubLink: { display: "inline-flex", alignItems: "center", justifyContent: "center", color: C.muted, padding: 6, borderRadius: 8 },
   copyPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: "min(360px, 90vw)", maxWidth: "90vw", boxSizing: "border-box", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: 12, zIndex: 50 },
   copyTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 8 },
   copyRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 },

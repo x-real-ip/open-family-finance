@@ -3,8 +3,7 @@ export default {
   currencyLocale: "en-GB",
   text: {
     appTitle: "Open Family Finance",
-    bylineCreatedBy: "created by",
-    sourceOnGitHub: "source on GitHub",
+    sourceOnGitHub: "Source on GitHub",
     themeLight: "Light",
     themeDark: "Dark",
     previousMonth: "Previous month",
