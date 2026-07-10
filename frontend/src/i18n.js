@@ -32,3 +32,9 @@ export function t(lang, key, vars = {}) {
 
 export const LANG = getRuntimeLanguage();
 export const TXT = LOCALIZATION[LANG]?.text || LOCALIZATION[DEFAULT_LANGUAGE].text;
+
+export function getRuntimeAppTitle() {
+  if (typeof window === "undefined") return TXT.appTitle;
+  const raw = window.__ENV__?.APP_TITLE?.trim();
+  return raw || TXT.appTitle;
+}

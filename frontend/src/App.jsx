@@ -29,7 +29,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 import { storage } from "./api";
-import { LANG, TXT, t, getRuntimeCurrencyLocale, getRuntimeDateLocale } from "./i18n";
+import { LANG, TXT, t, getRuntimeCurrencyLocale, getRuntimeDateLocale, getRuntimeAppTitle } from "./i18n";
 
 /* ----------------------------------------------------------------
    Design tokens
@@ -40,6 +40,7 @@ const C = {
 };
 
 const KEY = "open-family-finance:v1";
+const APP_TITLE = getRuntimeAppTitle();
 
 // User-defined labels get a stable auto color from a hash of the name.
 // Hue, saturation and lightness all vary, so distinct names rarely look alike.
@@ -258,6 +259,7 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.lang = LANG;
+    document.title = APP_TITLE;
   }, []);
 
   useEffect(() => {
@@ -518,7 +520,7 @@ export default function App() {
       <div style={St.shell} className="shell">
         <header style={St.header}>
           <div style={St.headerTop}>
-            <h1 style={St.h1}>{TXT.appTitle}</h1>
+            <h1 style={St.h1}>{APP_TITLE}</h1>
             <button type="button" onClick={toggleTheme} style={St.themeBtn} aria-label={t(LANG, "themeToggle", { theme: theme === "dark" ? TXT.themeLight : TXT.themeDark })}>
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? TXT.themeLight : TXT.themeDark}
             </button>
