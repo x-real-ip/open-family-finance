@@ -79,6 +79,8 @@ export default {
     divide: "divide",
     descriptionPlaceholder: "Description",
     categoryPlaceholder: "Category",
+    correspondent: "Correspondent",
+    correspondentPlaceholder: "Correspondent",
     notePlaceholder: "Note for this item…",
     openLink: "Open link ↗",
     sourceRule: "Source row",

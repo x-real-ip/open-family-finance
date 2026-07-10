@@ -28,7 +28,7 @@ import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
-import { storage } from "./api";
+import { storage, paperless, PAPERLESS_ENABLED } from "./api";
 import { LANG, TXT, t, getRuntimeCurrencyLocale, getRuntimeDateLocale, getRuntimeAppTitle } from "./i18n";
 
 /* ----------------------------------------------------------------
@@ -220,10 +220,10 @@ function migrateFig(f) {
   return {
     method: f.method || "income", margePct: f.margePct ?? "0.5", customPct: f.customPct ?? "50",
     partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "" })),
-    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", formula: g.formula || undefined })),
-    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", formula: e.formula || undefined })),
-    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", formula: s.formula || undefined }))
-      : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "" }] : []),
+    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", correspondent: g.correspondent || "", formula: g.formula || undefined })),
+    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", formula: e.formula || undefined })),
+    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", correspondent: s.correspondent || "", formula: s.formula || undefined }))
+      : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "", correspondent: "" }] : []),
     overrides: (f.overrides && typeof f.overrides === "object") ? { ...f.overrides } : {},
   };
 }
@@ -390,6 +390,35 @@ export default function App() {
     return [...set].sort();
   }, [data.months]);
 
+  // Correspondent suggestions: paperless-ngx's list (if the integration is on)
+  // plus anything already typed across all months, so the field stays useful
+  // even offline or with values paperless doesn't know about.
+  const [paperlessCorrespondents, setPaperlessCorrespondents] = useState([]);
+  useEffect(() => {
+    if (!PAPERLESS_ENABLED) return;
+    let active = true;
+    paperless.listCorrespondents().then((list) => { if (active) setPaperlessCorrespondents(list); });
+    return () => { active = false; };
+  }, []);
+  const correspondents = useMemo(() => {
+    const set = new Set(paperlessCorrespondents.map((c) => c.name));
+    for (const m of Object.values(data.months)) {
+      for (const kind of ["govIncome", "expenses", "savings"]) {
+        for (const e of m[kind]) if (e.correspondent) set.add(e.correspondent);
+      }
+    }
+    return [...set].sort();
+  }, [data.months, paperlessCorrespondents]);
+  // Best-effort: mirrors a newly typed correspondent into paperless on blur,
+  // skipped for names paperless already knows about.
+  const syncCorrespondent = (name) => {
+    if (!PAPERLESS_ENABLED || !name) return;
+    if (paperlessCorrespondents.some((c) => c.name.toLowerCase() === name.toLowerCase())) return;
+    paperless.ensureCorrespondent(name).then((created) => {
+      if (created) setPaperlessCorrespondents((list) => [...list, created]);
+    });
+  };
+
   // History of one entry (matched by id) across all months, for the sparkline.
   const entryHistory = (kind, id) => {
     const out = [];
@@ -547,9 +576,9 @@ export default function App() {
   const addListItem = (kind, item) => editForward((f) => (
     (f[kind] || []).some((x) => x.id === item.id) ? f : { ...f, [kind]: [...(f[kind] || []), clone(item)] }
   ), item.id);
-  const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "" });
-  const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "" });
-  const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "" });
+  const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "" });
+  const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "" });
+  const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "" });
   // Reset the selected month: take over the figures of the nearest earlier
   // month and clear this month's overrides, so it follows the baseline again.
   // Without an earlier month it falls back to the empty defaults.
@@ -581,6 +610,7 @@ export default function App() {
     <div style={St.page}>
       <style>{CSS}</style>
       <datalist id="cats">{categories.map((c) => <option key={c} value={c} />)}</datalist>
+      {PAPERLESS_ENABLED && <datalist id="correspondents">{correspondents.map((c) => <option key={c} value={c} />)}</datalist>}
 
       <div style={St.shell} className="shell">
         <header style={St.header}>
@@ -791,6 +821,7 @@ export default function App() {
                   <span className="e-lead">
                     <DragHandle active={manual} {...dragHandleProps("govIncome", g.id)} />
                     <span style={{ ...St.dot, background: C.gov }} />
+                    <CorrespondentInput value={g.correspondent || ""} onChange={(v) => setListItem("govIncome", g.id, { correspondent: v })} onSync={syncCorrespondent} />
                   </span>
                   <input className="e-desc" aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
@@ -827,6 +858,7 @@ export default function App() {
                     <DragHandle active={manual} {...dragHandleProps("expenses", e.id)} />
                     <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || TXT.otherCategory} />
                     <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { category: ev.target.value })} style={St.catInput} />
+                    <CorrespondentInput value={e.correspondent || ""} onChange={(v) => setListItem("expenses", e.id, { correspondent: v })} onSync={syncCorrespondent} />
                   </span>
                   <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setListItem("expenses", e.id, { amount: v })} onPeriod={() => toggleItemPeriod("expenses", e.id)} onCommit={(o, n) => logChange(`${TXT.expensesSection} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
@@ -886,6 +918,7 @@ export default function App() {
                   <span className="e-lead">
                     <DragHandle active={manual} {...dragHandleProps("savings", s.id)} />
                     <span style={{ ...St.dot, background: categoryColor(s.label) }} />
+                    <CorrespondentInput value={s.correspondent || ""} onChange={(v) => setListItem("savings", s.id, { correspondent: v })} onSync={syncCorrespondent} />
                   </span>
                   <input className="e-desc" aria-label={TXT.category} value={s.label} placeholder={TXT.categoryPlaceholder} onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`${TXT.savingsSection} · ${s.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
@@ -1020,6 +1053,18 @@ function SortToggle({ kind, mode, onChange }) {
 function DragHandle({ active, ...dragProps }) {
   if (!active) return null;
   return <span {...dragProps} style={St.dragHandle} aria-label={TXT.dragHandle} title={TXT.dragHandle}><GripVertical size={14} /></span>;
+}
+
+// Free-text with paperless-ngx suggestions (see the #correspondents datalist).
+// Renders nothing when the integration is off, per PAPERLESS_ENABLED.
+function CorrespondentInput({ value, onChange, onSync }) {
+  if (!PAPERLESS_ENABLED) return null;
+  return (
+    <input list="correspondents" aria-label={TXT.correspondent} value={value} placeholder={TXT.correspondentPlaceholder}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={(e) => onSync(e.target.value)}
+      style={St.catInput} />
+  );
 }
 
 function Collapsible({ id, title, icon, info, total, open, onToggle, children, style }) {

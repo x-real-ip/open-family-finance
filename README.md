@@ -56,6 +56,9 @@ numbers evolve over time.
   expenses additionally by category), or drag-and-drop your own manual order.
 - **Light and dark theme.**
 - **Dutch and English UI**, selectable via an environment variable.
+- **Optional paperless-ngx integration** — pick a correspondent from your
+  paperless instance on expenses, government support and savings entries, or
+  just type your own. See [Paperless-ngx integration](#paperless-ngx-integration).
 - **Self-hosted**: a small Express API backed by Postgres, with an optional
   bearer-token to lock down access.
 
@@ -96,10 +99,33 @@ All configuration is done through environment variables — see
 | `API_TOKEN`           | *(unset = API is open)* | Optional bearer token required on every `/api` request, shared between the frontend and backend |
 | `LANGUAGE`            | `nl`                     | UI language: `nl` or `en` |
 | `APP_TITLE`           | `Open Family Finance`    | Page title / heading shown in the app |
+| `PAPERLESS_ENABLED`   | `false`                  | Turns the paperless-ngx correspondent integration on, both the backend proxy and the frontend UI (see below) |
+| `PAPERLESS_URL`       | —                        | Base URL of your paperless-ngx instance. Backend-only, used only when `PAPERLESS_ENABLED=true` |
+| `PAPERLESS_API_TOKEN` | —                        | paperless-ngx API token. Backend-only, never sent to the browser |
 
-`LANGUAGE` and `APP_TITLE` are read by the frontend at container start (not
-baked into the build), so the same image can be reused for different
-deployments.
+`LANGUAGE`, `APP_TITLE` and `PAPERLESS_ENABLED` are read by the frontend at
+container start (not baked into the build), so the same image can be reused
+for different deployments.
+
+## Paperless-ngx integration
+
+If you run [paperless-ngx](https://docs.paperless-ngx.com/) and want your
+correspondents (the companies/senders on your documents) available while
+entering expenses, government support or savings:
+
+1. Generate an API token in paperless-ngx (user profile → API token).
+2. Set `PAPERLESS_ENABLED=true`, `PAPERLESS_URL` and `PAPERLESS_API_TOKEN` for
+   the **backend**, and `PAPERLESS_ENABLED=true` for the **frontend** — see
+   [Configuration](#configuration).
+3. The correspondent field on expenses, government support and savings
+   entries now suggests names from paperless as you type, while still
+   accepting anything you type yourself. A name that doesn't exist yet in
+   paperless is created there too, so the two stay in sync.
+
+The frontend never talks to paperless directly and never receives
+`PAPERLESS_URL` or `PAPERLESS_API_TOKEN` — all communication goes through the
+backend API. Leaving `PAPERLESS_ENABLED` unset (or `false`) hides the
+correspondent field entirely; nothing paperless-related is shown or fetched.
 
 ## Data & privacy
 

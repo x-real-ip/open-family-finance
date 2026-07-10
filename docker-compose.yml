@@ -21,6 +21,9 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       API_TOKEN: ${API_TOKEN}
       PORT: 8080
+      PAPERLESS_ENABLED: ${PAPERLESS_ENABLED:-false}
+      PAPERLESS_URL: ${PAPERLESS_URL:-}
+      PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
@@ -32,6 +35,7 @@ services:
       API_TOKEN: ${API_TOKEN}
       LANGUAGE: ${LANGUAGE:-nl}
       APP_TITLE: ${APP_TITLE:-}
+      PAPERLESS_ENABLED: ${PAPERLESS_ENABLED:-false}
     ports:
       - "8080:80"
     depends_on:

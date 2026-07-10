@@ -79,6 +79,8 @@ export default {
     divide: "gedeeld door",
     descriptionPlaceholder: "Omschrijving",
     categoryPlaceholder: "Categorie",
+    correspondent: "Correspondent",
+    correspondentPlaceholder: "Correspondent",
     notePlaceholder: "Notitie bij deze uitgave…",
     openLink: "Open link ↗",
     sourceRule: "Bronregel",

@@ -7,11 +7,17 @@
  *   DELETE /api/state/:key   -> { key, deleted }
  *   GET    /api/health       -> { ok: true }
  *
+ * Optional paperless-ngx integration (see paperless.js), enabled with
+ * PAPERLESS_ENABLED + PAPERLESS_URL + PAPERLESS_API_TOKEN:
+ *   GET  /api/paperless/correspondents          -> [{ id, name }] | 404 when disabled
+ *   POST /api/paperless/correspondents { name }  -> { id, name }   | 404 when disabled
+ *
  * Optional bearer auth: set API_TOKEN and send "Authorization: Bearer <token>".
  * Startup retries the database connection, so boot order does not matter.
  */
 import express from "express";
 import { pool, initDb } from "./db.js";
+import { paperlessEnabled, listCorrespondents, ensureCorrespondent } from "./paperless.js";
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
@@ -73,6 +79,28 @@ app.delete("/api/state/:key", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "server error" });
+  }
+});
+
+// List paperless-ngx correspondents, for the entry autocomplete.
+app.get("/api/paperless/correspondents", async (_req, res) => {
+  if (!paperlessEnabled) return res.status(404).json({ error: "paperless integration disabled" });
+  try {
+    res.json(await listCorrespondents());
+  } catch (e) {
+    console.error(e);
+    res.status(502).json({ error: "paperless unavailable" });
+  }
+});
+
+// Look up a correspondent by name, creating it in paperless if it doesn't exist yet.
+app.post("/api/paperless/correspondents", async (req, res) => {
+  if (!paperlessEnabled) return res.status(404).json({ error: "paperless integration disabled" });
+  try {
+    res.json(await ensureCorrespondent(req.body?.name));
+  } catch (e) {
+    console.error(e);
+    res.status(502).json({ error: "paperless unavailable" });
   }
 });
 

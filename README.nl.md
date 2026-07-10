@@ -60,6 +60,9 @@ cijfers zich over tijd ontwikkelen.
   volgorde.
 - **Licht en donker thema.**
 - **Nederlandse en Engelse UI**, instelbaar via een environment-variabele.
+- **Optionele paperless-ngx-integratie** — kies een correspondent uit je
+  paperless-omgeving bij uitgaven, overheidsbijdrage en spaardoelen, of typ
+  gewoon je eigen waarde. Zie [Paperless-ngx-integratie](#paperless-ngx-integratie).
 - **Zelf te hosten**: een kleine Express-API met Postgres als opslag, met een
   optioneel bearer-token om toegang af te schermen.
 
@@ -101,10 +104,33 @@ gebruikt:
 | `API_TOKEN`             | *(leeg = API is open)*    | Optioneel bearer-token dat vereist is bij elk `/api`-verzoek, gedeeld tussen frontend en backend |
 | `LANGUAGE`              | `nl`                       | UI-taal: `nl` of `en` |
 | `APP_TITLE`             | `Open Family Finance`      | Paginatitel/kop die in de app wordt getoond |
+| `PAPERLESS_ENABLED`     | `false`                    | Zet de paperless-ngx-correspondentintegratie aan, zowel de backend-proxy als de frontend-UI (zie hieronder) |
+| `PAPERLESS_URL`         | —                          | Basis-URL van je paperless-ngx-omgeving. Alleen backend, alleen gebruikt als `PAPERLESS_ENABLED=true` |
+| `PAPERLESS_API_TOKEN`   | —                          | paperless-ngx API-token. Alleen backend, komt nooit in de browser terecht |
 
-`LANGUAGE` en `APP_TITLE` worden door de frontend bij het opstarten van de
-container ingelezen (niet vast gebakken in de build), zodat dezelfde image
-voor verschillende omgevingen hergebruikt kan worden.
+`LANGUAGE`, `APP_TITLE` en `PAPERLESS_ENABLED` worden door de frontend bij het
+opstarten van de container ingelezen (niet vast gebakken in de build), zodat
+dezelfde image voor verschillende omgevingen hergebruikt kan worden.
+
+## Paperless-ngx-integratie
+
+Als je [paperless-ngx](https://docs.paperless-ngx.com/) draait en je
+correspondenten (de bedrijven/afzenders op je documenten) beschikbaar wilt
+hebben bij het invullen van uitgaven, overheidsbijdrage of sparen:
+
+1. Genereer een API-token in paperless-ngx (gebruikersprofiel → API-token).
+2. Zet `PAPERLESS_ENABLED=true`, `PAPERLESS_URL` en `PAPERLESS_API_TOKEN` voor
+   de **backend**, en `PAPERLESS_ENABLED=true` voor de **frontend** — zie
+   [Configuratie](#configuratie).
+3. Het correspondent-veld bij uitgaven, overheidsbijdrage en spaardoelen
+   suggereert nu namen uit paperless terwijl je typt, maar accepteert ook nog
+   gewoon alles wat je zelf intypt. Een naam die nog niet in paperless bestaat
+   wordt daar automatisch ook aangemaakt, zodat ze in sync blijven.
+
+De frontend praat nooit rechtstreeks met paperless en krijgt `PAPERLESS_URL`
+of `PAPERLESS_API_TOKEN` nooit te zien — alle communicatie loopt via de
+backend-API. Laat je `PAPERLESS_ENABLED` leeg (of op `false`), dan is het
+correspondent-veld nergens te zien en wordt er niets opgehaald.
 
 ## Data & privacy
 
