@@ -16,11 +16,13 @@ naar de gezamenlijke rekening.
   kinderbijslag) die verlagen wat jullie zelf moeten inleggen.
 - De app berekent `uitgaven + sparen − overheidsbijdrage` = wat jullie samen
   moeten financieren, en verdeelt dat bedrag tussen de partners op een van
-  twee manieren:
+  drie manieren:
   - **Naar inkomen** — wie meer verdient, legt naar verhouding meer in, zodat
     na de overboeking beide partners hetzelfde *percentage* van hun eigen
     salaris overhouden.
   - **50 / 50** — verdeel het gezamenlijke bedrag gelijk, ongeacht inkomen.
+  - **Eigen verdeling** — stel zelf een vast percentage in (bijv. 60/40) als
+    geen van bovenstaande bij jullie situatie past.
 - Er wordt een kleine, instelbare **buffer-marge** (%) bovenop elke
   overboeking gezet, zodat de gezamenlijke rekening een buffer overhoudt in
   plaats van precies op nul uit te komen.
@@ -30,9 +32,9 @@ cijfers zich over tijd ontwikkelen.
 
 ## Functies
 
-- **Eerlijke-verdeling-calculator** — naar inkomen of 50/50, met een
-  instelbare veiligheidsmarge, en een uitklapbare uitleg van precies hoe elk
-  bedrag is berekend.
+- **Eerlijke-verdeling-calculator** — naar inkomen, 50/50, of je eigen
+  percentage, met een instelbare veiligheidsmarge, en een uitklapbare uitleg
+  van precies hoe elk bedrag is berekend.
 - **Maandelijkse bijhouding met doorwerking naar volgende maanden** — een
   wijziging aan een post geldt voor de huidige maand én elke volgende maand,
   totdat die post in een van die maanden zelf weer wordt aangepast (dan wordt

@@ -15,11 +15,13 @@ transfer from each personal account to the shared account.
   that reduces what you need to contribute yourselves.
 - The app works out `expenses + savings − government support` = what you need
   to finance together, and splits that amount between partners using one of
-  two methods:
+  three methods:
   - **By income** — whoever earns more contributes proportionally more, so
     that after the transfer both partners keep the same *percentage* of their
     own salary.
   - **50 / 50** — split the shared amount evenly, regardless of income.
+  - **Custom split** — set your own fixed percentage (e.g. 60/40) if neither
+    of the above fits your situation.
 - A small configurable **buffer margin** (%) is added on top of each transfer,
   so the shared account keeps a cushion instead of running exactly to zero.
 
@@ -28,8 +30,9 @@ numbers evolve over time.
 
 ## Features
 
-- **Fair-split calculator** — by income share or 50/50, with a configurable
-  safety buffer, and a breakdown of exactly how each number was calculated.
+- **Fair-split calculator** — by income share, 50/50, or your own custom
+  percentage, with a configurable safety buffer, and a breakdown of exactly
+  how each number was calculated.
 - **Monthly tracking with forward propagation** — an edit to an entry applies
   to the current month and every future month, until that entry is edited
   again in one of those months (which "pins" it there). Past months are never
