@@ -40,6 +40,7 @@ export default {
     sortManual: "Handmatig",
     sortByCategory: "Categorie",
     sortByName: "Naam",
+    dragHandle: "Sleep om te verplaatsen",
     perCategory: "Per categorie",
     incomeSplit: "Inkomen",
     contributionSplit: "Inleg",

@@ -40,6 +40,7 @@ export default {
     sortManual: "Manual",
     sortByCategory: "Category",
     sortByName: "Name",
+    dragHandle: "Drag to reorder",
     perCategory: "By category",
     incomeSplit: "Income",
     contributionSplit: "Contribution",

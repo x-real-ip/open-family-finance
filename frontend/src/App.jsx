@@ -22,7 +22,7 @@ import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
   ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
-  Calculator, Github,
+  Calculator, Github, GripVertical,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
@@ -224,16 +224,26 @@ function migrateFig(f) {
     overrides: (f.overrides && typeof f.overrides === "object") ? { ...f.overrides } : {},
   };
 }
-const EXPENSE_SORTS = ["manual", "category", "name"];
-const expenseSortOf = (raw) => (EXPENSE_SORTS.includes(raw) ? raw : "manual");
-function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], expenseSort: "manual" }; }
+// "manual" = the stored entry order (drag handles reorder it); the other modes derive an order on the fly.
+const SORT_MODES = { govIncome: ["manual", "name"], expenses: ["manual", "category", "name"], savings: ["manual", "name"] };
+const DEFAULT_LIST_SORT = { govIncome: "manual", expenses: "manual", savings: "manual" };
+function listSortOf(raw) {
+  const out = { ...DEFAULT_LIST_SORT };
+  for (const kind of Object.keys(DEFAULT_LIST_SORT)) {
+    if (raw && SORT_MODES[kind].includes(raw[kind])) out[kind] = raw[kind];
+  }
+  return out;
+}
+function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT } }; }
 function normalize(raw) {
   if (!raw) return freshData();
   if (raw.months && raw.selectedMonth) {
     const months = {}; for (const [k, v] of Object.entries(raw.months)) months[k] = migrateFig(v);
-    return { selectedMonth: raw.selectedMonth, months, log: raw.log || [], expenseSort: expenseSortOf(raw.expenseSort) };
+    // expenseSort: kept for compatibility with blobs saved by an earlier version of this feature.
+    const sortSource = raw.listSort || (raw.expenseSort ? { expenses: raw.expenseSort } : null);
+    return { selectedMonth: raw.selectedMonth, months, log: raw.log || [], listSort: listSortOf(sortSource) };
   }
-  if (raw.partners) { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: migrateFig(raw) }, log: [], expenseSort: "manual" }; }
+  if (raw.partners) { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: migrateFig(raw) }, log: [], listSort: { ...DEFAULT_LIST_SORT } }; }
   return freshData();
 }
 
@@ -330,14 +340,44 @@ export default function App() {
     return Object.entries(map).sort((x, y) => y[1] - x[1]);
   }, [cur]);
 
-  // Display order only — mutations always address entries by id, so this never touches storage.
-  const expenseSort = data.expenseSort || "manual";
-  const sortedExpenses = useMemo(() => {
-    if (expenseSort === "manual") return cur.expenses;
-    const key = (e) => (expenseSort === "category" ? e.category || TXT.otherCategory : e.label || TXT.unnamed);
-    return cur.expenses.slice().sort((a, b) => key(a).localeCompare(key(b), undefined, { sensitivity: "base" }) || (a.label || "").localeCompare(b.label || "", undefined, { sensitivity: "base" }));
-  }, [cur.expenses, expenseSort]);
-  const setExpenseSort = (mode) => setData((d) => ({ ...d, expenseSort: mode }));
+  // "manual" shows the stored entry order as-is (see reorderListItem); the other
+  // modes derive a display order on the fly — mutations still address entries by
+  // id, so sorting here never touches storage.
+  const listSort = data.listSort || DEFAULT_LIST_SORT;
+  const setListSort = (kind, mode) => setData((d) => ({ ...d, listSort: { ...(d.listSort || DEFAULT_LIST_SORT), [kind]: mode } }));
+  const sortItems = (kind, items) => {
+    const mode = listSort[kind];
+    if (mode === "manual") return items;
+    const key = (item) => (mode === "category" ? item.category || TXT.otherCategory : item.label || TXT.unnamed);
+    return items.slice().sort((a, b) => key(a).localeCompare(key(b), undefined, { sensitivity: "base" }) || (a.label || "").localeCompare(b.label || "", undefined, { sensitivity: "base" }));
+  };
+  const sortedGovIncome = useMemo(() => sortItems("govIncome", cur.govIncome), [cur.govIncome, listSort.govIncome]);
+  const sortedExpenses = useMemo(() => sortItems("expenses", cur.expenses), [cur.expenses, listSort.expenses]);
+  const sortedSavings = useMemo(() => sortItems("savings", cur.savings), [cur.savings, listSort.savings]);
+
+  // Drag-and-drop reordering — only available while a section's sort mode is "manual".
+  // Reordering changes the entry order for the selected month only; it does not
+  // forward-propagate like value edits do, since order isn't a per-entry field.
+  const [dragItem, setDragItem] = useState(null);
+  const reorderListItem = (kind, dragId, dropId) => setData((d) => {
+    const s = d.selectedMonth;
+    const list = d.months[s][kind];
+    const from = list.findIndex((x) => x.id === dragId), to = list.findIndex((x) => x.id === dropId);
+    if (from === -1 || to === -1 || from === to) return d;
+    const next = list.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    return { ...d, months: { ...d.months, [s]: { ...d.months[s], [kind]: next } } };
+  });
+  const dragHandleProps = (kind, id) => ({
+    draggable: true,
+    onDragStart: (e) => { setDragItem({ kind, id }); e.dataTransfer.effectAllowed = "move"; },
+    onDragEnd: () => setDragItem(null),
+  });
+  const dragRowProps = (kind, id) => ({
+    onDragOver: (e) => { if (dragItem?.kind === kind && dragItem.id !== id) e.preventDefault(); },
+    onDrop: (e) => { if (dragItem?.kind !== kind) return; e.preventDefault(); reorderListItem(kind, dragItem.id, id); setDragItem(null); },
+  });
 
   // Existing category names across all months, for autocomplete suggestions.
   const categories = useMemo(() => {
@@ -716,13 +756,18 @@ export default function App() {
 
         {/* Government */}
         <Collapsible id="overheid" title={TXT.government} icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid} onToggle={toggleSec} style={St.sectionIncome}>
-          {cur.govIncome.map((g) => {
+          {cur.govIncome.length > 1 && <SortToggle kind="govIncome" mode={listSort.govIncome} onChange={(m) => setListSort("govIncome", m)} />}
+          {sortedGovIncome.map((g) => {
             const formulaActive = Boolean(g.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(g, cur))) : g.amount;
+            const manual = listSort.govIncome === "manual";
             return (
-              <div style={St.itemWrap} className="entryWrap" key={g.id}>
+              <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === "govIncome" && dragItem.id === g.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={g.id} {...(manual ? dragRowProps("govIncome", g.id) : {})}>
                 <div className="entry">
-                  <span className="e-lead"><span style={{ ...St.dot, background: C.gov }} /></span>
+                  <span className="e-lead">
+                    <DragHandle active={manual} {...dragHandleProps("govIncome", g.id)} />
+                    <span style={{ ...St.dot, background: C.gov }} />
+                  </span>
                   <input className="e-desc" aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
                   <span className="entryActions" style={St.rowActions}>
@@ -746,23 +791,16 @@ export default function App() {
         <ColTitle>{TXT.expensesSection}</ColTitle>
         {/* Expenses */}
         <Collapsible id="uitgaven" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec} style={St.sectionExpenses}>
-          {cur.expenses.length > 1 && (
-            <div style={St.sortRow}>
-              <span style={St.sortLabel}>{TXT.sortBy}</span>
-              <div style={St.toggle} role="group" aria-label={TXT.sortBy}>
-                <button type="button" onClick={() => setExpenseSort("manual")} style={{ ...St.toggleBtn, ...(expenseSort === "manual" ? St.toggleOn : {}) }}>{TXT.sortManual}</button>
-                <button type="button" onClick={() => setExpenseSort("category")} style={{ ...St.toggleBtn, ...(expenseSort === "category" ? St.toggleOn : {}) }}>{TXT.sortByCategory}</button>
-                <button type="button" onClick={() => setExpenseSort("name")} style={{ ...St.toggleBtn, ...(expenseSort === "name" ? St.toggleOn : {}) }}>{TXT.sortByName}</button>
-              </div>
-            </div>
-          )}
+          {cur.expenses.length > 1 && <SortToggle kind="expenses" mode={listSort.expenses} onChange={(m) => setListSort("expenses", m)} />}
           {sortedExpenses.map((e) => {
             const formulaActive = Boolean(e.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(e, cur))) : e.amount;
+            const manual = listSort.expenses === "manual";
             return (
-              <div style={St.itemWrap} className="entryWrap" key={e.id}>
+              <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === "expenses" && dragItem.id === e.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={e.id} {...(manual ? dragRowProps("expenses", e.id) : {})}>
                 <div className="entry exp">
                   <span className="e-lead">
+                    <DragHandle active={manual} {...dragHandleProps("expenses", e.id)} />
                     <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || TXT.otherCategory} />
                     <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { category: ev.target.value })} style={St.catInput} />
                   </span>
@@ -813,13 +851,18 @@ export default function App() {
 
         {/* Savings goals */}
         <Collapsible id="sparen" title={TXT.savingsSection} icon={<PiggyBank size={16} style={{ color: C.save }} />} info={TXT.sav} total={eur(calc.savingsTotal)} open={open.sparen} onToggle={toggleSec} style={St.sectionExpenses}>
-          {cur.savings.map((s) => {
+          {cur.savings.length > 1 && <SortToggle kind="savings" mode={listSort.savings} onChange={(m) => setListSort("savings", m)} />}
+          {sortedSavings.map((s) => {
             const formulaActive = Boolean(s.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(s, cur))) : s.amount;
+            const manual = listSort.savings === "manual";
             return (
-              <div style={St.itemWrap} className="entryWrap" key={s.id}>
+              <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === "savings" && dragItem.id === s.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={s.id} {...(manual ? dragRowProps("savings", s.id) : {})}>
                 <div className="entry">
-                  <span className="e-lead"><span style={{ ...St.dot, background: categoryColor(s.label) }} /></span>
+                  <span className="e-lead">
+                    <DragHandle active={manual} {...dragHandleProps("savings", s.id)} />
+                    <span style={{ ...St.dot, background: categoryColor(s.label) }} />
+                  </span>
                   <input className="e-desc" aria-label={TXT.category} value={s.label} placeholder={TXT.categoryPlaceholder} onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`${TXT.savingsSection} · ${s.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                   <span className="entryActions" style={St.rowActions}>
@@ -934,6 +977,25 @@ function SubTotal({ monthly }) {
       <span style={St.subTotalVal}>{eur(monthly)} <span style={St.subTotalYr}>· {eur(monthly * 12)} {TXT.perYearShort}</span></span>
     </div>
   );
+}
+
+const SORT_LABELS = { manual: "sortManual", category: "sortByCategory", name: "sortByName" };
+function SortToggle({ kind, mode, onChange }) {
+  return (
+    <div style={St.sortRow}>
+      <span style={St.sortLabel}>{TXT.sortBy}</span>
+      <div style={St.toggle} role="group" aria-label={TXT.sortBy}>
+        {SORT_MODES[kind].map((m) => (
+          <button key={m} type="button" onClick={() => onChange(m)} style={{ ...St.toggleBtn, ...(mode === m ? St.toggleOn : {}) }}>{TXT[SORT_LABELS[m]]}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DragHandle({ active, ...dragProps }) {
+  if (!active) return null;
+  return <span {...dragProps} style={St.dragHandle} aria-label={TXT.dragHandle} title={TXT.dragHandle}><GripVertical size={14} /></span>;
 }
 
 function Collapsible({ id, title, icon, info, total, open, onToggle, children, style }) {
@@ -1347,6 +1409,7 @@ const St = {
   sortRow: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10, flexWrap: "wrap" },
   sortLabel: { fontSize: 12.5, color: C.muted, fontWeight: 600 },
   statsPeriodRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" },
+  dragHandle: { display: "inline-flex", alignItems: "center", color: C.muted, cursor: "grab", flexShrink: 0, touchAction: "none" },
 
   contribGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 },
   contribCard: { borderRadius: 14, padding: "14px 14px 13px" },
