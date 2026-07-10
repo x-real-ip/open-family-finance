@@ -823,7 +823,7 @@ export default function App() {
                     <span style={{ ...St.dot, background: C.gov }} />
                     <CorrespondentInput value={g.correspondent || ""} onChange={(v) => setListItem("govIncome", g.id, { correspondent: v })} onSync={syncCorrespondent} />
                   </span>
-                  <input className="e-desc" aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
+                  <input className={PAPERLESS_ENABLED ? "e-desc e-desc-narrow" : "e-desc"} aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
@@ -860,7 +860,7 @@ export default function App() {
                     <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { category: ev.target.value })} style={St.catInput} />
                     <CorrespondentInput value={e.correspondent || ""} onChange={(v) => setListItem("expenses", e.id, { correspondent: v })} onSync={syncCorrespondent} />
                   </span>
-                  <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
+                  <input className={PAPERLESS_ENABLED ? "e-desc e-desc-narrow" : "e-desc"} aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setListItem("expenses", e.id, { amount: v })} onPeriod={() => toggleItemPeriod("expenses", e.id)} onCommit={(o, n) => logChange(`${TXT.expensesSection} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={e.note || ""} onChange={(v) => setListItem("expenses", e.id, { note: v })} />
@@ -920,7 +920,7 @@ export default function App() {
                     <span style={{ ...St.dot, background: categoryColor(s.label) }} />
                     <CorrespondentInput value={s.correspondent || ""} onChange={(v) => setListItem("savings", s.id, { correspondent: v })} onSync={syncCorrespondent} />
                   </span>
-                  <input className="e-desc" aria-label={TXT.category} value={s.label} placeholder={TXT.categoryPlaceholder} onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
+                  <input className={PAPERLESS_ENABLED ? "e-desc e-desc-narrow" : "e-desc"} aria-label={TXT.category} value={s.label} placeholder={TXT.categoryPlaceholder} onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`${TXT.savingsSection} · ${s.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
@@ -1063,7 +1063,7 @@ function CorrespondentInput({ value, onChange, onSync }) {
     <input list="correspondents" aria-label={TXT.correspondent} value={value} placeholder={TXT.correspondentPlaceholder}
       onChange={(e) => onChange(e.target.value)}
       onBlur={(e) => onSync(e.target.value)}
-      style={St.catInput} />
+      style={St.corrInput} />
   );
 }
 
@@ -1531,6 +1531,7 @@ const St = {
   dot: { width: 10, height: 10, borderRadius: 999, flexShrink: 0 },
   nameInput: { flex: 1, minWidth: 90, border: "none", borderBottom: `1px solid ${C.line}`, background: "transparent", padding: "8px 2px", fontSize: 15, color: C.ink, fontFamily: "inherit", outline: "none" },
   catInput: { width: 104, flexShrink: 0, border: "none", borderBottom: `1px solid ${C.line}`, background: C.canvas, borderRadius: "6px 6px 0 0", padding: "8px 8px", fontSize: 12.5, color: C.muted, fontFamily: "inherit", outline: "none" },
+  corrInput: { width: 168, flexShrink: 0, border: "none", borderBottom: `1px solid ${C.line}`, background: C.canvas, borderRadius: "6px 6px 0 0", padding: "8px 8px", fontSize: 12.5, color: C.muted, fontFamily: "inherit", outline: "none" },
   derived: { fontSize: 12, color: C.muted, marginTop: 4, fontVariantNumeric: "tabular-nums" },
 
   amountField: { display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 },
@@ -1622,6 +1623,7 @@ input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outli
 .entry.exp { gap: 8px; }
 .entry .e-lead { display: contents; }
 .entry .e-desc { flex: 1; min-width: 90px; }
+.entry .e-desc.e-desc-narrow { min-width: 64px; }
 .entry .e-amount { display: inline-flex; flex-shrink: 0; }
 .entry .entryActions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
 @media (max-width: 560px) {
