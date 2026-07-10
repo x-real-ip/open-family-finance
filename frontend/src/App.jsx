@@ -538,7 +538,10 @@ export default function App() {
   const setMethod = (method) => editForward((f) => ({ ...f, method }), "__method");
   const setMarge = (margePct) => editForward((f) => ({ ...f, margePct }), "__marge");
   const setCustomPct = (customPct) => editForward((f) => ({ ...f, customPct }), "__customPct");
-  const setListItem = (k, id, patch) => editForward((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, ...clone(patch) } : x) }), id);
+  // Not cloned: patch is always a fresh object from the caller, and JSON-cloning would
+  // silently drop keys explicitly set to `undefined` (e.g. clearing a formula), since
+  // JSON.stringify omits undefined values instead of preserving them.
+  const setListItem = (k, id, patch) => editForward((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, ...patch } : x) }), id);
   const toggleItemPeriod = (k, id) => editForward((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x) }), id);
   const removeListItem = (k, id) => editForward((f) => ({ ...f, [k]: f[k].filter((x) => x.id !== id) }), id);
   const addListItem = (kind, item) => editForward((f) => (
