@@ -246,6 +246,9 @@ export default function App() {
   const [saved, setSaved] = useState(true);
   const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, verloop: true, log: false });
   const [showDetails, setShowDetails] = useState(false);
+  // null = unbounded, so the range always defaults to (and grows with) all available months.
+  const [statsFrom, setStatsFrom] = useState(null);
+  const [statsTo, setStatsTo] = useState(null);
   const [theme, setTheme] = useState(() => {
     if (typeof window === "undefined") return "light";
     const stored = window.localStorage.getItem("open-family-finance:theme");
@@ -317,6 +320,9 @@ export default function App() {
       inlegA: Math.round(t.transferA), inlegB: Math.round(t.transferB),
     };
   }), [sortedMonths, data.months]);
+
+  const statsSeries = useMemo(() => series.filter((s) => (!statsFrom || s.key >= statsFrom) && (!statsTo || s.key <= statsTo)), [series, statsFrom, statsTo]);
+  const statsFiltered = Boolean(statsFrom || statsTo);
 
   const byCategory = useMemo(() => {
     const map = {};
@@ -625,7 +631,28 @@ export default function App() {
 
         {/* Statistics */}
         <Collapsible id="verloop" title={TXT.statistics} total={t(LANG, "months", { count: sortedMonths.length })} open={open.verloop} onToggle={toggleSec}>
-          {series.length < 2 ? (
+          {sortedMonths.length >= 2 && (
+            <div style={St.statsPeriodRow}>
+              <span style={St.sortLabel}>{TXT.statsPeriod}</span>
+              <select
+                value={statsFrom || sortedMonths[0]}
+                onChange={(e) => { const v = e.target.value; setStatsFrom(v === sortedMonths[0] ? null : v); if (v > (statsTo || sortedMonths[sortedMonths.length - 1])) setStatsTo(null); }}
+                style={St.copySel} aria-label={TXT.statsPeriodFrom}>
+                {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
+              </select>
+              <span style={St.sortLabel}>–</span>
+              <select
+                value={statsTo || sortedMonths[sortedMonths.length - 1]}
+                onChange={(e) => { const v = e.target.value; setStatsTo(v === sortedMonths[sortedMonths.length - 1] ? null : v); if (v < (statsFrom || sortedMonths[0])) setStatsFrom(null); }}
+                style={St.copySel} aria-label={TXT.statsPeriodTo}>
+                {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
+              </select>
+              {statsFiltered && (
+                <button type="button" onClick={() => { setStatsFrom(null); setStatsTo(null); }} style={St.resetBtn}><RotateCcw size={13} /> {TXT.statsPeriodReset}</button>
+              )}
+            </div>
+          )}
+          {statsSeries.length < 2 ? (
             <div style={St.emptyHist}>
               <TrendingUp size={18} style={{ color: C.muted }} />
               <span>{TXT.noSeries}</span>
@@ -635,7 +662,7 @@ export default function App() {
               <ChartTitle>{TXT.incomePerMonth}</ChartTitle>
               <div style={St.chartBox}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={series} margin={{ top: 6, right: 4, left: -14, bottom: 0 }}>
+                  <BarChart data={statsSeries} margin={{ top: 6, right: 4, left: -14, bottom: 0 }}>
                     <CartesianGrid stroke={C.line} vertical={false} />
                     <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
                     <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
@@ -648,7 +675,7 @@ export default function App() {
               <ChartTitle>{TXT.monthTotals}</ChartTitle>
               <div style={St.chartBox}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={series} margin={{ top: 6, right: 8, left: -14, bottom: 0 }}>
+                  <BarChart data={statsSeries} margin={{ top: 6, right: 8, left: -14, bottom: 0 }}>
                     <CartesianGrid stroke={C.line} vertical={false} />
                     <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
                     <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
@@ -1319,6 +1346,7 @@ const St = {
   toggleOn: { background: C.card, color: C.ink, boxShadow: "0 1px 3px rgba(0,0,0,0.10)" },
   sortRow: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10, flexWrap: "wrap" },
   sortLabel: { fontSize: 12.5, color: C.muted, fontWeight: 600 },
+  statsPeriodRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" },
 
   contribGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 },
   contribCard: { borderRadius: 14, padding: "14px 14px 13px" },
