@@ -224,14 +224,16 @@ function migrateFig(f) {
     overrides: (f.overrides && typeof f.overrides === "object") ? { ...f.overrides } : {},
   };
 }
-function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [] }; }
+const EXPENSE_SORTS = ["manual", "category", "name"];
+const expenseSortOf = (raw) => (EXPENSE_SORTS.includes(raw) ? raw : "manual");
+function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], expenseSort: "manual" }; }
 function normalize(raw) {
   if (!raw) return freshData();
   if (raw.months && raw.selectedMonth) {
     const months = {}; for (const [k, v] of Object.entries(raw.months)) months[k] = migrateFig(v);
-    return { selectedMonth: raw.selectedMonth, months, log: raw.log || [] };
+    return { selectedMonth: raw.selectedMonth, months, log: raw.log || [], expenseSort: expenseSortOf(raw.expenseSort) };
   }
-  if (raw.partners) { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: migrateFig(raw) }, log: [] }; }
+  if (raw.partners) { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: migrateFig(raw) }, log: [], expenseSort: "manual" }; }
   return freshData();
 }
 
@@ -321,6 +323,15 @@ export default function App() {
     for (const e of cur.expenses) map[e.category || TXT.otherCategory] = (map[e.category || TXT.otherCategory] || 0) + monthlyOf(e, cur);
     return Object.entries(map).sort((x, y) => y[1] - x[1]);
   }, [cur]);
+
+  // Display order only — mutations always address entries by id, so this never touches storage.
+  const expenseSort = data.expenseSort || "manual";
+  const sortedExpenses = useMemo(() => {
+    if (expenseSort === "manual") return cur.expenses;
+    const key = (e) => (expenseSort === "category" ? e.category || TXT.otherCategory : e.label || TXT.unnamed);
+    return cur.expenses.slice().sort((a, b) => key(a).localeCompare(key(b), undefined, { sensitivity: "base" }) || (a.label || "").localeCompare(b.label || "", undefined, { sensitivity: "base" }));
+  }, [cur.expenses, expenseSort]);
+  const setExpenseSort = (mode) => setData((d) => ({ ...d, expenseSort: mode }));
 
   // Existing category names across all months, for autocomplete suggestions.
   const categories = useMemo(() => {
@@ -708,7 +719,17 @@ export default function App() {
         <ColTitle>{TXT.expensesSection}</ColTitle>
         {/* Expenses */}
         <Collapsible id="uitgaven" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec} style={St.sectionExpenses}>
-          {cur.expenses.map((e) => {
+          {cur.expenses.length > 1 && (
+            <div style={St.sortRow}>
+              <span style={St.sortLabel}>{TXT.sortBy}</span>
+              <div style={St.toggle} role="group" aria-label={TXT.sortBy}>
+                <button type="button" onClick={() => setExpenseSort("manual")} style={{ ...St.toggleBtn, ...(expenseSort === "manual" ? St.toggleOn : {}) }}>{TXT.sortManual}</button>
+                <button type="button" onClick={() => setExpenseSort("category")} style={{ ...St.toggleBtn, ...(expenseSort === "category" ? St.toggleOn : {}) }}>{TXT.sortByCategory}</button>
+                <button type="button" onClick={() => setExpenseSort("name")} style={{ ...St.toggleBtn, ...(expenseSort === "name" ? St.toggleOn : {}) }}>{TXT.sortByName}</button>
+              </div>
+            </div>
+          )}
+          {sortedExpenses.map((e) => {
             const formulaActive = Boolean(e.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(e, cur))) : e.amount;
             return (
@@ -1296,6 +1317,8 @@ const St = {
   toggle: { display: "inline-flex", background: C.canvas, borderRadius: 999, padding: 3 },
   toggleBtn: { border: "none", background: "transparent", padding: "7px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, color: C.muted, cursor: "pointer", fontFamily: "inherit" },
   toggleOn: { background: C.card, color: C.ink, boxShadow: "0 1px 3px rgba(0,0,0,0.10)" },
+  sortRow: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10, flexWrap: "wrap" },
+  sortLabel: { fontSize: 12.5, color: C.muted, fontWeight: 600 },
 
   contribGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 },
   contribCard: { borderRadius: 14, padding: "14px 14px 13px" },
