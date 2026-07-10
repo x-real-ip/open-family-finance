@@ -2,8 +2,8 @@
  * Open Family Finance — the whole UI lives in this file.
  *
  * Reading guide (top to bottom):
- *   Design tokens .... colors (C) and UI texts (TXT)
- *   Helpers .......... numbers, currency (nl-NL) and month keys
+ *   Design tokens .... colors (C); UI texts (TXT) live in ./i18n and ./locales
+ *   Helpers .......... numbers, currency and month keys
  *   Core calculation . computeTotals: the fair split
  *   Data model ....... per-month figures + migration/normalization
  *   App .............. state, mutations and page layout
@@ -29,6 +29,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 import { storage } from "./api";
+import { LANG, TXT, t, getRuntimeCurrencyLocale, getRuntimeDateLocale } from "./i18n";
 
 /* ----------------------------------------------------------------
    Design tokens
@@ -50,256 +51,6 @@ function categoryColor(name) {
   const hue = h % 360, sat = 50 + ((h >>> 9) % 30), light = 42 + ((h >>> 17) % 14);
   return `hsl(${hue}, ${sat}%, ${light}%)`;
 }
-
-const LOCALIZATION = {
-  nl: {
-    dateLocale: "nl-NL",
-    currencyLocale: "nl-NL",
-    text: {
-      appTitle: "Open Family Finance",
-      bylineCreatedBy: "gemaakt door",
-      sourceOnGitHub: "source op GitHub",
-      themeLight: "Licht",
-      themeDark: "Donker",
-      previousMonth: "Vorige maand",
-      nextMonth: "Volgende maand",
-      chooseMonth: "Kies een maand",
-      currentMonth: "Huidige maand",
-      distributionMethod: "Verdeelmethode",
-      incomeMethod: "Naar inkomen",
-      equalMethod: "50 / 50",
-      keepsLeft: "Houdt zelf over",
-      howComputed: "Hoe is dit berekend?",
-      howComputedHeader: "Onder hoe is dit berekend",
-      expenses: "Uitgaven",
-      savings: "Sparen",
-      subtotalExpensesSavings: "Subtotaal uitgaven + sparen",
-      governmentBenefit: "− Overheidsbijdrage",
-      coupleFunds: "= Samen te financieren",
-      buffer: "+ Buffer (marge {pct}%)",
-      bufferMarginTransfer: "Buffer-marge per overboeking",
-      salary: "Vul het netto salaris per persoon in (wat er maandelijks op de rekening komt). Tik op een naam om die te wijzigen; die geldt voor alle maanden.",
-      model: "Uitgaven plus sparen, min de overheidsbijdrage, is wat jullie samen financieren. Dat verdelen we naar inkomen, plus een kleine buffer.",
-      fair: "Wie meer verdient, legt naar verhouding meer in. Na de overboeking houdt ieder hetzelfde percentage van het eigen salaris over.",
-      gov: "Toeslagen (kinderbijslag e.d.) komen binnen op de gezamenlijke rekening en verlagen het bedrag dat jullie zelf moeten inleggen.",
-      exp: "Kies of typ een categorie. Tik /mnd of /jr om per maand of per jaar in te vullen. Het percentage is het aandeel binnen deze sectie.",
-      sav: "Maandelijkse inleg per spaardoel. Tik /mnd of /jr om de invoer te wisselen. Telt mee in wat jullie samen financieren.",
-      incomes: "Inkomsten",
-      salarySection: "Salaris",
-      government: "Overheidsbijdrage",
-      addGovernment: "Toeslag toevoegen",
-      expensesSection: "Uitgaven",
-      fixedCosts: "Vaste lasten",
-      addExpense: "Uitgave toevoegen",
-      perCategory: "Per categorie",
-      incomeSplit: "Inkomen",
-      contributionSplit: "Inleg",
-      marginPercentage: "Marge percentage",
-      savingsSection: "Spaardoelen",
-      addSaving: "Spaardoel toevoegen",
-      statistics: "Statistieken",
-      noSeries: "Blader met de pijlen naar een volgende maand om je cijfers bij te werken. Vanaf twee maanden verschijnen hier de grafieken.",
-      incomePerMonth: "Inleg per maand",
-      monthTotals: "Maandtotalen",
-      logbook: "Logboek",
-      loading: "Laden…",
-      saved: "Opgeslagen",
-      saving: "Opslaan…",
-      restoreThisMonth: "Deze maand herstellen",
-      copyMonth: "Maand kopiëren naar…",
-      noPrevMonths: "Er zijn geen eerdere maanden om naartoe te kopiëren.",
-      copyAmount: "Bedrag kopiëren naar…",
-      noMonthsToCopy: "Er zijn nog geen andere maanden om naar te kopiëren.",
-      copyAll: "Alles",
-      copyNone: "Niets",
-      selectSource: "Kies een bronregel",
-      addOperation: "Voeg bewerking toe",
-      save: "Opslaan",
-      delete: "Verwijder",
-      minus: "min",
-      plus: "plus",
-      times: "keer",
-      divide: "gedeeld door",
-      descriptionPlaceholder: "Omschrijving",
-      categoryPlaceholder: "Categorie",
-      notePlaceholder: "Notitie bij deze uitgave…",
-      openLink: "Open link ↗",
-      sourceRule: "Bronregel",
-      sourceLabel: "Bron",
-      preview: "Voorbeeld",
-      bufferMarginPct: "Buffer-marge (%)",
-      noHistory: "Te weinig data — dit verschijnt zodra deze regel in meerdere maanden een bedrag heeft.",
-      perMonth: "per maand",
-      perYear: "per jaar",
-      periodMonthAbbr: "/mnd",
-      periodYearAbbr: "/jr",
-      total: "Totaal",
-      copy: "Kopiëren",
-      amount: "Bedrag",
-      category: "Categorie",
-      description: "Omschrijving",
-      note: "Notitie",
-      link: "Link",
-      source: "Bron",
-      nowTag: "nu",
-      toDivide: "te verdelen",
-      logEmpty: "Nog geen wijzigingen vastgelegd. Aanpassingen aan bedragen verschijnen hier met datum, tijd, het gewijzigde veld en de oude en nieuwe waarde.",
-      months: "{count} mnd",
-      makesOver: "maakt over · {value} p/j",
-      perYearShort: "p/j",
-      partnerName: "Naam partner {n}",
-      partnerPlaceholder: "Partner {n}",
-      themeToggle: "Schakel over naar {theme} thema",
-      help: "Uitleg",
-      periodToggle: "Per maand of per jaar invullen",
-      copyAmountAria: "Bedrag kopiëren naar andere maanden",
-      copyMonthAria: "Huidige maand kopiëren naar eerdere maanden",
-      deleteMonth: "Verwijder maand",
-      trendNoChange: "Geen verandering t.o.v. de vorige maand",
-      trendHigher: "Hoger dan de vorige maand",
-      trendLower: "Lager dan de vorige maand",
-      unnamed: "naamloos",
-      otherCategory: "Overig",
-      restoreMonthFromPrevious: "Cijfers van {month} terugzetten naar die van {source}? Handmatige aanpassingen in deze maand vervallen.",
-      restoreMonthFromEmpty: "Cijfers van {month} terugzetten naar het lege voorbeeld? (er is geen eerdere maand om van over te nemen)",
-      priceTrend: "Prijsverloop",
-    },
-  },
-  en: {
-    dateLocale: "en",
-    currencyLocale: "en-GB",
-    text: {
-      appTitle: "Open Family Finance",
-      bylineCreatedBy: "created by",
-      sourceOnGitHub: "source on GitHub",
-      themeLight: "Light",
-      themeDark: "Dark",
-      previousMonth: "Previous month",
-      nextMonth: "Next month",
-      chooseMonth: "Choose a month",
-      currentMonth: "Current month",
-      distributionMethod: "Distribution method",
-      incomeMethod: "By income",
-      equalMethod: "50 / 50",
-      keepsLeft: "Keeps left",
-      howComputed: "How is this calculated?",
-      howComputedHeader: "How this is calculated",
-      expenses: "Expenses",
-      savings: "Savings",
-      subtotalExpensesSavings: "Subtotal expenses + savings",
-      governmentBenefit: "− Government support",
-      coupleFunds: "= Shared contribution",
-      buffer: "+ Buffer (margin {pct}%)",
-      bufferMarginTransfer: "Buffer margin per transfer",
-      salary: "Enter the net salary per person (monthly). Tap a name to change it; it applies to all months.",
-      model: "Expenses plus savings, minus government support, is what you finance together. Split by income share, plus a small buffer.",
-      fair: "Higher earners contribute proportionally more. After transfer, each keeps the same share of their salary.",
-      gov: "Benefits (child allowance, etc.) arrive on the shared account and reduce what you need to contribute.",
-      exp: "Type or choose a category. Use /mo or /yr for monthly/yearly input. Percentage is the share within this section.",
-      sav: "Monthly savings goals. Use /mo or /yr to switch monthly/yearly input. Counts toward what you finance together.",
-      incomes: "Income",
-      salarySection: "Salary",
-      government: "Government support",
-      addGovernment: "Add benefit",
-      expensesSection: "Expenses",
-      fixedCosts: "Fixed costs",
-      addExpense: "Add expense",
-      perCategory: "By category",
-      incomeSplit: "Income",
-      contributionSplit: "Contribution",
-      marginPercentage: "Margin percentage",
-      savingsSection: "Savings goals",
-      addSaving: "Add savings goal",
-      statistics: "Statistics",
-      noSeries: "Navigate with the arrows to update your numbers. Charts appear once there are two or more months.",
-      incomePerMonth: "Contribution per month",
-      monthTotals: "Monthly totals",
-      logbook: "Change log",
-      loading: "Loading…",
-      saved: "Saved",
-      saving: "Saving…",
-      restoreThisMonth: "Restore this month",
-      copyMonth: "Copy month to…",
-      noPrevMonths: "There are no earlier months to copy to.",
-      copyAmount: "Copy amount to…",
-      noMonthsToCopy: "There are no other months to copy to yet.",
-      copyAll: "All",
-      copyNone: "None",
-      selectSource: "Choose a source row",
-      addOperation: "Add operation",
-      save: "Save",
-      delete: "Delete",
-      minus: "minus",
-      plus: "plus",
-      times: "times",
-      divide: "divide",
-      descriptionPlaceholder: "Description",
-      categoryPlaceholder: "Category",
-      notePlaceholder: "Note for this item…",
-      openLink: "Open link ↗",
-      sourceRule: "Source row",
-      sourceLabel: "Source",
-      preview: "Preview",
-      bufferMarginPct: "Buffer margin (%)",
-      noHistory: "Not enough data — this appears once this item has a value in multiple months.",
-      perMonth: "per month",
-      perYear: "per year",
-      periodMonthAbbr: "/mo",
-      periodYearAbbr: "/yr",
-      total: "Total",
-      copy: "Copy",
-      amount: "Amount",
-      category: "Category",
-      description: "Description",
-      note: "Note",
-      link: "Link",
-      source: "Source",
-      nowTag: "now",
-      toDivide: "to divide",
-      logEmpty: "Not enough changes recorded yet. Value changes appear here with date, time, field, old and new value.",
-      months: "{count} months",
-      makesOver: "makes over · {value} p/y",
-      perYearShort: "p/y",
-      partnerName: "Partner {n}",
-      partnerPlaceholder: "Partner {n}",
-      themeToggle: "Switch to {theme} theme",
-      help: "Help",
-      periodToggle: "Fill monthly or yearly",
-      copyAmountAria: "Copy amount to other months",
-      copyMonthAria: "Copy current month to previous months",
-      deleteMonth: "Delete month",
-      trendNoChange: "No change vs. the previous month",
-      trendHigher: "Higher than the previous month",
-      trendLower: "Lower than the previous month",
-      unnamed: "unnamed",
-      otherCategory: "Other",
-      restoreMonthFromPrevious: "Restore {month} to the figures of {source}? Manual changes in this month will be lost.",
-      restoreMonthFromEmpty: "Restore {month} to the empty example? (there is no earlier month to copy from)",
-      priceTrend: "Price trend",
-    },
-  },
-};
-
-const DEFAULT_LANGUAGE = "nl";
-const SUPPORTED_LANGUAGES = ["nl", "en"];
-function getRuntimeLanguage() {
-  if (typeof window === "undefined") return DEFAULT_LANGUAGE;
-  const raw = String(window.__ENV__?.LANGUAGE || DEFAULT_LANGUAGE).toLowerCase();
-  return SUPPORTED_LANGUAGES.includes(raw) ? raw : DEFAULT_LANGUAGE;
-}
-function getRuntimeCurrencyLocale() {
-  return LOCALIZATION[getRuntimeLanguage()]?.currencyLocale || LOCALIZATION[DEFAULT_LANGUAGE].currencyLocale;
-}
-function getRuntimeDateLocale() {
-  return LOCALIZATION[getRuntimeLanguage()]?.dateLocale || LOCALIZATION[DEFAULT_LANGUAGE].dateLocale;
-}
-function t(lang, key, vars = {}) {
-  const template = (LOCALIZATION[lang]?.text?.[key] || LOCALIZATION[DEFAULT_LANGUAGE].text[key] || key);
-  return Object.entries(vars).reduce((s, [placeholder, value]) => s.replace(`{${placeholder}}`, value), template);
-}
-
-const LANG = getRuntimeLanguage();
-const TXT = LOCALIZATION[LANG]?.text || LOCALIZATION[DEFAULT_LANGUAGE].text;
 
 /* Empty defaults. Real amounts are stored in the database, not in the
    code, so this repository can be public. */
@@ -492,8 +243,6 @@ export default function App() {
   const [saved, setSaved] = useState(true);
   const [open, setOpen] = useState({ inkomen: true, overheid: true, uitgaven: true, sparen: true, verloop: true, log: false });
   const [showDetails, setShowDetails] = useState(false);
-  const lang = getRuntimeLanguage();
-  const TXT = LOCALIZATION[lang]?.text || LOCALIZATION[DEFAULT_LANGUAGE].text;
   const [theme, setTheme] = useState(() => {
     if (typeof window === "undefined") return "light";
     const stored = window.localStorage.getItem("open-family-finance:theme");
@@ -508,8 +257,8 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    document.documentElement.lang = lang;
-  }, [lang]);
+    document.documentElement.lang = LANG;
+  }, []);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("open-family-finance:theme");
