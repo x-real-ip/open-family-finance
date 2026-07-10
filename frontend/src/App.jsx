@@ -51,14 +51,255 @@ function categoryColor(name) {
   return `hsl(${hue}, ${sat}%, ${light}%)`;
 }
 
-const TXT = {
-  salary: "Vul het netto salaris per persoon in (wat er maandelijks op de rekening komt). Tik op een naam om die te wijzigen; die geldt voor alle maanden.",
-  model: "Uitgaven plus sparen, min de overheidsbijdrage, is wat jullie samen financieren. Dat verdelen we naar inkomen, plus een kleine buffer.",
-  fair: "Wie meer verdient, legt naar verhouding meer in. Na de overboeking houdt ieder hetzelfde percentage van het eigen salaris over.",
-  gov: "Toeslagen (kinderbijslag e.d.) komen binnen op de gezamenlijke rekening en verlagen het bedrag dat jullie zelf moeten inleggen.",
-  exp: "Kies of typ een categorie. Tik /mnd of /jr om per maand of per jaar in te vullen. Het percentage is het aandeel binnen deze sectie.",
-  sav: "Maandelijkse inleg per spaardoel. Tik /mnd of /jr om de invoer te wisselen. Telt mee in wat jullie samen financieren.",
+const LOCALIZATION = {
+  nl: {
+    dateLocale: "nl-NL",
+    currencyLocale: "nl-NL",
+    text: {
+      appTitle: "Open Family Finance",
+      bylineCreatedBy: "gemaakt door",
+      sourceOnGitHub: "source op GitHub",
+      themeLight: "Licht",
+      themeDark: "Donker",
+      previousMonth: "Vorige maand",
+      nextMonth: "Volgende maand",
+      chooseMonth: "Kies een maand",
+      currentMonth: "Huidige maand",
+      distributionMethod: "Verdeelmethode",
+      incomeMethod: "Naar inkomen",
+      equalMethod: "50 / 50",
+      keepsLeft: "Houdt zelf over",
+      howComputed: "Hoe is dit berekend?",
+      howComputedHeader: "Onder hoe is dit berekend",
+      expenses: "Uitgaven",
+      savings: "Sparen",
+      subtotalExpensesSavings: "Subtotaal uitgaven + sparen",
+      governmentBenefit: "− Overheidsbijdrage",
+      coupleFunds: "= Samen te financieren",
+      buffer: "+ Buffer (marge {pct}%)",
+      bufferMarginTransfer: "Buffer-marge per overboeking",
+      salary: "Vul het netto salaris per persoon in (wat er maandelijks op de rekening komt). Tik op een naam om die te wijzigen; die geldt voor alle maanden.",
+      model: "Uitgaven plus sparen, min de overheidsbijdrage, is wat jullie samen financieren. Dat verdelen we naar inkomen, plus een kleine buffer.",
+      fair: "Wie meer verdient, legt naar verhouding meer in. Na de overboeking houdt ieder hetzelfde percentage van het eigen salaris over.",
+      gov: "Toeslagen (kinderbijslag e.d.) komen binnen op de gezamenlijke rekening en verlagen het bedrag dat jullie zelf moeten inleggen.",
+      exp: "Kies of typ een categorie. Tik /mnd of /jr om per maand of per jaar in te vullen. Het percentage is het aandeel binnen deze sectie.",
+      sav: "Maandelijkse inleg per spaardoel. Tik /mnd of /jr om de invoer te wisselen. Telt mee in wat jullie samen financieren.",
+      incomes: "Inkomsten",
+      salarySection: "Salaris",
+      government: "Overheidsbijdrage",
+      addGovernment: "Toeslag toevoegen",
+      expensesSection: "Uitgaven",
+      fixedCosts: "Vaste lasten",
+      addExpense: "Uitgave toevoegen",
+      perCategory: "Per categorie",
+      incomeSplit: "Inkomen",
+      contributionSplit: "Inleg",
+      marginPercentage: "Marge percentage",
+      savingsSection: "Spaardoelen",
+      addSaving: "Spaardoel toevoegen",
+      statistics: "Statistieken",
+      noSeries: "Blader met de pijlen naar een volgende maand om je cijfers bij te werken. Vanaf twee maanden verschijnen hier de grafieken.",
+      incomePerMonth: "Inleg per maand",
+      monthTotals: "Maandtotalen",
+      logbook: "Logboek",
+      loading: "Laden…",
+      saved: "Opgeslagen",
+      saving: "Opslaan…",
+      restoreThisMonth: "Deze maand herstellen",
+      copyMonth: "Maand kopiëren naar…",
+      noPrevMonths: "Er zijn geen eerdere maanden om naartoe te kopiëren.",
+      copyAmount: "Bedrag kopiëren naar…",
+      noMonthsToCopy: "Er zijn nog geen andere maanden om naar te kopiëren.",
+      copyAll: "Alles",
+      copyNone: "Niets",
+      selectSource: "Kies een bronregel",
+      addOperation: "Voeg bewerking toe",
+      save: "Opslaan",
+      delete: "Verwijder",
+      minus: "min",
+      plus: "plus",
+      times: "keer",
+      divide: "gedeeld door",
+      descriptionPlaceholder: "Omschrijving",
+      categoryPlaceholder: "Categorie",
+      notePlaceholder: "Notitie bij deze uitgave…",
+      openLink: "Open link ↗",
+      sourceRule: "Bronregel",
+      sourceLabel: "Bron",
+      preview: "Voorbeeld",
+      bufferMarginPct: "Buffer-marge (%)",
+      noHistory: "Te weinig data — dit verschijnt zodra deze regel in meerdere maanden een bedrag heeft.",
+      perMonth: "per maand",
+      perYear: "per jaar",
+      periodMonthAbbr: "/mnd",
+      periodYearAbbr: "/jr",
+      total: "Totaal",
+      copy: "Kopiëren",
+      amount: "Bedrag",
+      category: "Categorie",
+      description: "Omschrijving",
+      note: "Notitie",
+      link: "Link",
+      source: "Bron",
+      nowTag: "nu",
+      toDivide: "te verdelen",
+      logEmpty: "Nog geen wijzigingen vastgelegd. Aanpassingen aan bedragen verschijnen hier met datum, tijd, het gewijzigde veld en de oude en nieuwe waarde.",
+      months: "{count} mnd",
+      makesOver: "maakt over · {value} p/j",
+      perYearShort: "p/j",
+      partnerName: "Naam partner {n}",
+      partnerPlaceholder: "Partner {n}",
+      themeToggle: "Schakel over naar {theme} thema",
+      help: "Uitleg",
+      periodToggle: "Per maand of per jaar invullen",
+      copyAmountAria: "Bedrag kopiëren naar andere maanden",
+      copyMonthAria: "Huidige maand kopiëren naar eerdere maanden",
+      deleteMonth: "Verwijder maand",
+      trendNoChange: "Geen verandering t.o.v. de vorige maand",
+      trendHigher: "Hoger dan de vorige maand",
+      trendLower: "Lager dan de vorige maand",
+      unnamed: "naamloos",
+      otherCategory: "Overig",
+      restoreMonthFromPrevious: "Cijfers van {month} terugzetten naar die van {source}? Handmatige aanpassingen in deze maand vervallen.",
+      restoreMonthFromEmpty: "Cijfers van {month} terugzetten naar het lege voorbeeld? (er is geen eerdere maand om van over te nemen)",
+      priceTrend: "Prijsverloop",
+    },
+  },
+  en: {
+    dateLocale: "en",
+    currencyLocale: "en-GB",
+    text: {
+      appTitle: "Open Family Finance",
+      bylineCreatedBy: "created by",
+      sourceOnGitHub: "source on GitHub",
+      themeLight: "Light",
+      themeDark: "Dark",
+      previousMonth: "Previous month",
+      nextMonth: "Next month",
+      chooseMonth: "Choose a month",
+      currentMonth: "Current month",
+      distributionMethod: "Distribution method",
+      incomeMethod: "By income",
+      equalMethod: "50 / 50",
+      keepsLeft: "Keeps left",
+      howComputed: "How is this calculated?",
+      howComputedHeader: "How this is calculated",
+      expenses: "Expenses",
+      savings: "Savings",
+      subtotalExpensesSavings: "Subtotal expenses + savings",
+      governmentBenefit: "− Government support",
+      coupleFunds: "= Shared contribution",
+      buffer: "+ Buffer (margin {pct}%)",
+      bufferMarginTransfer: "Buffer margin per transfer",
+      salary: "Enter the net salary per person (monthly). Tap a name to change it; it applies to all months.",
+      model: "Expenses plus savings, minus government support, is what you finance together. Split by income share, plus a small buffer.",
+      fair: "Higher earners contribute proportionally more. After transfer, each keeps the same share of their salary.",
+      gov: "Benefits (child allowance, etc.) arrive on the shared account and reduce what you need to contribute.",
+      exp: "Type or choose a category. Use /mo or /yr for monthly/yearly input. Percentage is the share within this section.",
+      sav: "Monthly savings goals. Use /mo or /yr to switch monthly/yearly input. Counts toward what you finance together.",
+      incomes: "Income",
+      salarySection: "Salary",
+      government: "Government support",
+      addGovernment: "Add benefit",
+      expensesSection: "Expenses",
+      fixedCosts: "Fixed costs",
+      addExpense: "Add expense",
+      perCategory: "By category",
+      incomeSplit: "Income",
+      contributionSplit: "Contribution",
+      marginPercentage: "Margin percentage",
+      savingsSection: "Savings goals",
+      addSaving: "Add savings goal",
+      statistics: "Statistics",
+      noSeries: "Navigate with the arrows to update your numbers. Charts appear once there are two or more months.",
+      incomePerMonth: "Contribution per month",
+      monthTotals: "Monthly totals",
+      logbook: "Change log",
+      loading: "Loading…",
+      saved: "Saved",
+      saving: "Saving…",
+      restoreThisMonth: "Restore this month",
+      copyMonth: "Copy month to…",
+      noPrevMonths: "There are no earlier months to copy to.",
+      copyAmount: "Copy amount to…",
+      noMonthsToCopy: "There are no other months to copy to yet.",
+      copyAll: "All",
+      copyNone: "None",
+      selectSource: "Choose a source row",
+      addOperation: "Add operation",
+      save: "Save",
+      delete: "Delete",
+      minus: "minus",
+      plus: "plus",
+      times: "times",
+      divide: "divide",
+      descriptionPlaceholder: "Description",
+      categoryPlaceholder: "Category",
+      notePlaceholder: "Note for this item…",
+      openLink: "Open link ↗",
+      sourceRule: "Source row",
+      sourceLabel: "Source",
+      preview: "Preview",
+      bufferMarginPct: "Buffer margin (%)",
+      noHistory: "Not enough data — this appears once this item has a value in multiple months.",
+      perMonth: "per month",
+      perYear: "per year",
+      periodMonthAbbr: "/mo",
+      periodYearAbbr: "/yr",
+      total: "Total",
+      copy: "Copy",
+      amount: "Amount",
+      category: "Category",
+      description: "Description",
+      note: "Note",
+      link: "Link",
+      source: "Source",
+      nowTag: "now",
+      toDivide: "to divide",
+      logEmpty: "Not enough changes recorded yet. Value changes appear here with date, time, field, old and new value.",
+      months: "{count} months",
+      makesOver: "makes over · {value} p/y",
+      perYearShort: "p/y",
+      partnerName: "Partner {n}",
+      partnerPlaceholder: "Partner {n}",
+      themeToggle: "Switch to {theme} theme",
+      help: "Help",
+      periodToggle: "Fill monthly or yearly",
+      copyAmountAria: "Copy amount to other months",
+      copyMonthAria: "Copy current month to previous months",
+      deleteMonth: "Delete month",
+      trendNoChange: "No change vs. the previous month",
+      trendHigher: "Higher than the previous month",
+      trendLower: "Lower than the previous month",
+      unnamed: "unnamed",
+      otherCategory: "Other",
+      restoreMonthFromPrevious: "Restore {month} to the figures of {source}? Manual changes in this month will be lost.",
+      restoreMonthFromEmpty: "Restore {month} to the empty example? (there is no earlier month to copy from)",
+      priceTrend: "Price trend",
+    },
+  },
 };
+
+const DEFAULT_LANGUAGE = "nl";
+const SUPPORTED_LANGUAGES = ["nl", "en"];
+function getRuntimeLanguage() {
+  if (typeof window === "undefined") return DEFAULT_LANGUAGE;
+  const raw = String(window.__ENV__?.LANGUAGE || DEFAULT_LANGUAGE).toLowerCase();
+  return SUPPORTED_LANGUAGES.includes(raw) ? raw : DEFAULT_LANGUAGE;
+}
+function getRuntimeCurrencyLocale() {
+  return LOCALIZATION[getRuntimeLanguage()]?.currencyLocale || LOCALIZATION[DEFAULT_LANGUAGE].currencyLocale;
+}
+function getRuntimeDateLocale() {
+  return LOCALIZATION[getRuntimeLanguage()]?.dateLocale || LOCALIZATION[DEFAULT_LANGUAGE].dateLocale;
+}
+function t(lang, key, vars = {}) {
+  const template = (LOCALIZATION[lang]?.text?.[key] || LOCALIZATION[DEFAULT_LANGUAGE].text[key] || key);
+  return Object.entries(vars).reduce((s, [placeholder, value]) => s.replace(`{${placeholder}}`, value), template);
+}
+
+const LANG = getRuntimeLanguage();
+const TXT = LOCALIZATION[LANG]?.text || LOCALIZATION[DEFAULT_LANGUAGE].text;
 
 /* Empty defaults. Real amounts are stored in the database, not in the
    code, so this repository can be public. */
@@ -66,8 +307,8 @@ const DEFAULT_FIGURES = {
   method: "income",
   margePct: "0.5",
   partners: [
-    { id: "p1", name: "Partner 1", income: "", period: "month", note: "", url: "" },
-    { id: "p2", name: "Partner 2", income: "", period: "month", note: "", url: "" },
+    { id: "p1", name: "", income: "", period: "month", note: "", url: "" },
+    { id: "p2", name: "", income: "", period: "month", note: "", url: "" },
   ],
   govIncome: [],
   expenses: [],
@@ -131,8 +372,12 @@ const flip = (amountStr, fromPeriod) => String(round2(fromPeriod === "year" ? nu
 const pctOf = (part, whole) => (whole > 0 ? part / whole : null);
 
 // — formatting (nl-NL) —
-const eur = (n) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(isFinite(n) ? n : 0);
-const eur0 = (n) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(isFinite(n) ? n : 0);
+function eur(n, locale = getRuntimeCurrencyLocale()) {
+  return new Intl.NumberFormat(locale, { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(isFinite(n) ? n : 0);
+}
+function eur0(n, locale = getRuntimeCurrencyLocale()) {
+  return new Intl.NumberFormat(locale, { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(isFinite(n) ? n : 0);
+}
 const pct = (x) => `${Math.round(x * 100)}%`;
 const uid = () => Math.random().toString(36).slice(2, 9);
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -172,9 +417,9 @@ const mobilePopupStyle = (base) => {
 const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 const keyToDate = (k) => { const [y, m] = k.split("-").map(Number); return new Date(y, m - 1, 1); };
 const shiftMonth = (k, delta) => { const d = keyToDate(k); d.setMonth(d.getMonth() + delta); return monthKey(d); };
-const monthLong = (k) => new Intl.DateTimeFormat("nl-NL", { month: "long", year: "numeric" }).format(keyToDate(k));
-const monthShort = (k) => { const d = keyToDate(k); const m = new Intl.DateTimeFormat("nl-NL", { month: "short" }).format(d); return d.getMonth() === 0 ? `${m} '${String(d.getFullYear()).slice(2)}` : m; };
-const dt = (ts) => new Intl.DateTimeFormat("nl-NL", { dateStyle: "short", timeStyle: "short" }).format(new Date(ts));
+const monthLong = (k, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(keyToDate(k));
+const monthShort = (k, locale = getRuntimeDateLocale()) => { const d = keyToDate(k); const m = new Intl.DateTimeFormat(locale, { month: "short" }).format(d); return d.getMonth() === 0 ? `${m} '${String(d.getFullYear()).slice(2)}` : m; };
+const dt = (ts, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(new Date(ts));
 
 /* ----------------------------------------------------------------
    Core calculation — the fair split
@@ -247,6 +492,8 @@ export default function App() {
   const [saved, setSaved] = useState(true);
   const [open, setOpen] = useState({ inkomen: true, overheid: true, uitgaven: true, sparen: true, verloop: true, log: false });
   const [showDetails, setShowDetails] = useState(false);
+  const lang = getRuntimeLanguage();
+  const TXT = LOCALIZATION[lang]?.text || LOCALIZATION[DEFAULT_LANGUAGE].text;
   const [theme, setTheme] = useState(() => {
     if (typeof window === "undefined") return "light";
     const stored = window.localStorage.getItem("open-family-finance:theme");
@@ -259,6 +506,10 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("open-family-finance:theme");
@@ -308,15 +559,15 @@ export default function App() {
     const t = computeTotals(data.months[m]);
     return {
       key: m, label: monthShort(m),
-      Inkomen: Math.round(t.total), Overheidsbijdrage: Math.round(t.govTotal),
-      Uitgaven: Math.round(t.expensesTotal), Sparen: Math.round(t.savingsTotal),
+      income: Math.round(t.total), gov: Math.round(t.govTotal),
+      expenses: Math.round(t.expensesTotal), savings: Math.round(t.savingsTotal),
       inlegA: Math.round(t.transferA), inlegB: Math.round(t.transferB),
     };
   }), [sortedMonths, data.months]);
 
   const byCategory = useMemo(() => {
     const map = {};
-    for (const e of cur.expenses) map[e.category || "Overig"] = (map[e.category || "Overig"] || 0) + monthlyOf(e, cur);
+    for (const e of cur.expenses) map[e.category || TXT.otherCategory] = (map[e.category || TXT.otherCategory] || 0) + monthlyOf(e, cur);
     return Object.entries(map).sort((x, y) => y[1] - x[1]);
   }, [cur]);
 
@@ -490,8 +741,8 @@ export default function App() {
     const earlier = sortedMonths.filter((k) => k < sel);
     const hasEarlier = earlier.length > 0;
     const msg = hasEarlier
-      ? `Cijfers van ${monthLong(sel)} terugzetten naar die van ${monthLong(earlier[earlier.length - 1])}? Handmatige aanpassingen in deze maand vervallen.`
-      : `Cijfers van ${monthLong(sel)} terugzetten naar het lege voorbeeld? (er is geen eerdere maand om van over te nemen)`;
+      ? t(LANG, "restoreMonthFromPrevious", { month: monthLong(sel), source: monthLong(earlier[earlier.length - 1]) })
+      : t(LANG, "restoreMonthFromEmpty", { month: monthLong(sel) });
     if (!window.confirm(msg)) return;
     setData((d) => {
       const s = d.selectedMonth;
@@ -507,7 +758,7 @@ export default function App() {
     });
   };
   const pA = cur.partners[0], pB = cur.partners[1];
-  const nameA = pA.name || "Partner 1", nameB = pB.name || "Partner 2";
+  const nameA = pA.name || t(LANG, "partnerName", { n: 1 }), nameB = pB.name || t(LANG, "partnerName", { n: 2 });
 
   // ── Render ──
   return (
@@ -519,41 +770,41 @@ export default function App() {
         <header style={St.header}>
           <div style={St.headerTop}>
             <div>
-              <h1 style={St.h1}>Open Family Finance</h1>
+              <h1 style={St.h1}>{TXT.appTitle}</h1>
               <p style={St.byline}>
-                created by{" "}
+                {TXT.bylineCreatedBy}{" "}
                 <a style={St.link} href="https://github.com/x-real-ip" target="_blank" rel="noopener noreferrer">x-real-ip</a>
                 {" · "}
-                <a style={St.link} href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer">source on GitHub</a>
+                <a style={St.link} href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer">{TXT.sourceOnGitHub}</a>
               </p>
             </div>
-            <button type="button" onClick={toggleTheme} style={St.themeBtn} aria-label={`Schakel over naar ${theme === "dark" ? "licht" : "donker"} thema`}>
-              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? "Licht" : "Donker"}
+            <button type="button" onClick={toggleTheme} style={St.themeBtn} aria-label={t(LANG, "themeToggle", { theme: theme === "dark" ? TXT.themeLight : TXT.themeDark })}>
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? TXT.themeLight : TXT.themeDark}
             </button>
           </div>
         </header>
 
         {/* Month */}
         <div style={St.monthNav} className="fade">
-          <button type="button" onClick={() => goMonth(-1)} style={St.navBtn} aria-label="Vorige maand"><ChevronLeft size={18} /></button>
+          <button type="button" onClick={() => goMonth(-1)} style={St.navBtn} aria-label={TXT.previousMonth}><ChevronLeft size={18} /></button>
           <div style={St.monthLabelWrap}>
             <span style={St.monthLabel}>{monthLong(sel)}</span>
-            {isCurrentRealMonth && <span style={St.nowTag}>nu</span>}
+            {isCurrentRealMonth && <span style={St.nowTag}>{TXT.nowTag}</span>}
           </div>
-          <select value={sel} onChange={(e) => setData((d) => ({ ...d, selectedMonth: e.target.value }))} style={St.monthSelect} aria-label="Kies een maand">
+          <select value={sel} onChange={(e) => setData((d) => ({ ...d, selectedMonth: e.target.value }))} style={St.monthSelect} aria-label={TXT.chooseMonth}>
             {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
           </select>
-          <button type="button" onClick={goCurrent} style={St.currentBtn} aria-label="Ga naar huidige maand">Huidige maand</button>
-          <button type="button" onClick={() => goMonth(1)} style={St.navBtn} aria-label="Volgende maand"><ChevronRight size={18} /></button>
+          <button type="button" onClick={goCurrent} style={St.currentBtn} aria-label={TXT.currentMonth}>{TXT.currentMonth}</button>
+          <button type="button" onClick={() => goMonth(1)} style={St.navBtn} aria-label={TXT.nextMonth}><ChevronRight size={18} /></button>
         </div>
 
         {/* Distribution (result) — full width */}
         <section style={St.hero} className="fade">
           <div style={St.methodRow}>
-            <span style={St.methodLabel}>Verdeelmethode</span>
-            <div style={St.toggle} role="group" aria-label="Verdeelmethode">
-              <button type="button" onClick={() => setMethod("income")} style={{ ...St.toggleBtn, ...(cur.method === "income" ? St.toggleOn : {}) }}>Naar inkomen</button>
-              <button type="button" onClick={() => setMethod("equal")} style={{ ...St.toggleBtn, ...(cur.method === "equal" ? St.toggleOn : {}) }}>50 / 50</button>
+            <span style={St.methodLabel}>{TXT.distributionMethod}</span>
+            <div style={St.toggle} role="group" aria-label={TXT.distributionMethod}>
+              <button type="button" onClick={() => setMethod("income")} style={{ ...St.toggleBtn, ...(cur.method === "income" ? St.toggleOn : {}) }}>{TXT.incomeMethod}</button>
+              <button type="button" onClick={() => setMethod("equal")} style={{ ...St.toggleBtn, ...(cur.method === "equal" ? St.toggleOn : {}) }}>{TXT.equalMethod}</button>
             </div>
           </div>
 
@@ -562,13 +813,13 @@ export default function App() {
             <ContribCard name={nameB} color={C.b} soft={C.softB} amount={calc.transferB} />
           </div>
 
-          <SplitBar label="Inkomen" fracA={calc.shareA} nameA={nameA} nameB={nameB} />
-          <SplitBar label="Inleg" fracA={calc.contribShareA} nameA={nameA} nameB={nameB} />
+<SplitBar label={TXT.incomeSplit} fracA={calc.shareA} nameA={nameA} nameB={nameB} />
+            <SplitBar label={TXT.contributionSplit} fracA={calc.contribShareA} nameA={nameA} nameB={nameB} />
 
           <div style={St.leftLabel}>
-            <span>Houdt zelf over</span>
+            <span>{TXT.keepsLeft}</span>
             <span style={St.fairInline}>
-              {cur.method === "income" ? `allebei ${pct(calc.keepA)}` : `${pct(calc.keepA)} · ${pct(calc.keepB)}`}
+              {cur.method === "income" ? `${pct(calc.keepA)}` : `${pct(calc.keepA)} · ${pct(calc.keepB)}`}
               <InfoDot text={TXT.fair} align="right" />
             </span>
           </div>
@@ -578,36 +829,36 @@ export default function App() {
           </div>
 
           <button type="button" onClick={() => setShowDetails((s) => !s)} style={St.detailsBtn} aria-expanded={showDetails}>
-            Hoe is dit berekend?
+            {TXT.howComputed}
             <ChevronDown size={15} style={{ transform: showDetails ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
           </button>
           {showDetails && (
             <div style={St.details}>
-              <div style={St.detailsHeader}>Onder hoe is dit berekend</div>
+              <div style={St.detailsHeader}>{TXT.howComputedHeader}</div>
               <div style={St.detailSection}>
-                <Bd label="Uitgaven" value={calc.expensesTotal} />
-                <Bd label="Sparen" value={calc.savingsTotal} />
+                <Bd label={TXT.expenses} value={calc.expensesTotal} />
+                <Bd label={TXT.savings} value={calc.savingsTotal} />
                 <div style={St.detailSubtotal}>
-                  <span style={St.detailSubtotalLabel}>Subtotaal uitgaven + sparen</span>
+                  <span style={St.detailSubtotalLabel}>{TXT.subtotalExpensesSavings}</span>
                   <span style={St.detailSubtotalValue}>{eur(calc.expensesTotal + calc.savingsTotal)}</span>
                 </div>
               </div>
               <div style={St.detailSection}>
-                <Bd label="− Overheidsbijdrage" value={calc.govTotal} sign="− " color={C.gov} />
+                <Bd label={TXT.governmentBenefit} value={calc.govTotal} sign="− " color={C.gov} />
               </div>
               <div style={St.detailResult}>
-                <span>= Samen te financieren</span>
+                <span>{TXT.coupleFunds}</span>
                 <span>{eur(calc.coupleFunds)}</span>
               </div>
-              <Bd label={`+ Buffer (marge ${num(cur.margePct)}%)`} value={calc.buffer} sign="+ " muted />
+              <Bd label={t(LANG, "buffer", { pct: num(cur.margePct) })} value={calc.buffer} sign="+ " muted />
               <div style={St.margeRow}>
-                <span style={St.margeLabel}>Buffer-marge per overboeking</span>
+                <span style={St.margeLabel}>{TXT.bufferMarginTransfer}</span>
                 <div style={St.money}>
                   <input inputMode="decimal" value={cur.margePct}
                     onFocus={() => { margeStart.current = cur.margePct; }}
                     onChange={(e) => setMarge(e.target.value.replace(/[^0-9.,]/g, ""))}
-                    onBlur={() => { if (margeStart.current !== cur.margePct) logChange("Buffer-marge (%)", margeStart.current, cur.margePct); }}
-                    style={{ ...St.moneyInput, width: 50 }} aria-label="Marge percentage" />
+                    onBlur={() => { if (margeStart.current !== cur.margePct) logChange(TXT.bufferMarginPct, margeStart.current, cur.margePct); }}
+                    style={{ ...St.moneyInput, width: 50 }} aria-label={TXT.marginPercentage} />
                   <span style={St.euro}>%</span>
                 </div>
               </div>
@@ -615,15 +866,15 @@ export default function App() {
           )}
         </section>
 
-        <ColTitle>Inkomsten</ColTitle>
+        <ColTitle>{TXT.incomes}</ColTitle>
         {/* Income */}
-        <Collapsible id="inkomen" title="Salaris" icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec} style={St.sectionIncome}>
+        <Collapsible id="inkomen" title={TXT.salarySection} icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec} style={St.sectionIncome}>
           {[pA, pB].map((p, i) => (
             <div style={St.itemWrap} className="entryWrap" key={p.id}>
               <div className="entry">
                 <span className="e-lead"><span style={{ ...St.dot, background: i === 0 ? C.a : C.b }} /></span>
-                <input className="e-desc" aria-label={`Naam partner ${i + 1}`} value={p.name} placeholder={`Partner ${i + 1}`} onChange={(e) => setPartnerName(i, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
-                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setPartner(i, { income: v })} onPeriod={() => togglePartnerPeriod(i)} onCommit={(o, n) => logChange(`Inkomen · ${p.name || `Partner ${i + 1}`}`, o, n)} /></span>
+                <input className="e-desc" aria-label={t(LANG, "partnerName", { n: i + 1 })} value={p.name} placeholder={t(LANG, "partnerPlaceholder", { n: i + 1 })} onChange={(e) => setPartnerName(i, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
+                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setPartner(i, { income: v })} onPeriod={() => togglePartnerPeriod(i)} onCommit={(o, n) => logChange(`${TXT.salarySection} · ${p.name || t(LANG, "partnerName", { n: i + 1 })}`, o, n)} /></span>
                 <span className="entryActions" style={St.rowActions}>
                   <NoteField value={p.note || ""} onChange={(v) => setPartner(i, { note: v })} />
                   <LinkField value={p.url || ""} onChange={(v) => setPartner(i, { url: v })} />
@@ -639,7 +890,7 @@ export default function App() {
         </Collapsible>
 
         {/* Government */}
-        <Collapsible id="overheid" title="Overheidsbijdrage" icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid} onToggle={toggleSec} style={St.sectionIncome}>
+        <Collapsible id="overheid" title={TXT.government} icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid} onToggle={toggleSec} style={St.sectionIncome}>
           {cur.govIncome.map((g) => {
             const formulaActive = Boolean(g.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(g, cur))) : g.amount;
@@ -647,8 +898,8 @@ export default function App() {
               <div style={St.itemWrap} className="entryWrap" key={g.id}>
                 <div className="entry">
                   <span className="e-lead"><span style={{ ...St.dot, background: C.gov }} /></span>
-                  <input className="e-desc" aria-label="Omschrijving" value={g.label} placeholder="Toeslag" onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
-                  <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`Overheid · ${g.label || "toeslag"}`, o, n)} disabled={formulaActive} /></span>
+                  <input className="e-desc" aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
+                  <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
                     <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
@@ -656,20 +907,20 @@ export default function App() {
                     <TrendIcon income trend={entryTrend("govIncome", g.id, monthlyOf(g, cur))} />
                     <SparkIcon history={entryHistory("govIncome", g.id)} />
                     <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("govIncome", g.id, pk, fk)} />
-                    <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                    <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
                   </span>
                 </div>
                 <DerivedLine monthly={monthlyOf(g, cur)} period={g.period} percent={pctOf(monthlyOf(g, cur), calc.govTotal)} dot />
               </div>
             );
           })}
-          <button type="button" onClick={addGov} style={St.addBtn}><Plus size={16} /> Toeslag toevoegen</button>
+          <button type="button" onClick={addGov} style={St.addBtn}><Plus size={16} /> {TXT.addGovernment}</button>
           <SubTotal monthly={calc.govTotal} />
         </Collapsible>
 
-        <ColTitle>Uitgaven</ColTitle>
+        <ColTitle>{TXT.expensesSection}</ColTitle>
         {/* Expenses */}
-        <Collapsible id="uitgaven" title="Vaste lasten" icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec} style={St.sectionExpenses}>
+        <Collapsible id="uitgaven" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec} style={St.sectionExpenses}>
           {cur.expenses.map((e) => {
             const formulaActive = Boolean(e.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(e, cur))) : e.amount;
@@ -677,11 +928,11 @@ export default function App() {
               <div style={St.itemWrap} className="entryWrap" key={e.id}>
                 <div className="entry exp">
                   <span className="e-lead">
-                    <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || "geen categorie"} />
-                    <input list="cats" aria-label="Categorie" value={e.category} placeholder="Categorie" onChange={(ev) => setListItem("expenses", e.id, { category: ev.target.value })} style={St.catInput} />
+                    <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || TXT.otherCategory} />
+                    <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { category: ev.target.value })} style={St.catInput} />
                   </span>
-                  <input className="e-desc" aria-label="Omschrijving" value={e.label} placeholder="Omschrijving" onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
-                  <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setListItem("expenses", e.id, { amount: v })} onPeriod={() => toggleItemPeriod("expenses", e.id)} onCommit={(o, n) => logChange(`Uitgave · ${e.label || "naamloos"}`, o, n)} disabled={formulaActive} /></span>
+                  <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
+                  <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setListItem("expenses", e.id, { amount: v })} onPeriod={() => toggleItemPeriod("expenses", e.id)} onCommit={(o, n) => logChange(`${TXT.expensesSection} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={e.note || ""} onChange={(v) => setListItem("expenses", e.id, { note: v })} />
                     <LinkField value={e.url || ""} onChange={(v) => setListItem("expenses", e.id, { url: v })} />
@@ -689,25 +940,25 @@ export default function App() {
                     <TrendIcon income={false} trend={entryTrend("expenses", e.id, monthlyOf(e, cur))} />
                     <SparkIcon history={entryHistory("expenses", e.id)} />
                     <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("expenses", e.id, pk, fk)} />
-                    <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("expenses", e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                    <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("expenses", e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
                   </span>
                 </div>
                 <DerivedLine monthly={monthlyOf(e, cur)} period={e.period} percent={pctOf(monthlyOf(e, cur), calc.expensesTotal)} />
               </div>
             );
           })}
-          <button type="button" onClick={addExpense} style={St.addBtn}><Plus size={16} /> Uitgave toevoegen</button>
+          <button type="button" onClick={addExpense} style={St.addBtn}><Plus size={16} /> {TXT.addExpense}</button>
           {byCategory.length > 0 && (
             <div style={St.catSummary}>
-              <div style={St.catSummaryTitle}>Per categorie</div>
+              <div style={St.catSummaryTitle}>{TXT.perCategory}</div>
               {byCategory.map(([cat, val]) => (
                 <div style={St.catSummaryRow} key={cat}>
                   <span style={St.catName}>
-                    <span style={{ ...St.catDot, background: categoryColor(cat === "Overig" ? "" : cat) }} />
+                    <span style={{ ...St.catDot, background: categoryColor(cat === TXT.otherCategory ? "" : cat) }} />
                     {cat}
                   </span>
                   <span style={St.catMonthly}>{eur(val)}</span>
-                  <span style={St.catYr}>{eur(val * 12)} p/j</span>
+                  <span style={St.catYr}>{eur(val * 12)} {TXT.perYearShort}</span>
                 </div>
               ))}
             </div>
@@ -716,7 +967,7 @@ export default function App() {
         </Collapsible>
 
         {/* Savings goals */}
-        <Collapsible id="sparen" title="Spaardoelen" icon={<PiggyBank size={16} style={{ color: C.save }} />} info={TXT.sav} total={eur(calc.savingsTotal)} open={open.sparen} onToggle={toggleSec} style={St.sectionExpenses}>
+        <Collapsible id="sparen" title={TXT.savingsSection} icon={<PiggyBank size={16} style={{ color: C.save }} />} info={TXT.sav} total={eur(calc.savingsTotal)} open={open.sparen} onToggle={toggleSec} style={St.sectionExpenses}>
           {cur.savings.map((s) => {
             const formulaActive = Boolean(s.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(s, cur))) : s.amount;
@@ -724,8 +975,8 @@ export default function App() {
               <div style={St.itemWrap} className="entryWrap" key={s.id}>
                 <div className="entry">
                   <span className="e-lead"><span style={{ ...St.dot, background: categoryColor(s.label) }} /></span>
-                  <input className="e-desc" aria-label="Spaardoel" value={s.label} placeholder="Spaardoel" onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
-                  <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`Sparen · ${s.label || "spaardoel"}`, o, n)} disabled={formulaActive} /></span>
+                  <input className="e-desc" aria-label={TXT.category} value={s.label} placeholder={TXT.categoryPlaceholder} onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
+                  <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`${TXT.savingsSection} · ${s.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
                     <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
@@ -733,27 +984,27 @@ export default function App() {
                     <TrendIcon income={false} trend={entryTrend("savings", s.id, monthlyOf(s, cur))} />
                     <SparkIcon history={entryHistory("savings", s.id)} />
                     <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("savings", s.id, pk, fk)} />
-                    <button type="button" aria-label="Verwijderen" onClick={() => removeListItem("savings", s.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                    <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("savings", s.id)} style={St.iconBtn}><Trash2 size={16} /></button>
                   </span>
                 </div>
                 <DerivedLine monthly={monthlyOf(s, cur)} period={s.period} percent={pctOf(monthlyOf(s, cur), calc.savingsTotal)} dot />
               </div>
             );
           })}
-          <button type="button" onClick={addSaving} style={St.addBtn}><Plus size={16} /> Spaardoel toevoegen</button>
+          <button type="button" onClick={addSaving} style={St.addBtn}><Plus size={16} /> {TXT.addSaving}</button>
           <SubTotal monthly={calc.savingsTotal} />
         </Collapsible>
 
         {/* History */}
-        <Collapsible id="verloop" title="Statistieken" total={`${sortedMonths.length} mnd`} open={open.verloop} onToggle={toggleSec}>
+        <Collapsible id="verloop" title={TXT.statistics} total={t(LANG, "months", { count: sortedMonths.length })} open={open.verloop} onToggle={toggleSec}>
           {series.length < 2 ? (
             <div style={St.emptyHist}>
               <TrendingUp size={18} style={{ color: C.muted }} />
-              <span>Blader met de pijlen naar een volgende maand om je cijfers bij te werken. Vanaf twee maanden verschijnen hier de grafieken.</span>
+              <span>{TXT.noSeries}</span>
             </div>
           ) : (
             <>
-              <ChartTitle>Inleg per maand</ChartTitle>
+              <ChartTitle>{TXT.incomePerMonth}</ChartTitle>
               <div style={St.chartBox}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={series} margin={{ top: 6, right: 4, left: -14, bottom: 0 }}>
@@ -766,7 +1017,7 @@ export default function App() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <ChartTitle>Maandtotalen</ChartTitle>
+              <ChartTitle>{TXT.monthTotals}</ChartTitle>
               <div style={St.chartBox}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={series} margin={{ top: 6, right: 8, left: -14, bottom: 0 }}>
@@ -774,10 +1025,10 @@ export default function App() {
                     <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
                     <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
                     <Tooltip {...tooltipProps} /><Legend {...legendProps} />
-                    <Line type="monotone" dataKey="Inkomen" stroke={C.inc} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="Overheidsbijdrage" stroke={C.gov} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="Uitgaven" stroke={C.exp} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="Sparen" stroke={C.save} strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="income" name={TXT.incomes} stroke={C.inc} strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="gov" name={TXT.government} stroke={C.gov} strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="expenses" name={TXT.expenses} stroke={C.exp} strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="savings" name={TXT.savings} stroke={C.save} strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -790,10 +1041,10 @@ export default function App() {
                 <div key={m} style={{ ...St.monthItem, ...(active ? St.monthItemActive : {}) }}>
                   <button type="button" onClick={() => setData((d) => ({ ...d, selectedMonth: m }))} style={St.monthItemBtn}>
                     <span style={St.monthItemName}>{monthLong(m)}</span>
-                    <span style={St.monthItemPot}>{eur0(t.coupleFunds)} te verdelen</span>
+                    <span style={St.monthItemPot}>{eur0(t.coupleFunds)} {TXT.toDivide}</span>
                   </button>
                   {sortedMonths.length > 1 && (
-                    <button type="button" aria-label={`${monthLong(m)} verwijderen`} onClick={() => deleteMonth(m)} style={St.iconBtn}><Trash2 size={15} /></button>
+                    <button type="button" aria-label={`${TXT.deleteMonth} · ${monthLong(m)}`} onClick={() => deleteMonth(m)} style={St.iconBtn}><Trash2 size={15} /></button>
                   )}
                 </div>
               );
@@ -802,9 +1053,9 @@ export default function App() {
         </Collapsible>
 
         {/* Change log */}
-        <Collapsible id="log" title="Logboek" icon={<History size={16} style={{ color: C.muted }} />} total={`${(data.log || []).length}`} open={open.log} onToggle={toggleSec}>
+        <Collapsible id="log" title={TXT.logbook} icon={<History size={16} style={{ color: C.muted }} />} total={`${(data.log || []).length}`} open={open.log} onToggle={toggleSec}>
           {(data.log || []).length === 0 ? (
-            <div style={St.logEmpty}>Nog geen wijzigingen vastgelegd. Aanpassingen aan bedragen verschijnen hier met datum, tijd, het gewijzigde veld en de oude en nieuwe waarde.</div>
+            <div style={St.logEmpty}>{TXT.logEmpty}</div>
           ) : (
             <div style={St.logList}>
               {(data.log || []).map((l) => (
@@ -826,11 +1077,11 @@ export default function App() {
 
         <footer style={St.footer}>
           <span style={St.saveState}>
-            {!loaded ? (<><Loader2 size={14} className="spin" /> Laden…</>) : saved ? (<><Check size={14} style={{ color: C.save }} /> Opgeslagen</>) : (<><Loader2 size={14} className="spin" /> Opslaan…</>) }
+            {!loaded ? (<><Loader2 size={14} className="spin" /> {TXT.loading}</>) : saved ? (<><Check size={14} style={{ color: C.save }} /> {TXT.saved}</>) : (<><Loader2 size={14} className="spin" /> {TXT.saving}</>) }
           </span>
           <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
             <MonthCopyField pastMonths={pastMonths} onCopy={copyMonthToPast} />
-            <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> Deze maand herstellen</button>
+            <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>
           </div>
         </footer>
       </div>
@@ -851,7 +1102,7 @@ function InfoDot({ text, align = "left" }) {
   useClickOutside(rootRef, open, () => setOpen(false));
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex", verticalAlign: "middle" }}>
-      <button type="button" aria-label="Uitleg"
+      <button type="button" aria-label={TXT.help}
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         onPointerEnter={(e) => { if (e.pointerType === "mouse") setOpen(true); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") setOpen(false); }} style={St.infoBtn}>i</button>
       {open && <span style={mobilePopupStyle({ ...St.bubble, ...(align === "right" ? { right: 0 } : { left: 0 }) })} onClick={(e) => e.stopPropagation()}>{text}</span>}
@@ -861,8 +1112,8 @@ function InfoDot({ text, align = "left" }) {
 
 function PeriodPill({ period, onToggle }) {
   return (
-    <button type="button" onClick={onToggle} style={St.periodPill} aria-label="Per maand of per jaar invullen" title="Wissel tussen per maand en per jaar">
-      {period === "year" ? "/jr" : "/mnd"}
+    <button type="button" onClick={onToggle} style={St.periodPill} aria-label={TXT.periodToggle} title={TXT.periodToggle}>
+      {period === "year" ? TXT.periodYearAbbr : TXT.periodMonthAbbr}
     </button>
   );
 }
@@ -877,7 +1128,7 @@ function AmountField({ value, period, onValue, onPeriod, onCommit, disabled }) {
 }
 
 function DerivedLine({ monthly, period, percent, dot }) {
-  const other = period === "year" ? `${eur(monthly)} per maand` : `${eur(monthly * 12)} per jaar`;
+  const other = period === "year" ? `${eur(monthly)} ${TXT.perMonth}` : `${eur(monthly * 12)} ${TXT.perYear}`;
   return (
     <div style={{ ...St.derived, marginLeft: dot ? 20 : 2 }}>
       = {other}{percent != null ? ` · ${Math.round(percent * 100)}%` : ""}
@@ -888,8 +1139,8 @@ function DerivedLine({ monthly, period, percent, dot }) {
 function SubTotal({ monthly }) {
   return (
     <div style={St.subTotal}>
-      <span>Totaal</span>
-      <span style={St.subTotalVal}>{eur(monthly)} <span style={St.subTotalYr}>· {eur(monthly * 12)} p/j</span></span>
+      <span>{TXT.total}</span>
+      <span style={St.subTotalVal}>{eur(monthly)} <span style={St.subTotalYr}>· {eur(monthly * 12)} {TXT.perYearShort}</span></span>
     </div>
   );
 }
@@ -922,7 +1173,7 @@ function Bd({ label, value, sign = "", color, strong, muted }) {
       <span style={{ color: muted ? C.muted : C.ink, fontWeight: strong ? 700 : 500 }}>{label}</span>
       <span style={{ textAlign: "right" }}>
         <span style={{ color: color || (muted ? C.muted : C.ink), fontWeight: strong ? 700 : 600, fontVariantNumeric: "tabular-nums" }}>{sign}{eur(value)}</span>
-        <span style={St.bdYear}>{sign}{eur(value * 12)} p/j</span>
+        <span style={St.bdYear}>{sign}{eur(value * 12)} {TXT.perYearShort}</span>
       </span>
     </div>
   );
@@ -933,7 +1184,7 @@ function ContribCard({ name, color, soft, amount }) {
     <div style={{ ...St.contribCard, background: soft }}>
       <div style={{ ...St.contribName, color }}>{name}</div>
       <div style={St.contribAmount}>{eur(amount)}</div>
-      <div style={St.contribSub}>maakt over · {eur0(amount * 12)} p/j</div>
+      <div style={St.contribSub}>{t(LANG, "makesOver", { value: eur0(amount * 12) })}</div>
     </div>
   );
 }
@@ -943,7 +1194,7 @@ function LeftoverCard({ name, color, amount }) {
     <div style={St.leftoverCard}>
       <div style={St.leftoverTop}><span style={{ ...St.dot, background: color, margin: 0 }} /><span style={St.leftoverName}>{name}</span></div>
       <div style={{ ...St.leftoverAmount, color: amount < 0 ? C.a : C.ink }}>{eur(amount)}</div>
-      <div style={St.leftoverYr}>{eur0(amount * 12)} p/j</div>
+      <div style={St.leftoverYr}>{eur0(amount * 12)} {TXT.perYearShort}</div>
     </div>
   );
 }
@@ -971,7 +1222,7 @@ function MoneyInput({ value, onChange, onCommit, disabled }) {
         onChange={(e) => onChange(e.target.value.replace(/[^0-9.,]/g, ""))}
         onBlur={() => { if (onCommit && startRef.current !== value) onCommit(startRef.current, value); }}
         style={{ ...St.moneyInput, opacity: disabled ? 0.6 : 1, cursor: disabled ? "not-allowed" : "text" }}
-        aria-label="Bedrag"
+        aria-label={TXT.amount}
         disabled={disabled} />
     </div>
   );
@@ -980,19 +1231,19 @@ function MoneyInput({ value, onChange, onCommit, disabled }) {
 function TrendIcon({ trend, income }) {
   const up = trend && trend.dir === "up";     // amount increased vs previous month
   const down = trend && trend.dir === "down"; // amount decreased vs previous month
-  let Icon = Minus, color = C.muted, title = "Geen verandering t.o.v. de vorige maand";
+  let Icon = Minus, color = C.muted, title = TXT.trendNoChange;
   if (up || down) {
     Icon = up ? ArrowUp : ArrowDown;                  // arrow follows the number
     const good = income ? up : down;                  // income: up is good · expenses/savings: down is good
     color = good ? C.save : C.exp;                    // green = good, red = bad
-    title = `${up ? "Hoger" : "Lager"} dan de vorige maand (${eur(trend.prev)} → ${eur(trend.cur)})`;
+    title = `${up ? TXT.trendHigher : TXT.trendLower} (${eur(trend.prev)} → ${eur(trend.cur)})`;
   }
   return <span style={St.trendIcon} title={title}><Icon size={16} color={color} /></span>;
 }
 
 function Sparkline({ data }) {
   const W = 212, H = 56, pad = 6;
-  if (!data || data.length < 2) return <div style={St.sparkEmpty}>Te weinig data — dit verschijnt zodra deze regel in meerdere maanden een bedrag heeft.</div>;
+  if (!data || data.length < 2) return <div style={St.sparkEmpty}>{TXT.noHistory}</div>;
   const vals = data.map((d) => d.value);
   const min = Math.min(...vals), max = Math.max(...vals), span = (max - min) || 1;
   const x = (i) => pad + (i * (W - 2 * pad)) / (data.length - 1);
@@ -1024,29 +1275,29 @@ function CopyField({ pastMonths, futureMonths, onCopy }) {
   const apply = () => { onCopy(past || null, future || null); setOpen(false); setPast(""); setFuture(""); };
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label="Bedrag kopiëren naar andere maanden" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
+      <button type="button" aria-label={TXT.copyAmountAria} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
       {open && (
         <span style={mobilePopupStyle(St.copyPop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <div style={St.copyTitle}>Bedrag kopiëren naar…</div>
+          <div style={St.copyTitle}>{TXT.copyAmount}</div>
           {!has ? (
-            <div style={St.copyEmpty}>Er zijn nog geen andere maanden om naar te kopiëren.</div>
+            <div style={St.copyEmpty}>{TXT.noMonthsToCopy}</div>
           ) : (
             <>
               <label style={St.copyRow}>
-                <span style={St.copyLbl}>Verleden t/m</span>
+                <span style={St.copyLbl}>{TXT.copyAmount}</span>
                 <select value={past} onChange={(e) => setPast(e.target.value)} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }} style={St.copySel} disabled={!pastMonths.length}>
                   <option value="">—</option>
                   {pastMonths.slice().reverse().map((k) => <option key={k} value={k}>{monthLong(k)}</option>)}
                 </select>
               </label>
               <label style={St.copyRow}>
-                <span style={St.copyLbl}>Toekomst t/m</span>
+                <span style={St.copyLbl}>{TXT.copyMonth}</span>
                 <select value={future} onChange={(e) => setFuture(e.target.value)} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }} style={St.copySel} disabled={!futureMonths.length}>
                   <option value="">—</option>
                   {futureMonths.map((k) => <option key={k} value={k}>{monthLong(k)}</option>)}
                 </select>
               </label>
-              <button type="button" onClick={apply} disabled={!past && !future} style={{ ...St.copyApply, opacity: (!past && !future) ? 0.5 : 1 }}>Kopiëren</button>
+              <button type="button" onClick={apply} disabled={!past && !future} style={{ ...St.copyApply, opacity: (!past && !future) ? 0.5 : 1 }}>{TXT.copy}</button>
             </>
           )}
         </span>
@@ -1073,17 +1324,17 @@ function MonthCopyField({ pastMonths, onCopy }) {
   const apply = () => { if (selected.length) { onCopy(selected); setOpen(false); setSelected([]); } };
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label="Huidige maand kopiëren naar eerdere maanden" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
+      <button type="button" aria-label={TXT.copyMonthAria} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
       {open && (
         <span style={mobilePopupStyle({ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" })} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <div style={St.copyTitle}>Maand kopiëren naar…</div>
+          <div style={St.copyTitle}>{TXT.copyMonth}</div>
           {!has ? (
-            <div style={St.copyEmpty}>Er zijn geen eerdere maanden om naartoe te kopiëren.</div>
+            <div style={St.copyEmpty}>{TXT.noPrevMonths}</div>
           ) : (
             <>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
-                <button type="button" onClick={selectAll} style={{ ...St.copyApply, flex: 1 }}>Alles</button>
-                <button type="button" onClick={clearAll} style={{ ...St.copyApply, background: C.exp, flex: 1 }}>Niets</button>
+                <button type="button" onClick={selectAll} style={{ ...St.copyApply, flex: 1 }}>{TXT.copyAll}</button>
+                <button type="button" onClick={clearAll} style={{ ...St.copyApply, background: C.exp, flex: 1 }}>{TXT.copyNone}</button>
               </div>
               <div style={{ maxHeight: 240, overflowY: "auto", marginBottom: 10 }}>
                 {pastMonths.slice().reverse().map((k) => (
@@ -1093,7 +1344,7 @@ function MonthCopyField({ pastMonths, onCopy }) {
                   </label>
                 ))}
               </div>
-              <button type="button" onClick={apply} disabled={!selected.length} style={{ ...St.copyApply, opacity: selected.length ? 1 : 0.5 }}>Kopiëren</button>
+              <button type="button" onClick={apply} disabled={!selected.length} style={{ ...St.copyApply, opacity: selected.length ? 1 : 0.5 }}>{TXT.copy}</button>
             </>
           )}
         </span>
@@ -1112,13 +1363,13 @@ function SparkIcon({ history }) {
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => setOpen(false), 200); };
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label="Prijsverloop" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+      <button type="button" aria-label={TXT.priceTrend} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <LineChartIcon size={16} />
       </button>
       {open && (
         <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <div style={St.sparkTitle}>Prijsverloop</div>
+          <div style={St.sparkTitle}>{TXT.priceTrend}</div>
           <Sparkline data={history} />
         </span>
       )}
@@ -1139,7 +1390,7 @@ function LinkField({ value, onChange }) {
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label="Link bij deze uitgave"
+      <button type="button" aria-label={TXT.link}
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <Link2 size={16} />
@@ -1149,8 +1400,8 @@ function LinkField({ value, onChange }) {
           <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="https://…"
             onFocus={() => { editingRef.current = true; }}
             onBlur={() => { editingRef.current = false; setOpen(false); }}
-            style={St.noteInput} aria-label="URL" />
-          {href && <a href={href} target="_blank" rel="noopener noreferrer" style={St.noteLink}>Open link ↗</a>}
+            style={St.noteInput} aria-label={TXT.link} />
+          {href && <a href={href} target="_blank" rel="noopener noreferrer" style={St.noteLink}>{TXT.openLink}</a>}
         </span>
       )}
     </span>
@@ -1177,9 +1428,9 @@ function FormulaField({ entry, monthData, onChange }) {
   for (const kind of entryKinds) {
     for (const item of monthData[kind] || []) {
       if (item.id === entry.id) continue;
-      const label = kind === "govIncome" ? (item.label || "Toeslag")
-        : kind === "expenses" ? `${item.category || "Uitgave"}${item.label ? ` · ${item.label}` : ""}`
-        : kind === "savings" ? (item.label || "Spaardoel")
+      const label = kind === "govIncome" ? (item.label || TXT.government)
+        : kind === "expenses" ? `${item.category || TXT.expensesSection}${item.label ? ` · ${item.label}` : ""}`
+        : kind === "savings" ? (item.label || TXT.savingsSection)
         : item.label || item.id;
       entries.push({ id: item.id, label, kind });
     }
@@ -1200,44 +1451,44 @@ function FormulaField({ entry, monthData, onChange }) {
   const removeOpAt = (idx) => { const n = ops.slice(); n.splice(idx, 1); setOps(n); onChange({ formula: { sourceId, ops: n } }); };
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label="Koppel aan een andere entry" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
+      <button type="button" aria-label={TXT.link} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <Calculator size={16} />
       </button>
       {open && (
         <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <div style={St.copyTitle}>Entry koppelen</div>
+          <div style={St.copyTitle}>{TXT.sourceRule}</div>
           <label style={St.copyRow}>
-            <span style={St.copyLbl}>Bronregel</span>
+            <span style={St.copyLbl}>{TXT.sourceRule}</span>
             <select value={sourceId} onChange={(e) => updateSource(e.target.value)} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }} style={St.copySel}>
-              <option value="">— kies een regel —</option>
+              <option value="">— {TXT.selectSource} —</option>
               {entries.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
           </label>
           <div style={{ marginBottom: 6 }}>
-            <div style={{ marginBottom: 6, fontSize: 13, color: C.muted }}>Bewerkingen (voert ze in volgorde uit op de bron)</div>
+            <div style={{ marginBottom: 6, fontSize: 13, color: C.muted }}>{TXT.addOperation}</div>
             {ops.map((step, idx) => (
               <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
                 <select value={step.op} onChange={(e) => updateOpAt(idx, e.target.value)} style={St.copySel}>
-                  <option value="minus">min</option>
-                  <option value="plus">plus</option>
-                  <option value="times">keer</option>
-                  <option value="divide">gedeeld door</option>
+                  <option value="minus">{TXT.minus || "min"}</option>
+                  <option value="plus">{TXT.plus || "plus"}</option>
+                  <option value="times">{TXT.times || "keer"}</option>
+                  <option value="divide">{TXT.divide || "gedeeld door"}</option>
                 </select>
                 <input value={step.factor} onChange={(e) => updateFactorAt(idx, e.target.value.replace(/[^0-9.,-]/g, ""))} style={{ ...St.copySel, width: 110 }} inputMode="decimal" />
-                <button type="button" onClick={() => removeOpAt(idx)} style={{ ...St.copyApply, background: C.exp }}>Verwijder</button>
+                <button type="button" onClick={() => removeOpAt(idx)} style={{ ...St.copyApply, background: C.exp }}>{TXT.delete}</button>
               </div>
             ))}
-            <button type="button" onClick={addOp} style={{ ...St.copyApply, marginTop: 4 }}>Voeg bewerking toe</button>
+            <button type="button" onClick={addOp} style={{ ...St.copyApply, marginTop: 4 }}>{TXT.addOperation}</button>
           </div>
           <div style={{ marginTop: 10, fontSize: 13, color: C.muted }}>
-            {selected ? `Bron: ${selected.label}` : "Kies eerst een bronregel"}
+            {selected ? `${TXT.sourceLabel}: ${selected.label}` : TXT.selectSource}
           </div>
           <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600 }}>
-            Preview: {preview != null ? eur(preview) : "—"}
+            {TXT.preview}: {preview != null ? eur(preview) : "—"}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 10 }}>
-            <button type="button" onClick={onSave} style={{ ...St.copyApply, opacity: sourceId ? 1 : 0.5 }} disabled={!sourceId}>Opslaan</button>
-            {has && <button type="button" onClick={onRemove} style={{ ...St.copyApply, background: C.exp }}>Verwijder</button>}
+            <button type="button" onClick={onSave} style={{ ...St.copyApply, opacity: sourceId ? 1 : 0.5 }} disabled={!sourceId}>{TXT.save}</button>
+            {has && <button type="button" onClick={onRemove} style={{ ...St.copyApply, background: C.exp }}>{TXT.delete}</button>}
           </div>
         </span>
       )}
@@ -1256,7 +1507,7 @@ function NoteField({ value, onChange }) {
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label="Notitie bij deze uitgave"
+      <button type="button" aria-label={TXT.note}
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <MessageSquare size={16} />
@@ -1264,7 +1515,7 @@ function NoteField({ value, onChange }) {
       {open && (
         <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3}
-            placeholder="Notitie bij deze uitgave…"
+            placeholder={TXT.notePlaceholder}
             onFocus={() => { editingRef.current = true; }}
             onBlur={() => { editingRef.current = false; setOpen(false); }}
             style={St.noteArea} />

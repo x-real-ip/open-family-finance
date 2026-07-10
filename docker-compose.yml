@@ -30,6 +30,7 @@ services:
     environment:
       BACKEND_URL: http://api:8080
       API_TOKEN: ${API_TOKEN}
+      LANGUAGE: ${LANGUAGE:-nl}
     ports:
       - "8080:80"
     depends_on:
