@@ -9,15 +9,16 @@
  *
  * Optional paperless-ngx integration (see paperless.js), enabled with
  * PAPERLESS_ENABLED + PAPERLESS_URL + PAPERLESS_API_TOKEN:
- *   GET  /api/paperless/correspondents          -> [{ id, name }] | 404 when disabled
- *   POST /api/paperless/correspondents { name }  -> { id, name }   | 404 when disabled
+ *   GET  /api/paperless/correspondents                        -> [{ id, name }] | 404 when disabled
+ *   POST /api/paperless/correspondents { name }                -> { id, name }   | 404 when disabled
+ *   GET  /api/paperless/correspondents/:id/latest-document     -> { id, title, created, url } | null | 404 when disabled
  *
  * Optional bearer auth: set API_TOKEN and send "Authorization: Bearer <token>".
  * Startup retries the database connection, so boot order does not matter.
  */
 import express from "express";
 import { pool, initDb } from "./db.js";
-import { paperlessEnabled, listCorrespondents, ensureCorrespondent } from "./paperless.js";
+import { paperlessEnabled, listCorrespondents, ensureCorrespondent, latestDocumentForCorrespondent } from "./paperless.js";
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
@@ -98,6 +99,17 @@ app.post("/api/paperless/correspondents", async (req, res) => {
   if (!paperlessEnabled) return res.status(404).json({ error: "paperless integration disabled" });
   try {
     res.json(await ensureCorrespondent(req.body?.name));
+  } catch (e) {
+    console.error(e);
+    res.status(502).json({ error: "paperless unavailable" });
+  }
+});
+
+// Most recent document (invoice, contract, ...) linked to a correspondent.
+app.get("/api/paperless/correspondents/:id/latest-document", async (req, res) => {
+  if (!paperlessEnabled) return res.status(404).json({ error: "paperless integration disabled" });
+  try {
+    res.json(await latestDocumentForCorrespondent(req.params.id));
   } catch (e) {
     console.error(e);
     res.status(502).json({ error: "paperless unavailable" });

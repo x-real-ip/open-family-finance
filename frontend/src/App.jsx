@@ -22,7 +22,7 @@ import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
   ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
-  Calculator, Github, GripVertical,
+  Calculator, Github, GripVertical, Building2,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
@@ -821,13 +821,13 @@ export default function App() {
                   <span className="e-lead">
                     <DragHandle active={manual} {...dragHandleProps("govIncome", g.id)} />
                     <span style={{ ...St.dot, background: C.gov }} />
-                    <CorrespondentInput value={g.correspondent || ""} onChange={(v) => setListItem("govIncome", g.id, { correspondent: v })} onSync={syncCorrespondent} />
                   </span>
-                  <input className={PAPERLESS_ENABLED ? "e-desc e-desc-narrow" : "e-desc"} aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
+                  <input className="e-desc" aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
                     <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
+                    <CorrespondentField value={g.correspondent || ""} onChange={(v) => setListItem("govIncome", g.id, { correspondent: v })} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} />
                     <FormulaField entry={g} monthData={cur} onChange={(patch) => setListItem("govIncome", g.id, patch)} />
                     <TrendIcon income trend={entryTrend("govIncome", g.id, monthlyOf(g, cur))} />
                     <SparkIcon history={entryHistory("govIncome", g.id)} />
@@ -858,13 +858,13 @@ export default function App() {
                     <DragHandle active={manual} {...dragHandleProps("expenses", e.id)} />
                     <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || TXT.otherCategory} />
                     <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { category: ev.target.value })} style={St.catInput} />
-                    <CorrespondentInput value={e.correspondent || ""} onChange={(v) => setListItem("expenses", e.id, { correspondent: v })} onSync={syncCorrespondent} />
                   </span>
-                  <input className={PAPERLESS_ENABLED ? "e-desc e-desc-narrow" : "e-desc"} aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
+                  <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setListItem("expenses", e.id, { amount: v })} onPeriod={() => toggleItemPeriod("expenses", e.id)} onCommit={(o, n) => logChange(`${TXT.expensesSection} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={e.note || ""} onChange={(v) => setListItem("expenses", e.id, { note: v })} />
                     <LinkField value={e.url || ""} onChange={(v) => setListItem("expenses", e.id, { url: v })} />
+                    <CorrespondentField value={e.correspondent || ""} onChange={(v) => setListItem("expenses", e.id, { correspondent: v })} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} />
                     <FormulaField entry={e} monthData={cur} onChange={(patch) => setListItem("expenses", e.id, patch)} />
                     <TrendIcon income={false} trend={entryTrend("expenses", e.id, monthlyOf(e, cur))} />
                     <SparkIcon history={entryHistory("expenses", e.id)} />
@@ -918,13 +918,13 @@ export default function App() {
                   <span className="e-lead">
                     <DragHandle active={manual} {...dragHandleProps("savings", s.id)} />
                     <span style={{ ...St.dot, background: categoryColor(s.label) }} />
-                    <CorrespondentInput value={s.correspondent || ""} onChange={(v) => setListItem("savings", s.id, { correspondent: v })} onSync={syncCorrespondent} />
                   </span>
-                  <input className={PAPERLESS_ENABLED ? "e-desc e-desc-narrow" : "e-desc"} aria-label={TXT.category} value={s.label} placeholder={TXT.categoryPlaceholder} onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
+                  <input className="e-desc" aria-label={TXT.category} value={s.label} placeholder={TXT.categoryPlaceholder} onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`${TXT.savingsSection} · ${s.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
                     <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
+                    <CorrespondentField value={s.correspondent || ""} onChange={(v) => setListItem("savings", s.id, { correspondent: v })} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} />
                     <FormulaField entry={s} monthData={cur} onChange={(patch) => setListItem("savings", s.id, patch)} />
                     <TrendIcon income={false} trend={entryTrend("savings", s.id, monthlyOf(s, cur))} />
                     <SparkIcon history={entryHistory("savings", s.id)} />
@@ -1055,15 +1055,59 @@ function DragHandle({ active, ...dragProps }) {
   return <span {...dragProps} style={St.dragHandle} aria-label={TXT.dragHandle} title={TXT.dragHandle}><GripVertical size={14} /></span>;
 }
 
-// Free-text with paperless-ngx suggestions (see the #correspondents datalist).
-// Renders nothing when the integration is off, per PAPERLESS_ENABLED.
-function CorrespondentInput({ value, onChange, onSync }) {
+// Correspondent, hidden behind an icon like Note/Link so entries that don't
+// need one don't carry a permanently visible field. Free-text with
+// paperless-ngx suggestions (see the #correspondents datalist); when the
+// typed value matches a known paperless correspondent, also looks up (and
+// links to) the most recent document paperless has for it. Renders nothing
+// when the integration is off, per PAPERLESS_ENABLED.
+function CorrespondentField({ value, onChange, onSync, correspondents }) {
+  const [open, setOpen] = useState(false);
+  const editingRef = useRef(false);
+  const timer = useRef(null);
+  const rootRef = useRef(null);
+  const [doc, setDoc] = useState(null);
+  const [docLoading, setDocLoading] = useState(false);
+  const [docFetchedFor, setDocFetchedFor] = useState(null);
+  useClickOutside(rootRef, open, () => setOpen(false));
+  const has = value && value.trim().length > 0;
+  const match = has ? correspondents.find((c) => c.name.toLowerCase() === value.trim().toLowerCase()) : null;
+  useEffect(() => {
+    if (!open || !match || docFetchedFor === match.id) return;
+    setDocLoading(true);
+    paperless.latestDocument(match.id).then((d) => { setDoc(d); setDocFetchedFor(match.id); setDocLoading(false); });
+  }, [open, match?.id]);
+  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
   if (!PAPERLESS_ENABLED) return null;
   return (
-    <input list="correspondents" aria-label={TXT.correspondent} value={value} placeholder={TXT.correspondentPlaceholder}
-      onChange={(e) => onChange(e.target.value)}
-      onBlur={(e) => onSync(e.target.value)}
-      style={St.corrInput} />
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
+      <button type="button" aria-label={TXT.correspondent}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
+        <Building2 size={16} />
+      </button>
+      {open && (
+        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
+          <input list="correspondents" value={value} placeholder={TXT.correspondentPlaceholder}
+            onChange={(e) => onChange(e.target.value)}
+            onFocus={() => { editingRef.current = true; }}
+            onBlur={(e) => { editingRef.current = false; onSync(e.target.value); setOpen(false); }}
+            style={St.noteInput} aria-label={TXT.correspondent} />
+          {match && (
+            <div style={St.correspondentDoc}>
+              {docLoading ? (
+                <span style={St.correspondentDocMuted}><Loader2 size={13} className="spin" /> {TXT.searchingDocument}</span>
+              ) : doc ? (
+                <a href={doc.url} target="_blank" rel="noopener noreferrer" style={St.correspondentDocLink}>{doc.title} — {TXT.openInPaperless}</a>
+              ) : (
+                <span style={St.correspondentDocMuted}>{TXT.noDocumentFound}</span>
+              )}
+            </div>
+          )}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -1531,7 +1575,6 @@ const St = {
   dot: { width: 10, height: 10, borderRadius: 999, flexShrink: 0 },
   nameInput: { flex: 1, minWidth: 90, border: "none", borderBottom: `1px solid ${C.line}`, background: "transparent", padding: "8px 2px", fontSize: 15, color: C.ink, fontFamily: "inherit", outline: "none" },
   catInput: { width: 104, flexShrink: 0, border: "none", borderBottom: `1px solid ${C.line}`, background: C.canvas, borderRadius: "6px 6px 0 0", padding: "8px 8px", fontSize: 12.5, color: C.muted, fontFamily: "inherit", outline: "none" },
-  corrInput: { width: 168, flexShrink: 0, border: "none", borderBottom: `1px solid ${C.line}`, background: C.canvas, borderRadius: "6px 6px 0 0", padding: "8px 8px", fontSize: 12.5, color: C.muted, fontFamily: "inherit", outline: "none" },
   derived: { fontSize: 12, color: C.muted, marginTop: 4, fontVariantNumeric: "tabular-nums" },
 
   amountField: { display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 },
@@ -1557,6 +1600,9 @@ const St = {
   noteArea: { width: "100%", border: "none", outline: "none", resize: "vertical", fontFamily: "inherit", fontSize: 13, lineHeight: 1.45, color: C.ink, background: "transparent" },
   noteInput: { width: "100%", border: "none", outline: "none", fontFamily: "inherit", fontSize: 13, color: C.ink, background: "transparent" },
   noteLink: { display: "inline-block", marginTop: 8, fontSize: 12.5, color: C.b, fontWeight: 600, textDecoration: "none", borderTop: `1px solid ${C.line}`, paddingTop: 7, width: "100%" },
+  correspondentDoc: { marginTop: 8, paddingTop: 7, borderTop: `1px solid ${C.line}` },
+  correspondentDocMuted: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.muted },
+  correspondentDocLink: { color: C.b, fontWeight: 600, textDecoration: "none", fontSize: 12.5 },
   trendIcon: { width: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   sparkTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 6 },
   sparkCap: { display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 12, color: C.muted },
@@ -1623,7 +1669,6 @@ input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outli
 .entry.exp { gap: 8px; }
 .entry .e-lead { display: contents; }
 .entry .e-desc { flex: 1; min-width: 90px; }
-.entry .e-desc.e-desc-narrow { min-width: 64px; }
 .entry .e-amount { display: inline-flex; flex-shrink: 0; }
 .entry .entryActions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
 @media (max-width: 560px) {

@@ -69,4 +69,14 @@ export const paperless = {
       return null;
     }
   },
+  // Resolves to null if there's no document, the integration is disabled, or
+  // paperless is unreachable — callers treat all three the same way.
+  async latestDocument(correspondentId) {
+    try {
+      return await req("GET", `/api/paperless/correspondents/${encodeURIComponent(correspondentId)}/latest-document`);
+    } catch (e) {
+      console.warn("paperless: could not load latest document", e);
+      return null;
+    }
+  },
 };
