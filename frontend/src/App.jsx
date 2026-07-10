@@ -25,7 +25,7 @@ import {
   Calculator, Github,
 } from "lucide-react";
 import {
-  ResponsiveContainer, BarChart, Bar,
+  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 import { storage } from "./api";
@@ -738,6 +738,16 @@ export default function App() {
           {byCategory.length > 0 && (
             <div style={St.catSummary}>
               <div style={St.catSummaryTitle}>{TXT.perCategory}</div>
+              <div style={St.pieBox}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={byCategory.map(([cat, val]) => ({ name: cat, value: val }))} dataKey="value" nameKey="name" innerRadius="55%" outerRadius="90%" paddingAngle={2}>
+                      {byCategory.map(([cat]) => <Cell key={cat} fill={categoryColor(cat === TXT.otherCategory ? "" : cat)} />)}
+                    </Pie>
+                    <Tooltip {...tooltipProps} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
               {byCategory.map(([cat, val]) => (
                 <div style={St.catSummaryRow} key={cat}>
                   <span style={St.catName}>
@@ -1349,6 +1359,7 @@ const St = {
 
   catSummary: { marginTop: 14, background: C.canvas, borderRadius: 12, padding: "12px 14px" },
   catSummaryTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 8 },
+  pieBox: { width: "100%", height: 200, marginBottom: 6 },
   catSummaryRow: { display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "baseline", columnGap: 14, fontSize: 13.5, padding: "3px 0" },
   catName: { display: "inline-flex", alignItems: "center", gap: 7, color: C.ink, minWidth: 0 },
   catMonthly: { textAlign: "right", fontVariantNumeric: "tabular-nums", color: C.ink, fontWeight: 600, whiteSpace: "nowrap" },
