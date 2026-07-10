@@ -58,6 +58,7 @@ function categoryColor(name) {
 const DEFAULT_FIGURES = {
   method: "income",
   margePct: "0.5",
+  customPct: "50",
   partners: [
     { id: "p1", name: "", income: "", period: "month", note: "", url: "" },
     { id: "p2", name: "", income: "", period: "month", note: "", url: "" },
@@ -74,6 +75,7 @@ const DEFAULT_FIGURES = {
 // — numbers & amounts —
 const num = (x) => { const v = parseFloat(String(x).replace(",", ".")); return isFinite(v) ? v : 0; };
 const round2 = (n) => Math.round(n * 100) / 100;
+const clamp01 = (n) => Math.min(1, Math.max(0, n));
 const toMonthly = (amountStr, period) => num(amountStr) / (period === "year" ? 12 : 1);
 const monthlyOf = (x, monthData, visited = new Set()) => {
   if (x?.formula && monthData) {
@@ -190,6 +192,7 @@ function computeTotals(fig) {
   const marge = num(fig.margePct) / 100;
   let baseA, baseB;
   if (fig.method === "equal") { baseA = coupleFunds / 2; baseB = coupleFunds / 2; }
+  else if (fig.method === "custom") { const pA = clamp01(num(fig.customPct) / 100); baseA = coupleFunds * pA; baseB = coupleFunds * (1 - pA); }
   else { baseA = coupleFunds * shareA; baseB = coupleFunds * shareB; }
   const transferA = baseA * (1 + marge), transferB = baseB * (1 + marge);
   const buffer = transferA + transferB - coupleFunds;
@@ -215,7 +218,7 @@ function migrateFig(f) {
   if (!f) return clone(DEFAULT_FIGURES);
   const per = (p) => (p === "year" ? "year" : "month");
   return {
-    method: f.method || "income", margePct: f.margePct ?? "0.5",
+    method: f.method || "income", margePct: f.margePct ?? "0.5", customPct: f.customPct ?? "50",
     partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "" })),
     govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", formula: g.formula || undefined })),
     expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", formula: e.formula || undefined })),
@@ -267,6 +270,7 @@ export default function App() {
   });
   const saveTimer = useRef(null);
   const margeStart = useRef(null);
+  const customStart = useRef(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -533,6 +537,7 @@ export default function App() {
   };
   const setMethod = (method) => editForward((f) => ({ ...f, method }), "__method");
   const setMarge = (margePct) => editForward((f) => ({ ...f, margePct }), "__marge");
+  const setCustomPct = (customPct) => editForward((f) => ({ ...f, customPct }), "__customPct");
   const setListItem = (k, id, patch) => editForward((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, ...clone(patch) } : x) }), id);
   const toggleItemPeriod = (k, id) => editForward((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x) }), id);
   const removeListItem = (k, id) => editForward((f) => ({ ...f, [k]: f[k].filter((x) => x.id !== id) }), id);
@@ -608,8 +613,24 @@ export default function App() {
             <div style={St.toggle} role="group" aria-label={TXT.distributionMethod}>
               <button type="button" onClick={() => setMethod("income")} style={{ ...St.toggleBtn, ...(cur.method === "income" ? St.toggleOn : {}) }}>{TXT.incomeMethod}</button>
               <button type="button" onClick={() => setMethod("equal")} style={{ ...St.toggleBtn, ...(cur.method === "equal" ? St.toggleOn : {}) }}>{TXT.equalMethod}</button>
+              <button type="button" onClick={() => setMethod("custom")} style={{ ...St.toggleBtn, ...(cur.method === "custom" ? St.toggleOn : {}) }}>{TXT.customMethod}</button>
             </div>
           </div>
+
+          {cur.method === "custom" && (
+            <div style={St.customRow}>
+              <span style={St.customName}>{nameA}</span>
+              <div style={St.money}>
+                <input inputMode="decimal" value={cur.customPct}
+                  onFocus={() => { customStart.current = cur.customPct; }}
+                  onChange={(e) => setCustomPct(e.target.value.replace(/[^0-9.,]/g, ""))}
+                  onBlur={() => { if (customStart.current !== cur.customPct) logChange(TXT.customPctLabel, customStart.current, cur.customPct); }}
+                  style={{ ...St.moneyInput, width: 44 }} aria-label={t(LANG, "customPctAria", { name: nameA })} />
+                <span style={St.euro}>%</span>
+              </div>
+              <span style={St.customName}>{nameB}: {pct(1 - clamp01(num(cur.customPct) / 100))}</span>
+            </div>
+          )}
 
           <div style={St.contribGrid}>
             <ContribCard name={nameA} color={C.a} soft={C.softA} amount={calc.transferA} />
@@ -623,7 +644,7 @@ export default function App() {
             <span>{TXT.keepsLeft}</span>
             <span style={St.fairInline}>
               {cur.method === "income" ? `${pct(calc.keepA)}` : `${pct(calc.keepA)} · ${pct(calc.keepB)}`}
-              <InfoDot text={TXT.fair} align="right" />
+              <InfoDot text={cur.method === "equal" ? TXT.fairEqual : cur.method === "custom" ? TXT.fairCustom : TXT.fair} align="right" />
             </span>
           </div>
           <div style={St.leftoverGrid}>
@@ -1406,6 +1427,8 @@ const St = {
   toggle: { display: "inline-flex", background: C.canvas, borderRadius: 999, padding: 3 },
   toggleBtn: { border: "none", background: "transparent", padding: "7px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, color: C.muted, cursor: "pointer", fontFamily: "inherit" },
   toggleOn: { background: C.card, color: C.ink, boxShadow: "0 1px 3px rgba(0,0,0,0.10)" },
+  customRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" },
+  customName: { fontSize: 13, color: C.muted, fontWeight: 600 },
   sortRow: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10, flexWrap: "wrap" },
   sortLabel: { fontSize: 12.5, color: C.muted, fontWeight: 600 },
   statsPeriodRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" },
