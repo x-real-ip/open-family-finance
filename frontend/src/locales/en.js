@@ -94,6 +94,7 @@ export default {
     duration: "Duration",
     startDate: "Start date",
     endDate: "End date",
+    warningDays: "Warn (days ahead)",
     contractExpired: "Expired {days} days ago",
     contractEndingSoon: "Ends in {days} days",
     contractActiveUntil: "Runs until {date}",

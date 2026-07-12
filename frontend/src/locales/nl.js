@@ -94,6 +94,7 @@ export default {
     duration: "Looptijd",
     startDate: "Startdatum",
     endDate: "Einddatum",
+    warningDays: "Waarschuw (dagen van tevoren)",
     contractExpired: "Verlopen sinds {days} dagen",
     contractEndingSoon: "Loopt af over {days} dagen",
     contractActiveUntil: "Loopt tot {date}",

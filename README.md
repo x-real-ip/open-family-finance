@@ -56,7 +56,8 @@ numbers evolve over time.
   expenses additionally by category), or drag-and-drop your own manual order.
 - **Contract duration** — give any entry a start and end date to track a
   contract or subscription term, with a progress bar and a color-coded
-  warning once it's ending soon (within 30 days) or has already expired.
+  warning once it's ending soon (within 30 days by default, adjustable per
+  entry) or has already expired.
 - **Light and dark theme.**
 - **Dutch and English UI**, selectable via an environment variable.
 - **Optional paperless-ngx integration** — pick a correspondent from your

@@ -60,8 +60,8 @@ const DEFAULT_FIGURES = {
   margePct: "0.5",
   customPct: "50",
   partners: [
-    { id: "p1", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "" },
-    { id: "p2", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "" },
+    { id: "p1", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" },
+    { id: "p2", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" },
   ],
   govIncome: [],
   expenses: [],
@@ -234,11 +234,11 @@ function migrateFig(f) {
   const per = (p) => (p === "year" ? "year" : "month");
   return {
     method: f.method || "income", margePct: f.margePct ?? "0.5", customPct: f.customPct ?? "50",
-    partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "", correspondent: p.correspondent || "", documentMode: p.documentMode || "auto", documentLabel: p.documentLabel || null, documentId: p.documentId ?? null, startDate: p.startDate || "", endDate: p.endDate || "" })),
-    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", correspondent: g.correspondent || "", documentMode: g.documentMode || "auto", documentLabel: g.documentLabel || null, documentId: g.documentId ?? null, startDate: g.startDate || "", endDate: g.endDate || "", formula: g.formula || undefined })),
-    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", formula: e.formula || undefined })),
-    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", correspondent: s.correspondent || "", documentMode: s.documentMode || "auto", documentLabel: s.documentLabel || null, documentId: s.documentId ?? null, startDate: s.startDate || "", endDate: s.endDate || "", formula: s.formula || undefined }))
-      : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "" }] : []),
+    partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "", correspondent: p.correspondent || "", documentMode: p.documentMode || "auto", documentLabel: p.documentLabel || null, documentId: p.documentId ?? null, startDate: p.startDate || "", endDate: p.endDate || "", warningDays: p.warningDays || "" })),
+    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", correspondent: g.correspondent || "", documentMode: g.documentMode || "auto", documentLabel: g.documentLabel || null, documentId: g.documentId ?? null, startDate: g.startDate || "", endDate: g.endDate || "", warningDays: g.warningDays || "", formula: g.formula || undefined })),
+    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", warningDays: e.warningDays || "", formula: e.formula || undefined })),
+    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", correspondent: s.correspondent || "", documentMode: s.documentMode || "auto", documentLabel: s.documentLabel || null, documentId: s.documentId ?? null, startDate: s.startDate || "", endDate: s.endDate || "", warningDays: s.warningDays || "", formula: s.formula || undefined }))
+      : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" }] : []),
     overrides: (f.overrides && typeof f.overrides === "object") ? { ...f.overrides } : {},
   };
 }
@@ -600,9 +600,9 @@ export default function App() {
   const addListItem = (kind, item) => editForward((f) => (
     (f[kind] || []).some((x) => x.id === item.id) ? f : { ...f, [kind]: [...(f[kind] || []), clone(item)] }
   ), item.id);
-  const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "" });
-  const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "" });
-  const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "" });
+  const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
+  const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
+  const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   // Reset the selected month: take over the figures of the nearest earlier
   // month and clear this month's overrides, so it follows the baseline again.
   // Without an earlier month it falls back to the empty defaults.
@@ -1236,10 +1236,11 @@ function DurationField({ entry, onChange }) {
 
   const start = entry.startDate || "";
   const end = entry.endDate || "";
+  const warningDays = entry.warningDays ? num(entry.warningDays) : CONTRACT_WARNING_DAYS;
   const has = Boolean(start || end);
   const left = daysUntil(end);
   const expired = left != null && left < 0;
-  const endingSoon = left != null && left >= 0 && left <= CONTRACT_WARNING_DAYS;
+  const endingSoon = left != null && left >= 0 && left <= warningDays;
   const progress = durationProgress(start, end);
   const color = expired ? C.exp : endingSoon ? C.warn : has ? C.b : C.muted;
 
@@ -1270,6 +1271,12 @@ function DurationField({ entry, onChange }) {
           <label style={St.copyRow}>
             <span style={St.copyLbl}>{TXT.endDate}</span>
             <input type="date" value={end} onChange={(e) => onChange({ endDate: e.target.value })} onFocus={markEditing} onBlur={unmarkEditing} style={St.copySel} />
+          </label>
+          <label style={St.copyRow}>
+            <span style={St.copyLbl}>{TXT.warningDays}</span>
+            <input inputMode="numeric" value={entry.warningDays || ""} placeholder={String(CONTRACT_WARNING_DAYS)}
+              onChange={(e) => onChange({ warningDays: e.target.value.replace(/[^0-9]/g, "") })}
+              onFocus={markEditing} onBlur={unmarkEditing} style={{ ...St.copySel, width: 60 }} />
           </label>
           {progress != null && (
             <div style={St.progressTrack}><div style={{ ...St.progressFill, width: `${progress * 100}%`, background: color }} /></div>
