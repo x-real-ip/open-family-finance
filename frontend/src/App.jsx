@@ -60,8 +60,8 @@ const DEFAULT_FIGURES = {
   margePct: "0.5",
   customPct: "50",
   partners: [
-    { id: "p1", name: "", income: "", period: "month", note: "", url: "" },
-    { id: "p2", name: "", income: "", period: "month", note: "", url: "" },
+    { id: "p1", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null },
+    { id: "p2", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null },
   ],
   govIncome: [],
   expenses: [],
@@ -219,7 +219,7 @@ function migrateFig(f) {
   const per = (p) => (p === "year" ? "year" : "month");
   return {
     method: f.method || "income", margePct: f.margePct ?? "0.5", customPct: f.customPct ?? "50",
-    partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "" })),
+    partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "", correspondent: p.correspondent || "", documentMode: p.documentMode || "auto", documentLabel: p.documentLabel || null, documentId: p.documentId ?? null })),
     govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", correspondent: g.correspondent || "", documentMode: g.documentMode || "auto", documentLabel: g.documentLabel || null, documentId: g.documentId ?? null, formula: g.formula || undefined })),
     expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, formula: e.formula || undefined })),
     savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", correspondent: s.correspondent || "", documentMode: s.documentMode || "auto", documentLabel: s.documentLabel || null, documentId: s.documentId ?? null, formula: s.formula || undefined }))
@@ -403,7 +403,7 @@ export default function App() {
   const correspondents = useMemo(() => {
     const set = new Set(paperlessCorrespondents.map((c) => c.name));
     for (const m of Object.values(data.months)) {
-      for (const kind of ["govIncome", "expenses", "savings"]) {
+      for (const kind of ["partners", "govIncome", "expenses", "savings"]) {
         for (const e of m[kind]) if (e.correspondent) set.add(e.correspondent);
       }
     }
@@ -806,6 +806,7 @@ export default function App() {
                 <span className="entryActions" style={St.rowActions}>
                   <NoteField value={p.note || ""} onChange={(v) => setPartner(i, { note: v })} />
                   <LinkField value={p.url || ""} onChange={(v) => setPartner(i, { url: v })} />
+                  <CorrespondentField entry={p} onChange={(patch) => setPartner(i, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
                   <TrendIcon income trend={entryTrend("partners", p.id, monthlyInc(p))} />
                   <SparkIcon history={entryHistory("partners", p.id)} />
                   <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("partners", p.id, pk, fk)} />
