@@ -220,10 +220,10 @@ function migrateFig(f) {
   return {
     method: f.method || "income", margePct: f.margePct ?? "0.5", customPct: f.customPct ?? "50",
     partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "" })),
-    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", correspondent: g.correspondent || "", formula: g.formula || undefined })),
-    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", formula: e.formula || undefined })),
-    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", correspondent: s.correspondent || "", formula: s.formula || undefined }))
-      : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "", correspondent: "" }] : []),
+    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", correspondent: g.correspondent || "", documentMode: g.documentMode || "auto", documentLabel: g.documentLabel || null, documentId: g.documentId ?? null, formula: g.formula || undefined })),
+    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, formula: e.formula || undefined })),
+    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", correspondent: s.correspondent || "", documentMode: s.documentMode || "auto", documentLabel: s.documentLabel || null, documentId: s.documentId ?? null, formula: s.formula || undefined }))
+      : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null }] : []),
     overrides: (f.overrides && typeof f.overrides === "object") ? { ...f.overrides } : {},
   };
 }
@@ -419,6 +419,15 @@ export default function App() {
     });
   };
 
+  // Document types + tags, for the per-entry "preferred label" picker.
+  const [paperlessLabels, setPaperlessLabels] = useState({ types: [], tags: [] });
+  useEffect(() => {
+    if (!PAPERLESS_ENABLED) return;
+    let active = true;
+    paperless.listLabels().then((labels) => { if (active) setPaperlessLabels(labels); });
+    return () => { active = false; };
+  }, []);
+
   // History of one entry (matched by id) across all months, for the sparkline.
   const entryHistory = (kind, id) => {
     const out = [];
@@ -576,9 +585,9 @@ export default function App() {
   const addListItem = (kind, item) => editForward((f) => (
     (f[kind] || []).some((x) => x.id === item.id) ? f : { ...f, [kind]: [...(f[kind] || []), clone(item)] }
   ), item.id);
-  const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "" });
-  const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "" });
-  const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "" });
+  const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null });
+  const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null });
+  const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null });
   // Reset the selected month: take over the figures of the nearest earlier
   // month and clear this month's overrides, so it follows the baseline again.
   // Without an earlier month it falls back to the empty defaults.
@@ -827,7 +836,7 @@ export default function App() {
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
                     <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
-                    <CorrespondentField value={g.correspondent || ""} onChange={(v) => setListItem("govIncome", g.id, { correspondent: v })} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} />
+                    <CorrespondentField entry={g} onChange={(patch) => setListItem("govIncome", g.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
                     <FormulaField entry={g} monthData={cur} onChange={(patch) => setListItem("govIncome", g.id, patch)} />
                     <TrendIcon income trend={entryTrend("govIncome", g.id, monthlyOf(g, cur))} />
                     <SparkIcon history={entryHistory("govIncome", g.id)} />
@@ -864,7 +873,7 @@ export default function App() {
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={e.note || ""} onChange={(v) => setListItem("expenses", e.id, { note: v })} />
                     <LinkField value={e.url || ""} onChange={(v) => setListItem("expenses", e.id, { url: v })} />
-                    <CorrespondentField value={e.correspondent || ""} onChange={(v) => setListItem("expenses", e.id, { correspondent: v })} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} />
+                    <CorrespondentField entry={e} onChange={(patch) => setListItem("expenses", e.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
                     <FormulaField entry={e} monthData={cur} onChange={(patch) => setListItem("expenses", e.id, patch)} />
                     <TrendIcon income={false} trend={entryTrend("expenses", e.id, monthlyOf(e, cur))} />
                     <SparkIcon history={entryHistory("expenses", e.id)} />
@@ -924,7 +933,7 @@ export default function App() {
                   <span className="entryActions" style={St.rowActions}>
                     <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
                     <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
-                    <CorrespondentField value={s.correspondent || ""} onChange={(v) => setListItem("savings", s.id, { correspondent: v })} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} />
+                    <CorrespondentField entry={s} onChange={(patch) => setListItem("savings", s.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
                     <FormulaField entry={s} monthData={cur} onChange={(patch) => setListItem("savings", s.id, patch)} />
                     <TrendIcon income={false} trend={entryTrend("savings", s.id, monthlyOf(s, cur))} />
                     <SparkIcon history={entryHistory("savings", s.id)} />
@@ -1061,49 +1070,133 @@ function DragHandle({ active, ...dragProps }) {
 // typed value matches a known paperless correspondent, also looks up (and
 // links to) the most recent document paperless has for it. Renders nothing
 // when the integration is off, per PAPERLESS_ENABLED.
-function CorrespondentField({ value, onChange, onSync, correspondents }) {
+function CorrespondentField({ entry, onChange, onSync, correspondents, labels }) {
   const [open, setOpen] = useState(false);
   const editingRef = useRef(false);
   const timer = useRef(null);
   const rootRef = useRef(null);
   const [doc, setDoc] = useState(null);
   const [docLoading, setDocLoading] = useState(false);
-  const [docFetchedFor, setDocFetchedFor] = useState(null);
+  const [docKey, setDocKey] = useState(null);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
   useClickOutside(rootRef, open, () => setOpen(false));
-  const has = value && value.trim().length > 0;
+
+  const value = entry.correspondent || "";
+  const mode = entry.documentMode || "auto";
+  const has = value.trim().length > 0;
   const match = has ? correspondents.find((c) => c.name.toLowerCase() === value.trim().toLowerCase()) : null;
+
+  // Auto mode: (re)fetch whenever the popover opens, the correspondent
+  // resolves, or the entry's preferred label changes.
   useEffect(() => {
-    if (!open || !match || docFetchedFor === match.id) return;
+    if (!open || mode !== "auto" || !match) return;
+    const key = `auto:${match.id}:${entry.documentLabel?.kind || ""}:${entry.documentLabel?.id || ""}`;
+    if (docKey === key) return;
     setDocLoading(true);
-    paperless.latestDocument(match.id).then((d) => { setDoc(d); setDocFetchedFor(match.id); setDocLoading(false); });
-  }, [open, match?.id]);
+    paperless.latestDocument(match.id, entry.documentLabel).then((d) => { setDoc(d); setDocKey(key); setDocLoading(false); });
+  }, [open, mode, match?.id, entry.documentLabel?.kind, entry.documentLabel?.id]);
+
+  // Manual mode: fetch the pinned document's details whenever it's open and the pin changes.
+  useEffect(() => {
+    if (!open || mode !== "manual" || !entry.documentId) return;
+    const key = `manual:${entry.documentId}`;
+    if (docKey === key) return;
+    setDocLoading(true);
+    paperless.getDocument(entry.documentId).then((d) => { setDoc(d); setDocKey(key); setDocLoading(false); });
+  }, [open, mode, entry.documentId]);
+
+  const runSearch = (q) => {
+    setQuery(q);
+    if (!match || !q.trim()) { setResults([]); return; }
+    setSearching(true);
+    paperless.searchDocuments(match.id, q.trim()).then((r) => { setResults(r); setSearching(false); });
+  };
+  const pickDocument = (id) => { onChange({ documentId: id }); setResults([]); setQuery(""); setDocKey(null); };
+  const changeLabel = (raw) => {
+    if (!raw) return onChange({ documentLabel: null });
+    const [kind, idStr] = raw.split(":");
+    const found = (kind === "tag" ? labels.tags : labels.types).find((l) => String(l.id) === idStr);
+    onChange({ documentLabel: found ? { kind, id: found.id, name: found.name } : null });
+  };
+
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
+  const markEditing = () => { editingRef.current = true; };
+  const unmarkEditing = () => { editingRef.current = false; };
   if (!PAPERLESS_ENABLED) return null;
+
+  const docBlock = docLoading ? (
+    <span style={St.correspondentDocMuted}><Loader2 size={13} className="spin" /> {TXT.searchingDocument}</span>
+  ) : doc ? (
+    <a href={doc.url} target="_blank" rel="noopener noreferrer" style={St.correspondentDocLink}>{doc.documentType ? `${doc.documentType} · ` : ""}{doc.title} — {TXT.openInPaperless}</a>
+  ) : (
+    <span style={St.correspondentDocMuted}>{TXT.noDocumentFound}</span>
+  );
+
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label={TXT.correspondent}
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
+        style={{ ...St.iconBtn, color: (has || entry.documentId) ? C.b : C.muted }}>
         <Building2 size={16} />
       </button>
       {open && (
         <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <input list="correspondents" value={value} placeholder={TXT.correspondentPlaceholder}
-            onChange={(e) => onChange(e.target.value)}
-            onFocus={() => { editingRef.current = true; }}
-            onBlur={(e) => { editingRef.current = false; onSync(e.target.value); setOpen(false); }}
+            onChange={(e) => onChange({ correspondent: e.target.value })}
+            onFocus={markEditing}
+            onBlur={(e) => { unmarkEditing(); onSync(e.target.value); }}
             style={St.noteInput} aria-label={TXT.correspondent} />
           {match && (
-            <div style={St.correspondentDoc}>
-              {docLoading ? (
-                <span style={St.correspondentDocMuted}><Loader2 size={13} className="spin" /> {TXT.searchingDocument}</span>
-              ) : doc ? (
-                <a href={doc.url} target="_blank" rel="noopener noreferrer" style={St.correspondentDocLink}>{doc.title} — {TXT.openInPaperless}</a>
+            <>
+              <div style={St.correspondentModeRow}>
+                <button type="button" onClick={() => onChange({ documentMode: "auto" })} style={{ ...St.toggleBtn, ...(mode === "auto" ? St.toggleOn : {}) }}>{TXT.documentModeAuto}</button>
+                <button type="button" onClick={() => onChange({ documentMode: "manual" })} style={{ ...St.toggleBtn, ...(mode === "manual" ? St.toggleOn : {}) }}>{TXT.documentModeManual}</button>
+              </div>
+              {mode === "auto" ? (
+                <>
+                  <select
+                    value={entry.documentLabel ? `${entry.documentLabel.kind}:${entry.documentLabel.id}` : ""}
+                    onChange={(e) => changeLabel(e.target.value)}
+                    onFocus={markEditing} onBlur={unmarkEditing}
+                    style={{ ...St.copySel, width: "100%", maxWidth: "none", marginBottom: 8 }}>
+                    <option value="">{TXT.noLabelPreference}</option>
+                    <optgroup label={TXT.documentTypes}>
+                      {labels.types.map((t) => <option key={`type:${t.id}`} value={`type:${t.id}`}>{t.name}</option>)}
+                    </optgroup>
+                    <optgroup label={TXT.documentTags}>
+                      {labels.tags.map((t) => <option key={`tag:${t.id}`} value={`tag:${t.id}`}>{t.name}</option>)}
+                    </optgroup>
+                  </select>
+                  <div style={St.correspondentDoc}>{docBlock}</div>
+                </>
               ) : (
-                <span style={St.correspondentDocMuted}>{TXT.noDocumentFound}</span>
+                <>
+                  <input value={query} placeholder={TXT.searchDocumentsPlaceholder}
+                    onChange={(e) => runSearch(e.target.value)}
+                    onFocus={markEditing} onBlur={unmarkEditing}
+                    style={St.noteInput} aria-label={TXT.searchDocumentsPlaceholder} />
+                  {searching && <span style={St.correspondentDocMuted}><Loader2 size={13} className="spin" /> {TXT.searchingDocument}</span>}
+                  {!searching && results.length > 0 && (
+                    <div style={St.correspondentResults}>
+                      {results.map((r) => (
+                        <button key={r.id} type="button" onClick={() => pickDocument(r.id)} style={St.correspondentResult}>
+                          {r.documentType ? `${r.documentType} · ` : ""}{r.title}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {entry.documentId && (
+                    <div style={St.correspondentDoc}>
+                      {docBlock}
+                      <button type="button" onClick={() => { onChange({ documentId: null }); setDocKey(null); }} style={St.correspondentUnlink}>{TXT.clearPinnedDocument}</button>
+                    </div>
+                  )}
+                </>
               )}
-            </div>
+            </>
           )}
         </span>
       )}
@@ -1600,9 +1693,13 @@ const St = {
   noteArea: { width: "100%", border: "none", outline: "none", resize: "vertical", fontFamily: "inherit", fontSize: 13, lineHeight: 1.45, color: C.ink, background: "transparent" },
   noteInput: { width: "100%", border: "none", outline: "none", fontFamily: "inherit", fontSize: 13, color: C.ink, background: "transparent" },
   noteLink: { display: "inline-block", marginTop: 8, fontSize: 12.5, color: C.b, fontWeight: 600, textDecoration: "none", borderTop: `1px solid ${C.line}`, paddingTop: 7, width: "100%" },
-  correspondentDoc: { marginTop: 8, paddingTop: 7, borderTop: `1px solid ${C.line}` },
+  correspondentModeRow: { display: "flex", marginBottom: 8 },
+  correspondentDoc: { marginTop: 8, paddingTop: 7, borderTop: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 },
   correspondentDocMuted: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.muted },
   correspondentDocLink: { color: C.b, fontWeight: 600, textDecoration: "none", fontSize: 12.5 },
+  correspondentResults: { maxHeight: 160, overflowY: "auto", marginTop: 6, display: "flex", flexDirection: "column", gap: 2 },
+  correspondentResult: { textAlign: "left", border: "none", background: "transparent", color: C.ink, fontSize: 12.5, padding: "6px 4px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" },
+  correspondentUnlink: { border: "none", background: "transparent", color: C.exp, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 },
   trendIcon: { width: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   sparkTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 6 },
   sparkCap: { display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 12, color: C.muted },

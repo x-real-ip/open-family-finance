@@ -109,6 +109,7 @@ gebruikt:
 | `PAPERLESS_URL`         | —                          | Basis-URL die de **backend** gebruikt om de paperless-API aan te roepen. Alleen backend, alleen gebruikt als `PAPERLESS_ENABLED=true` |
 | `PAPERLESS_PUBLIC_URL`  | *(valt terug op `PAPERLESS_URL`)* | Basis-URL waarmee "open in paperless"-links worden opgebouwd. Alleen nodig als paperless voor je browser op een ander adres bereikbaar is dan `PAPERLESS_URL` (bijv. als `PAPERLESS_URL` een cluster-interne URL is) |
 | `PAPERLESS_API_TOKEN`   | —                          | paperless-ngx API-token. Alleen backend, komt nooit in de browser terecht |
+| `PAPERLESS_DOCUMENT_TYPE_PRIORITY` | —              | Optionele, kommagescheiden lijst van documenttype-namen in prioriteitsvolgorde (bijv. `Jaaropgave,Jaarafrekening,Factuur,Contract`). Het gekoppelde document wordt het meest recente document van het eerste type uit deze lijst dat de correspondent heeft, in plaats van gewoon het meest recente document. Alleen backend |
 
 `LANGUAGE`, `APP_TITLE` en `PAPERLESS_ENABLED` worden door de frontend bij het
 opstarten van de container ingelezen (niet vast gebakken in de build), zodat
@@ -134,7 +135,9 @@ hebben bij het invullen van uitgaven, overheidsbijdrage of sparen:
 4. Komt de getypte naam overeen met een bekende correspondent in paperless,
    dan toont datzelfde popovertje meteen het meest recente document dat
    paperless daarvoor heeft (als er een is), met een link om 'm direct in
-   paperless te openen.
+   paperless te openen. Zet `PAPERLESS_DOCUMENT_TYPE_PRIORITY` om bepaalde
+   documenttypes (bijv. een jaaropgave of factuur) voorrang te geven boven
+   gewoon het meest recente document.
 
 De frontend praat nooit rechtstreeks met paperless en krijgt `PAPERLESS_URL`,
 `PAPERLESS_PUBLIC_URL` of `PAPERLESS_API_TOKEN` nooit te zien — alle

@@ -25,6 +25,7 @@ services:
       PAPERLESS_URL: ${PAPERLESS_URL:-}
       PAPERLESS_PUBLIC_URL: ${PAPERLESS_PUBLIC_URL:-}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN:-}
+      PAPERLESS_DOCUMENT_TYPE_PRIORITY: ${PAPERLESS_DOCUMENT_TYPE_PRIORITY:-}
     depends_on:
       db:
         condition: service_healthy

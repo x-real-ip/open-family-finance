@@ -71,11 +71,38 @@ export const paperless = {
   },
   // Resolves to null if there's no document, the integration is disabled, or
   // paperless is unreachable — callers treat all three the same way.
-  async latestDocument(correspondentId) {
+  // `label`, if given, is { kind: "type" | "tag", id } chosen for this entry.
+  async latestDocument(correspondentId, label) {
     try {
-      return await req("GET", `/api/paperless/correspondents/${encodeURIComponent(correspondentId)}/latest-document`);
+      const q = label?.kind && label?.id ? `?labelKind=${encodeURIComponent(label.kind)}&labelId=${encodeURIComponent(label.id)}` : "";
+      return await req("GET", `/api/paperless/correspondents/${encodeURIComponent(correspondentId)}/latest-document${q}`);
     } catch (e) {
       console.warn("paperless: could not load latest document", e);
+      return null;
+    }
+  },
+  // Resolves to { types: [], tags: [] } if disabled/unreachable.
+  async listLabels() {
+    try {
+      return (await req("GET", "/api/paperless/labels")) || { types: [], tags: [] };
+    } catch (e) {
+      console.warn("paperless: could not load labels", e);
+      return { types: [], tags: [] };
+    }
+  },
+  async searchDocuments(correspondentId, query) {
+    try {
+      return (await req("GET", `/api/paperless/documents?correspondentId=${encodeURIComponent(correspondentId)}&query=${encodeURIComponent(query)}`)) || [];
+    } catch (e) {
+      console.warn("paperless: could not search documents", e);
+      return [];
+    }
+  },
+  async getDocument(id) {
+    try {
+      return await req("GET", `/api/paperless/documents/${encodeURIComponent(id)}`);
+    } catch (e) {
+      console.warn("paperless: could not load document", e);
       return null;
     }
   },
