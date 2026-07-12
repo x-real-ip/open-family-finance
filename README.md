@@ -56,6 +56,10 @@ numbers evolve over time.
   expenses additionally by category), or drag-and-drop your own manual order.
 - **Light and dark theme.**
 - **Dutch and English UI**, selectable via an environment variable.
+- **Optional paperless-ngx integration** — pick a correspondent from your
+  paperless instance on expenses, government support and savings entries, or
+  just type your own, and jump straight to the most recent document paperless
+  has for it. See [Paperless-ngx integration](#paperless-ngx-integration).
 - **Self-hosted**: a small Express API backed by Postgres, with an optional
   bearer-token to lock down access.
 
@@ -96,10 +100,44 @@ All configuration is done through environment variables — see
 | `API_TOKEN`           | *(unset = API is open)* | Optional bearer token required on every `/api` request, shared between the frontend and backend |
 | `LANGUAGE`            | `nl`                     | UI language: `nl` or `en` |
 | `APP_TITLE`           | `Open Family Finance`    | Page title / heading shown in the app |
+| `PAPERLESS_ENABLED`   | `false`                  | Turns the paperless-ngx correspondent integration on, both the backend proxy and the frontend UI (see below) |
+| `PAPERLESS_URL`       | —                        | Base URL the **backend** uses to call the paperless API. Backend-only, used only when `PAPERLESS_ENABLED=true` |
+| `PAPERLESS_PUBLIC_URL`| *(falls back to `PAPERLESS_URL`)* | Base URL used to build "open in paperless" links. Only set this if paperless is reachable at a different address from your browser than `PAPERLESS_URL` (e.g. `PAPERLESS_URL` is a cluster-internal address) |
+| `PAPERLESS_API_TOKEN` | —                        | paperless-ngx API token. Backend-only, never sent to the browser |
+| `PAPERLESS_DOCUMENT_TYPE_PRIORITY` | —           | Optional, comma-separated document type names in priority order (e.g. `Jaaropgave,Jaarafrekening,Factuur,Contract`). The linked document becomes the most recent one of the first type in this list the correspondent has, instead of just the most recent overall. Backend-only |
 
-`LANGUAGE` and `APP_TITLE` are read by the frontend at container start (not
-baked into the build), so the same image can be reused for different
-deployments.
+`LANGUAGE`, `APP_TITLE` and `PAPERLESS_ENABLED` are read by the frontend at
+container start (not baked into the build), so the same image can be reused
+for different deployments.
+
+## Paperless-ngx integration
+
+If you run [paperless-ngx](https://docs.paperless-ngx.com/) and want your
+correspondents (the companies/senders on your documents) available while
+entering expenses, government support or savings:
+
+1. Generate an API token in paperless-ngx (user profile → API token).
+2. Set `PAPERLESS_ENABLED=true`, `PAPERLESS_URL` and `PAPERLESS_API_TOKEN`
+   (and `PAPERLESS_PUBLIC_URL`, if paperless is reachable at a different
+   address from your browser) for the **backend**, and `PAPERLESS_ENABLED=true`
+   for the **frontend** — see [Configuration](#configuration).
+3. A correspondent icon appears in the action row of expenses, government
+   support and savings entries — it's collapsed by default so entries that
+   don't need one stay uncluttered. Clicking it opens a field that suggests
+   names from paperless as you type, while still accepting anything you type
+   yourself. A name that doesn't exist yet in paperless is created there too,
+   so the two stay in sync.
+4. If the typed name matches a known paperless correspondent, the same popover
+   shows the most recent document paperless has for it (if any), with a link
+   to open it directly in paperless. Set `PAPERLESS_DOCUMENT_TYPE_PRIORITY` to
+   prefer certain document types (e.g. an annual statement or invoice) over
+   just whatever is most recent overall.
+
+The frontend never talks to paperless directly and never receives
+`PAPERLESS_URL`, `PAPERLESS_PUBLIC_URL` or `PAPERLESS_API_TOKEN` — all
+communication goes through the backend API. Leaving `PAPERLESS_ENABLED` unset
+(or `false`) hides the correspondent field entirely; nothing paperless-related
+is shown or fetched.
 
 ## Data & privacy
 

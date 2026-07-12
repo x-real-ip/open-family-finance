@@ -60,6 +60,10 @@ cijfers zich over tijd ontwikkelen.
   volgorde.
 - **Licht en donker thema.**
 - **Nederlandse en Engelse UI**, instelbaar via een environment-variabele.
+- **Optionele paperless-ngx-integratie** — kies een correspondent uit je
+  paperless-omgeving bij uitgaven, overheidsbijdrage en spaardoelen, of typ
+  gewoon je eigen waarde, en spring meteen naar het meest recente document dat
+  paperless daarvoor heeft. Zie [Paperless-ngx-integratie](#paperless-ngx-integratie).
 - **Zelf te hosten**: een kleine Express-API met Postgres als opslag, met een
   optioneel bearer-token om toegang af te schermen.
 
@@ -101,10 +105,45 @@ gebruikt:
 | `API_TOKEN`             | *(leeg = API is open)*    | Optioneel bearer-token dat vereist is bij elk `/api`-verzoek, gedeeld tussen frontend en backend |
 | `LANGUAGE`              | `nl`                       | UI-taal: `nl` of `en` |
 | `APP_TITLE`             | `Open Family Finance`      | Paginatitel/kop die in de app wordt getoond |
+| `PAPERLESS_ENABLED`     | `false`                    | Zet de paperless-ngx-correspondentintegratie aan, zowel de backend-proxy als de frontend-UI (zie hieronder) |
+| `PAPERLESS_URL`         | —                          | Basis-URL die de **backend** gebruikt om de paperless-API aan te roepen. Alleen backend, alleen gebruikt als `PAPERLESS_ENABLED=true` |
+| `PAPERLESS_PUBLIC_URL`  | *(valt terug op `PAPERLESS_URL`)* | Basis-URL waarmee "open in paperless"-links worden opgebouwd. Alleen nodig als paperless voor je browser op een ander adres bereikbaar is dan `PAPERLESS_URL` (bijv. als `PAPERLESS_URL` een cluster-interne URL is) |
+| `PAPERLESS_API_TOKEN`   | —                          | paperless-ngx API-token. Alleen backend, komt nooit in de browser terecht |
+| `PAPERLESS_DOCUMENT_TYPE_PRIORITY` | —              | Optionele, kommagescheiden lijst van documenttype-namen in prioriteitsvolgorde (bijv. `Jaaropgave,Jaarafrekening,Factuur,Contract`). Het gekoppelde document wordt het meest recente document van het eerste type uit deze lijst dat de correspondent heeft, in plaats van gewoon het meest recente document. Alleen backend |
 
-`LANGUAGE` en `APP_TITLE` worden door de frontend bij het opstarten van de
-container ingelezen (niet vast gebakken in de build), zodat dezelfde image
-voor verschillende omgevingen hergebruikt kan worden.
+`LANGUAGE`, `APP_TITLE` en `PAPERLESS_ENABLED` worden door de frontend bij het
+opstarten van de container ingelezen (niet vast gebakken in de build), zodat
+dezelfde image voor verschillende omgevingen hergebruikt kan worden.
+
+## Paperless-ngx-integratie
+
+Als je [paperless-ngx](https://docs.paperless-ngx.com/) draait en je
+correspondenten (de bedrijven/afzenders op je documenten) beschikbaar wilt
+hebben bij het invullen van uitgaven, overheidsbijdrage of sparen:
+
+1. Genereer een API-token in paperless-ngx (gebruikersprofiel → API-token).
+2. Zet `PAPERLESS_ENABLED=true`, `PAPERLESS_URL` en `PAPERLESS_API_TOKEN`
+   (en `PAPERLESS_PUBLIC_URL`, als paperless voor je browser op een ander
+   adres bereikbaar is) voor de **backend**, en `PAPERLESS_ENABLED=true` voor
+   de **frontend** — zie [Configuratie](#configuratie).
+3. Bij uitgaven, overheidsbijdrage en spaardoelen verschijnt een
+   correspondent-icoon in de actierij — standaard ingeklapt, zodat entries die
+   het niet nodig hebben niet vollopen. Erop klikken opent een veld dat namen
+   uit paperless suggereert terwijl je typt, maar accepteert ook nog gewoon
+   alles wat je zelf intypt. Een naam die nog niet in paperless bestaat wordt
+   daar automatisch ook aangemaakt, zodat ze in sync blijven.
+4. Komt de getypte naam overeen met een bekende correspondent in paperless,
+   dan toont datzelfde popovertje meteen het meest recente document dat
+   paperless daarvoor heeft (als er een is), met een link om 'm direct in
+   paperless te openen. Zet `PAPERLESS_DOCUMENT_TYPE_PRIORITY` om bepaalde
+   documenttypes (bijv. een jaaropgave of factuur) voorrang te geven boven
+   gewoon het meest recente document.
+
+De frontend praat nooit rechtstreeks met paperless en krijgt `PAPERLESS_URL`,
+`PAPERLESS_PUBLIC_URL` of `PAPERLESS_API_TOKEN` nooit te zien — alle
+communicatie loopt via de backend-API. Laat je `PAPERLESS_ENABLED` leeg (of
+op `false`), dan is het
+correspondent-veld nergens te zien en wordt er niets opgehaald.
 
 ## Data & privacy
 
