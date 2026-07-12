@@ -109,10 +109,17 @@ export async function latestDocumentForCorrespondent(correspondentId, label) {
 
 // Free-text search (paperless's own full-text search) scoped to one correspondent,
 // for manually picking a specific document instead of relying on the automatic pick.
+// paperless's `query` search runs through its own search index rather than the
+// regular queryset filters, so it doesn't reliably combine with correspondent__id
+// in the same request — fetch a larger candidate set and filter by correspondent
+// ourselves instead of trusting paperless to scope both together.
 export async function searchDocuments(correspondentId, query, limit = 10) {
-  const base = `correspondent__id=${encodeURIComponent(correspondentId)}&query=${encodeURIComponent(query)}&page_size=${limit}`;
-  const [page, types] = await Promise.all([paperlessFetch(`/api/documents/?${base}`), listDocumentTypes()]);
-  return (page.results || []).map((doc) => toDocumentResult(doc, types.find((t) => t.id === doc.document_type)?.name || null));
+  const [page, types] = await Promise.all([
+    paperlessFetch(`/api/documents/?query=${encodeURIComponent(query)}&page_size=100`),
+    listDocumentTypes(),
+  ]);
+  const matches = (page.results || []).filter((doc) => String(doc.correspondent) === String(correspondentId));
+  return matches.slice(0, limit).map((doc) => toDocumentResult(doc, types.find((t) => t.id === doc.document_type)?.name || null));
 }
 
 // A single document by id, for displaying one that was manually pinned to an
