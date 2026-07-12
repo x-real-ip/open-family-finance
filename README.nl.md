@@ -58,6 +58,10 @@ cijfers zich over tijd ontwikkelen.
 - **Sorteren** — sorteer uitgaven, overheidsbijdragen en spaardoelen op naam
   (uitgaven ook op categorie), of versleep ze naar je eigen handmatige
   volgorde.
+- **Looptijd van contracten** — geef een post een start- en einddatum om een
+  contract of abonnement te volgen, met een voortgangsbalk en een
+  kleurgecodeerde waarschuwing zodra het binnenkort afloopt (binnen 30 dagen)
+  of al verlopen is.
 - **Licht en donker thema.**
 - **Nederlandse en Engelse UI**, instelbaar via een environment-variabele.
 - **Optionele paperless-ngx-integratie** — kies een correspondent uit je
