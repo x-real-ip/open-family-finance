@@ -22,7 +22,7 @@ import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
   ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
-  Calculator, Github, GripVertical, Building2, CalendarClock,
+  Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
@@ -374,6 +374,28 @@ export default function App() {
   const sortedExpenses = useMemo(() => sortItems("expenses", cur.expenses), [cur.expenses, listSort.expenses]);
   const sortedSavings = useMemo(() => sortItems("savings", cur.savings), [cur.savings, listSort.savings]);
 
+  // Contracts (of any kind: income, gov income, expenses, savings) that are
+  // expired or about to expire for the selected month, surfaced as a banner
+  // at the top of the page so they aren't only visible on hover.
+  const contractWarnings = useMemo(() => {
+    const entries = [
+      ...cur.partners.map((p, i) => ({ ...p, label: p.name || t(LANG, "partnerName", { n: i + 1 }) })),
+      ...cur.govIncome.map((g) => ({ ...g, label: g.label || TXT.unnamed })),
+      ...cur.expenses.map((e) => ({ ...e, label: e.label || TXT.unnamed })),
+      ...cur.savings.map((s) => ({ ...s, label: s.label || TXT.unnamed })),
+    ];
+    return entries.map((entry) => {
+      const left = daysUntil(entry.endDate);
+      if (left == null) return null;
+      const warningDays = entry.warningDays ? num(entry.warningDays) : CONTRACT_WARNING_DAYS;
+      const expired = left < 0;
+      const endingSoon = left >= 0 && left <= warningDays;
+      if (!expired && !endingSoon) return null;
+      const status = expired ? t(LANG, "contractExpired", { days: Math.abs(left) }) : t(LANG, "contractEndingSoon", { days: left });
+      return { id: entry.id, label: entry.label, status, expired };
+    }).filter(Boolean).sort((a, b) => (a.expired === b.expired ? 0 : a.expired ? -1 : 1));
+  }, [cur]);
+
   // Drag-and-drop reordering — only available while a section's sort mode is "manual".
   // Reordering changes the entry order for the selected month only; it does not
   // forward-propagate like value edits do, since order isn't a per-entry field.
@@ -637,6 +659,20 @@ export default function App() {
       {PAPERLESS_ENABLED && <datalist id="correspondents">{correspondents.map((c) => <option key={c} value={c} />)}</datalist>}
 
       <div style={St.shell} className="shell">
+        {contractWarnings.length > 0 && (
+          <div style={St.warnBanner} className="fade" role="alert">
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={St.warnBannerBody}>
+              {contractWarnings.map((w) => (
+                <div key={w.id} style={St.warnBannerRow}>
+                  <span style={St.warnBannerLabel}>{w.label}</span>
+                  <span style={{ color: w.expired ? C.exp : C.warn }}>{w.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <header style={St.header}>
           <div style={St.headerTop}>
             <h1 style={St.h1}>{APP_TITLE}</h1>
@@ -1674,6 +1710,11 @@ function NoteField({ value, onChange }) {
 const St = {
   page: { minHeight: "100vh", background: C.canvas, color: C.ink, fontFamily: "'Inter', system-ui, sans-serif", fontFeatureSettings: "'tnum' 1", padding: "24px 20px 56px" },
   shell: { maxWidth: 1120, width: "100%", margin: "0 auto" },
+
+  warnBanner: { display: "flex", gap: 10, alignItems: "flex-start", background: "var(--warn-soft)", border: `1px solid ${C.warn}`, color: C.warn, borderRadius: 14, padding: "12px 14px", marginTop: 12, marginBottom: 4 },
+  warnBannerBody: { display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 0 },
+  warnBannerRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, fontSize: 13, flexWrap: "wrap" },
+  warnBannerLabel: { color: C.ink, fontWeight: 700 },
 
   header: { padding: "8px 4px 16px" },
   headerTop: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" },
