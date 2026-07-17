@@ -22,7 +22,7 @@ import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
   ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
-  Calculator, Github, GripVertical, Building2,
+  Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
@@ -36,7 +36,7 @@ import { LANG, TXT, t, getRuntimeCurrencyLocale, getRuntimeDateLocale, getRuntim
 ------------------------------------------------------------------- */
 const C = {
   canvas: "var(--canvas)", card: "var(--card)", ink: "var(--ink)", muted: "var(--muted)", line: "var(--line)",
-  a: "var(--a)", b: "var(--b)", gov: "var(--gov)", save: "var(--save)", inc: "var(--inc)", exp: "var(--exp)", softA: "var(--soft-a)", softB: "var(--soft-b)",
+  a: "var(--a)", b: "var(--b)", gov: "var(--gov)", save: "var(--save)", inc: "var(--inc)", exp: "var(--exp)", warn: "var(--warn)", softA: "var(--soft-a)", softB: "var(--soft-b)",
 };
 
 const KEY = "open-family-finance:v1";
@@ -60,8 +60,8 @@ const DEFAULT_FIGURES = {
   margePct: "0.5",
   customPct: "50",
   partners: [
-    { id: "p1", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null },
-    { id: "p2", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null },
+    { id: "p1", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" },
+    { id: "p2", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" },
   ],
   govIncome: [],
   expenses: [],
@@ -174,6 +174,21 @@ const shiftMonth = (k, delta) => { const d = keyToDate(k); d.setMonth(d.getMonth
 const monthLong = (k, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(keyToDate(k));
 const monthShort = (k, locale = getRuntimeDateLocale()) => { const d = keyToDate(k); const m = new Intl.DateTimeFormat(locale, { month: "short" }).format(d); return d.getMonth() === 0 ? `${m} '${String(d.getFullYear()).slice(2)}` : m; };
 const dt = (ts, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(new Date(ts));
+const fmtDate = (iso, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(`${iso}T00:00:00`));
+
+// — contract duration: start/end date, "ending soon" warning and progress —
+const CONTRACT_WARNING_DAYS = 30;
+const MS_PER_DAY = 86400000;
+const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+// Days from today until `iso` (negative once past); null without an end date.
+const daysUntil = (iso) => iso ? Math.round((new Date(`${iso}T00:00:00`) - startOfToday()) / MS_PER_DAY) : null;
+// Share of the start–end span already elapsed, clamped to 0–1; null without both dates.
+const durationProgress = (startIso, endIso) => {
+  if (!startIso || !endIso) return null;
+  const start = new Date(`${startIso}T00:00:00`), end = new Date(`${endIso}T00:00:00`);
+  if (end <= start) return null;
+  return clamp01((startOfToday() - start) / (end - start));
+};
 
 /* ----------------------------------------------------------------
    Core calculation — the fair split
@@ -219,11 +234,11 @@ function migrateFig(f) {
   const per = (p) => (p === "year" ? "year" : "month");
   return {
     method: f.method || "income", margePct: f.margePct ?? "0.5", customPct: f.customPct ?? "50",
-    partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "", correspondent: p.correspondent || "", documentMode: p.documentMode || "auto", documentLabel: p.documentLabel || null, documentId: p.documentId ?? null })),
-    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", correspondent: g.correspondent || "", documentMode: g.documentMode || "auto", documentLabel: g.documentLabel || null, documentId: g.documentId ?? null, formula: g.formula || undefined })),
-    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, formula: e.formula || undefined })),
-    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", correspondent: s.correspondent || "", documentMode: s.documentMode || "auto", documentLabel: s.documentLabel || null, documentId: s.documentId ?? null, formula: s.formula || undefined }))
-      : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null }] : []),
+    partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "", correspondent: p.correspondent || "", documentMode: p.documentMode || "auto", documentLabel: p.documentLabel || null, documentId: p.documentId ?? null, startDate: p.startDate || "", endDate: p.endDate || "", warningDays: p.warningDays || "" })),
+    govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", correspondent: g.correspondent || "", documentMode: g.documentMode || "auto", documentLabel: g.documentLabel || null, documentId: g.documentId ?? null, startDate: g.startDate || "", endDate: g.endDate || "", warningDays: g.warningDays || "", formula: g.formula || undefined })),
+    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", warningDays: e.warningDays || "", formula: e.formula || undefined })),
+    savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", correspondent: s.correspondent || "", documentMode: s.documentMode || "auto", documentLabel: s.documentLabel || null, documentId: s.documentId ?? null, startDate: s.startDate || "", endDate: s.endDate || "", warningDays: s.warningDays || "", formula: s.formula || undefined }))
+      : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" }] : []),
     overrides: (f.overrides && typeof f.overrides === "object") ? { ...f.overrides } : {},
   };
 }
@@ -358,6 +373,28 @@ export default function App() {
   const sortedGovIncome = useMemo(() => sortItems("govIncome", cur.govIncome), [cur.govIncome, listSort.govIncome]);
   const sortedExpenses = useMemo(() => sortItems("expenses", cur.expenses), [cur.expenses, listSort.expenses]);
   const sortedSavings = useMemo(() => sortItems("savings", cur.savings), [cur.savings, listSort.savings]);
+
+  // Contracts (of any kind: income, gov income, expenses, savings) that are
+  // expired or about to expire for the selected month, surfaced as a banner
+  // at the top of the page so they aren't only visible on hover.
+  const contractWarnings = useMemo(() => {
+    const entries = [
+      ...cur.partners.map((p, i) => ({ ...p, label: p.name || t(LANG, "partnerName", { n: i + 1 }) })),
+      ...cur.govIncome.map((g) => ({ ...g, label: g.label || TXT.unnamed })),
+      ...cur.expenses.map((e) => ({ ...e, label: e.label || TXT.unnamed })),
+      ...cur.savings.map((s) => ({ ...s, label: s.label || TXT.unnamed })),
+    ];
+    return entries.map((entry) => {
+      const left = daysUntil(entry.endDate);
+      if (left == null) return null;
+      const warningDays = entry.warningDays ? num(entry.warningDays) : CONTRACT_WARNING_DAYS;
+      const expired = left < 0;
+      const endingSoon = left >= 0 && left <= warningDays;
+      if (!expired && !endingSoon) return null;
+      const status = expired ? t(LANG, "contractExpired", { days: Math.abs(left) }) : t(LANG, "contractEndingSoon", { days: left });
+      return { id: entry.id, label: entry.label, status, expired };
+    }).filter(Boolean).sort((a, b) => (a.expired === b.expired ? 0 : a.expired ? -1 : 1));
+  }, [cur]);
 
   // Drag-and-drop reordering — only available while a section's sort mode is "manual".
   // Reordering changes the entry order for the selected month only; it does not
@@ -585,9 +622,9 @@ export default function App() {
   const addListItem = (kind, item) => editForward((f) => (
     (f[kind] || []).some((x) => x.id === item.id) ? f : { ...f, [kind]: [...(f[kind] || []), clone(item)] }
   ), item.id);
-  const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null });
-  const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null });
-  const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null });
+  const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
+  const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
+  const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   // Reset the selected month: take over the figures of the nearest earlier
   // month and clear this month's overrides, so it follows the baseline again.
   // Without an earlier month it falls back to the empty defaults.
@@ -622,6 +659,20 @@ export default function App() {
       {PAPERLESS_ENABLED && <datalist id="correspondents">{correspondents.map((c) => <option key={c} value={c} />)}</datalist>}
 
       <div style={St.shell} className="shell">
+        {contractWarnings.length > 0 && (
+          <div style={St.warnBanner} className="fade" role="alert">
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={St.warnBannerBody}>
+              {contractWarnings.map((w) => (
+                <div key={w.id} style={St.warnBannerRow}>
+                  <span style={St.warnBannerLabel}>{w.label}</span>
+                  <span style={{ color: w.expired ? C.exp : C.warn }}>{w.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <header style={St.header}>
           <div style={St.headerTop}>
             <h1 style={St.h1}>{APP_TITLE}</h1>
@@ -807,6 +858,7 @@ export default function App() {
                   <NoteField value={p.note || ""} onChange={(v) => setPartner(i, { note: v })} />
                   <LinkField value={p.url || ""} onChange={(v) => setPartner(i, { url: v })} />
                   <CorrespondentField entry={p} onChange={(patch) => setPartner(i, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
+                  <DurationField entry={p} onChange={(patch) => setPartner(i, patch)} />
                   <TrendIcon income trend={entryTrend("partners", p.id, monthlyInc(p))} />
                   <SparkIcon history={entryHistory("partners", p.id)} />
                   <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("partners", p.id, pk, fk)} />
@@ -838,6 +890,7 @@ export default function App() {
                     <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
                     <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
                     <CorrespondentField entry={g} onChange={(patch) => setListItem("govIncome", g.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
+                    <DurationField entry={g} onChange={(patch) => setListItem("govIncome", g.id, patch)} />
                     <FormulaField entry={g} monthData={cur} onChange={(patch) => setListItem("govIncome", g.id, patch)} />
                     <TrendIcon income trend={entryTrend("govIncome", g.id, monthlyOf(g, cur))} />
                     <SparkIcon history={entryHistory("govIncome", g.id)} />
@@ -875,6 +928,7 @@ export default function App() {
                     <NoteField value={e.note || ""} onChange={(v) => setListItem("expenses", e.id, { note: v })} />
                     <LinkField value={e.url || ""} onChange={(v) => setListItem("expenses", e.id, { url: v })} />
                     <CorrespondentField entry={e} onChange={(patch) => setListItem("expenses", e.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
+                    <DurationField entry={e} onChange={(patch) => setListItem("expenses", e.id, patch)} />
                     <FormulaField entry={e} monthData={cur} onChange={(patch) => setListItem("expenses", e.id, patch)} />
                     <TrendIcon income={false} trend={entryTrend("expenses", e.id, monthlyOf(e, cur))} />
                     <SparkIcon history={entryHistory("expenses", e.id)} />
@@ -935,6 +989,7 @@ export default function App() {
                     <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
                     <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
                     <CorrespondentField entry={s} onChange={(patch) => setListItem("savings", s.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
+                    <DurationField entry={s} onChange={(patch) => setListItem("savings", s.id, patch)} />
                     <FormulaField entry={s} monthData={cur} onChange={(patch) => setListItem("savings", s.id, patch)} />
                     <TrendIcon income={false} trend={entryTrend("savings", s.id, monthlyOf(s, cur))} />
                     <SparkIcon history={entryHistory("savings", s.id)} />
@@ -1199,6 +1254,70 @@ function CorrespondentField({ entry, onChange, onSync, correspondents, labels })
               )}
             </>
           )}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Contract/subscription duration: start + end date, a progress bar, and a
+// warning state (color-coded, visible even with the popover closed) once the
+// end date is within CONTRACT_WARNING_DAYS or already passed.
+function DurationField({ entry, onChange }) {
+  const [open, setOpen] = useState(false);
+  const editingRef = useRef(false);
+  const timer = useRef(null);
+  const rootRef = useRef(null);
+  useClickOutside(rootRef, open, () => setOpen(false));
+
+  const start = entry.startDate || "";
+  const end = entry.endDate || "";
+  const warningDays = entry.warningDays ? num(entry.warningDays) : CONTRACT_WARNING_DAYS;
+  const has = Boolean(start || end);
+  const left = daysUntil(end);
+  const expired = left != null && left < 0;
+  const endingSoon = left != null && left >= 0 && left <= warningDays;
+  const progress = durationProgress(start, end);
+  const color = expired ? C.exp : endingSoon ? C.warn : has ? C.b : C.muted;
+
+  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
+  const markEditing = () => { editingRef.current = true; };
+  const unmarkEditing = () => { editingRef.current = false; };
+
+  const status = expired ? t(LANG, "contractExpired", { days: Math.abs(left) })
+    : endingSoon ? t(LANG, "contractEndingSoon", { days: left })
+    : end ? t(LANG, "contractActiveUntil", { date: fmtDate(end) })
+    : null;
+
+  return (
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
+      <button type="button" aria-label={TXT.duration}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        style={{ ...St.iconBtn, color }}>
+        <CalendarClock size={16} />
+      </button>
+      {open && (
+        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
+          <div style={St.copyTitle}>{TXT.duration}</div>
+          <label style={St.copyRow}>
+            <span style={St.copyLbl}>{TXT.startDate}</span>
+            <input type="date" value={start} onChange={(e) => onChange({ startDate: e.target.value })} onFocus={markEditing} onBlur={unmarkEditing} style={St.copySel} />
+          </label>
+          <label style={St.copyRow}>
+            <span style={St.copyLbl}>{TXT.endDate}</span>
+            <input type="date" value={end} onChange={(e) => onChange({ endDate: e.target.value })} onFocus={markEditing} onBlur={unmarkEditing} style={St.copySel} />
+          </label>
+          <label style={St.copyRow}>
+            <span style={St.copyLbl}>{TXT.warningDays}</span>
+            <input inputMode="numeric" value={entry.warningDays || ""} placeholder={String(CONTRACT_WARNING_DAYS)}
+              onChange={(e) => onChange({ warningDays: e.target.value.replace(/[^0-9]/g, "") })}
+              onFocus={markEditing} onBlur={unmarkEditing} style={{ ...St.copySel, width: 60 }} />
+          </label>
+          {progress != null && (
+            <div style={St.progressTrack}><div style={{ ...St.progressFill, width: `${progress * 100}%`, background: color }} /></div>
+          )}
+          {status && <div style={{ ...St.correspondentDocMuted, color, marginTop: progress != null ? 6 : 8 }}>{status}</div>}
         </span>
       )}
     </span>
@@ -1592,6 +1711,11 @@ const St = {
   page: { minHeight: "100vh", background: C.canvas, color: C.ink, fontFamily: "'Inter', system-ui, sans-serif", fontFeatureSettings: "'tnum' 1", padding: "24px 20px 56px" },
   shell: { maxWidth: 1120, width: "100%", margin: "0 auto" },
 
+  warnBanner: { display: "flex", gap: 10, alignItems: "flex-start", background: "var(--warn-soft)", border: `1px solid ${C.warn}`, color: C.warn, borderRadius: 14, padding: "12px 14px", marginTop: 12, marginBottom: 4 },
+  warnBannerBody: { display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 0 },
+  warnBannerRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, fontSize: 13, flexWrap: "wrap" },
+  warnBannerLabel: { color: C.ink, fontWeight: 700 },
+
   header: { padding: "8px 4px 16px" },
   headerTop: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" },
   eyebrow: { fontSize: 12, letterSpacing: "0.14em", color: C.muted, fontWeight: 600 },
@@ -1701,6 +1825,8 @@ const St = {
   correspondentResults: { maxHeight: 160, overflowY: "auto", marginTop: 6, display: "flex", flexDirection: "column", gap: 2 },
   correspondentResult: { textAlign: "left", border: "none", background: "transparent", color: C.ink, fontSize: 12.5, padding: "6px 4px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" },
   correspondentUnlink: { border: "none", background: "transparent", color: C.exp, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 },
+  progressTrack: { marginTop: 10, height: 6, borderRadius: 999, background: C.canvas, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 999, transition: "width .2s" },
   trendIcon: { width: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   sparkTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 6 },
   sparkCap: { display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 12, color: C.muted },
