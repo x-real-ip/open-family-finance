@@ -189,6 +189,14 @@ const durationProgress = (startIso, endIso) => {
   if (end <= start) return null;
   return clamp01((startOfToday() - start) / (end - start));
 };
+// One year after `iso` (used to default a contract's end date once a start
+// date is picked). Feb 29 rolls over to Mar 1 in a non-leap target year,
+// which is JS Date's normal behavior for setFullYear.
+const addOneYear = (iso) => {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setFullYear(d.getFullYear() + 1);
+  return d.toISOString().slice(0, 10);
+};
 
 /* ----------------------------------------------------------------
    Core calculation — the fair split
@@ -1278,10 +1286,18 @@ function CorrespondentField({ entry, onChange, onSync, correspondents, labels })
 // end date is within CONTRACT_WARNING_DAYS or already passed.
 function DurationField({ entry, onChange }) {
   const [open, setOpen] = useState(false);
+  // Tracks whether a field in this popover has been focused since it opened.
+  // Only reset on an explicit close (outside click / toggling the button
+  // shut), never on blur: some browsers momentarily blur the date input while
+  // its native calendar overlay is open, which — combined with the pointer
+  // appearing to leave the popover onto that overlay — used to auto-close the
+  // whole popover mid-pick, forcing a second click before the day could be
+  // selected. Once you've started editing, only an explicit close dismisses it.
   const editingRef = useRef(false);
   const timer = useRef(null);
   const rootRef = useRef(null);
-  useClickOutside(rootRef, open, () => setOpen(false));
+  const closeNow = () => { clearTimeout(timer.current); editingRef.current = false; setOpen(false); };
+  useClickOutside(rootRef, open, closeNow);
 
   const start = entry.startDate || "";
   const end = entry.endDate || "";
@@ -1296,7 +1312,10 @@ function DurationField({ entry, onChange }) {
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
   const markEditing = () => { editingRef.current = true; };
-  const unmarkEditing = () => { editingRef.current = false; };
+
+  // Picking a start date defaults the end date to one year later, but only
+  // when there's no end date yet — an already-set end date is left alone.
+  const setStart = (value) => onChange(value && !end ? { startDate: value, endDate: addOneYear(value) } : { startDate: value });
 
   const status = expired ? t(LANG, "contractExpired", { days: Math.abs(left) })
     : endingSoon ? t(LANG, "contractEndingSoon", { days: left })
@@ -1306,7 +1325,7 @@ function DurationField({ entry, onChange }) {
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
       <button type="button" aria-label={TXT.duration}
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => { if (o) editingRef.current = false; return !o; }); }}
         style={{ ...St.iconBtn, color }}>
         <CalendarClock size={16} />
       </button>
@@ -1315,17 +1334,17 @@ function DurationField({ entry, onChange }) {
           <div style={St.copyTitle}>{TXT.duration}</div>
           <label style={St.copyRow}>
             <span style={St.copyLbl}>{TXT.startDate}</span>
-            <input type="date" value={start} onChange={(e) => onChange({ startDate: e.target.value })} onFocus={markEditing} onBlur={unmarkEditing} style={St.copySel} />
+            <input type="date" lang={LANG} value={start} onChange={(e) => setStart(e.target.value)} onFocus={markEditing} style={St.copySel} />
           </label>
           <label style={St.copyRow}>
             <span style={St.copyLbl}>{TXT.endDate}</span>
-            <input type="date" value={end} onChange={(e) => onChange({ endDate: e.target.value })} onFocus={markEditing} onBlur={unmarkEditing} style={St.copySel} />
+            <input type="date" lang={LANG} value={end} onChange={(e) => onChange({ endDate: e.target.value })} onFocus={markEditing} style={St.copySel} />
           </label>
           <label style={St.copyRow}>
             <span style={St.copyLbl}>{TXT.warningDays}</span>
             <input inputMode="numeric" value={entry.warningDays || ""} placeholder={String(CONTRACT_WARNING_DAYS)}
               onChange={(e) => onChange({ warningDays: e.target.value.replace(/[^0-9]/g, "") })}
-              onFocus={markEditing} onBlur={unmarkEditing} style={{ ...St.copySel, width: 60 }} />
+              onFocus={markEditing} style={{ ...St.copySel, width: 60 }} />
           </label>
           {progress != null && (
             <div style={St.progressTrack}><div style={{ ...St.progressFill, width: `${progress * 100}%`, background: color }} /></div>
