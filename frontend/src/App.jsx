@@ -25,7 +25,7 @@ import {
   Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle,
 } from "lucide-react";
 import {
-  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
+  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 import { storage, paperless, PAPERLESS_ENABLED } from "./api";
@@ -300,11 +300,16 @@ function monthlyContributionAt(months, entryId, key) {
   if (!entryId) return 0;
   const findIn = (fig) => fig?.savings?.find((x) => x.id === entryId);
   if (months[key]) { const e = findIn(months[key]); return e ? monthlyOf(e, months[key]) : 0; }
-  const earlier = Object.keys(months).filter((k) => k < key).sort();
-  if (!earlier.length) return 0;
-  const nearestKey = earlier[earlier.length - 1];
-  const e = findIn(months[nearestKey]);
-  return e ? monthlyOf(e, months[nearestKey]) : 0;
+  const sorted = Object.keys(months).sort();
+  const earlier = sorted.filter((k) => k < key);
+  // A checkpoint often predates the earliest month the app actually has
+  // figures for (e.g. a start balance from months before you started using
+  // this app) — fall back to the earliest month available at all rather
+  // than silently treating those months as a €0 contribution.
+  const refKey = earlier.length ? earlier[earlier.length - 1] : sorted[0];
+  if (!refKey) return 0;
+  const e = findIn(months[refKey]);
+  return e ? monthlyOf(e, months[refKey]) : 0;
 }
 // Projects a sub-account's balance across `keys` (sorted, ascending month
 // keys), starting from its own checkpoint. Never recomputes months before or
@@ -1522,6 +1527,11 @@ function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, horiz
   const totalAtEnd = keys.length ? goal.subAccounts.reduce((sum, s) => sum + (seriesBySub[s.id][keys[keys.length - 1]]?.balance ?? 0), 0) : 0;
   const reached = target != null && keys.length > 0 && totalAtEnd >= target;
   const hasInterest = goal.subAccounts.some((s) => num(s.interestRate) > 0);
+  const chartData = useMemo(() => keys.map((k) => {
+    const point = { label: monthShort(k) };
+    for (const s of goal.subAccounts) point[s.id] = seriesBySub[s.id][k]?.balance ?? null;
+    return point;
+  }), [keys, seriesBySub, goal.subAccounts]);
 
   return (
     <section style={St.section} className="fade">
@@ -1543,6 +1553,26 @@ function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, horiz
       ))}
       {goal.subAccounts.length === 0 && <div style={St.copyEmpty}>{TXT.noSubAccounts}</div>}
       <button type="button" onClick={onAddSubAccount} style={St.addBtn}><Plus size={16} /> {TXT.addSubAccount}</button>
+
+      {keys.length >= 2 && goal.subAccounts.length > 0 && (
+        <>
+          <ChartTitle>{TXT.savingsChartTitle}</ChartTitle>
+          <div style={St.chartBox}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 6, right: 8, left: -14, bottom: 0 }}>
+                <CartesianGrid stroke={C.line} vertical={false} />
+                <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
+                <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
+                <Tooltip {...tooltipProps} /><Legend {...legendProps} />
+                {goal.subAccounts.map((s) => (
+                  <Area key={s.id} type="monotone" dataKey={s.id} name={s.holder || TXT.unnamed} stackId="1"
+                    stroke={categoryColor(s.holder || s.id)} fill={categoryColor(s.holder || s.id)} fillOpacity={0.35} />
+                ))}
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
 
       {keys.length > 0 && goal.subAccounts.length > 0 && (
         <div style={St.savingsTableWrap}>
