@@ -1601,47 +1601,48 @@ function SubAccountRow({ sub, savingsEntries, currentMonthData, onChange, onRemo
   const linkedEntry = sub.entryId ? savingsEntries.find((s) => s.id === sub.entryId) : null;
   const share = sub.sharePercent === "" || sub.sharePercent == null ? 1 : num(sub.sharePercent) / 100;
   const preview = linkedEntry ? monthlyOf(linkedEntry, currentMonthData) * share : null;
+  // Stored internally as a "YYYY-MM" month key (same as everywhere else in
+  // the app), but edited with the same date picker as the contract fields —
+  // the day is discarded on change, only year and month are kept.
+  const checkpointDate = sub.checkpointMonth ? `${sub.checkpointMonth}-01` : "";
 
   return (
     <div style={St.subAccountRow}>
-      <Field label={TXT.subAccountHolder} width={100}>
-        <input value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder} onChange={(e) => onChange({ holder: e.target.value })} style={{ ...St.copySel, width: 100 }} />
-      </Field>
-      <Field label={TXT.subAccountBank} width={150}>
-        <input value={sub.bank} placeholder={TXT.subAccountBankPlaceholder} onChange={(e) => onChange({ bank: e.target.value })} style={{ ...St.copySel, width: 150, maxWidth: 150 }} />
-      </Field>
-      <Field label={TXT.subAccountIban} width={170}>
-        <input value={sub.iban} placeholder={TXT.subAccountIbanPlaceholder} onChange={(e) => onChange({ iban: e.target.value })} style={{ ...St.copySel, width: 170, maxWidth: 170 }} />
-      </Field>
-      <Field label={TXT.subAccountPlanId} width={140}>
-        <input value={sub.planId} placeholder={TXT.subAccountPlanIdPlaceholder} onChange={(e) => onChange({ planId: e.target.value })} style={{ ...St.copySel, width: 140, maxWidth: 140 }} />
-      </Field>
-      <Field label={TXT.subAccountLinkedEntry} info={TXT.subAccountLinkedEntryInfo} width={160}>
-        <select value={sub.entryId || ""} onChange={(e) => onChange({ entryId: e.target.value || null })} style={{ ...St.copySel, width: 160, maxWidth: 160 }}>
+      <input aria-label={TXT.subAccountHolder} value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder}
+        onChange={(e) => onChange({ holder: e.target.value })} style={{ ...St.nameInput, flex: "1 1 100px", minWidth: 90 }} />
+      <input aria-label={TXT.subAccountBank} value={sub.bank} placeholder={TXT.subAccountBankPlaceholder}
+        onChange={(e) => onChange({ bank: e.target.value })} style={{ ...St.catInput, width: 130 }} />
+      <input aria-label={TXT.subAccountIban} value={sub.iban} placeholder={TXT.subAccountIbanPlaceholder}
+        onChange={(e) => onChange({ iban: e.target.value })} style={{ ...St.catInput, width: 150 }} />
+      <input aria-label={TXT.subAccountPlanId} value={sub.planId} placeholder={TXT.subAccountPlanIdPlaceholder}
+        onChange={(e) => onChange({ planId: e.target.value })} style={{ ...St.catInput, width: 120 }} />
+
+      <Field label={TXT.subAccountLinkedEntry} info={TXT.subAccountLinkedEntryInfo} width={150}>
+        <select value={sub.entryId || ""} onChange={(e) => onChange({ entryId: e.target.value || null })} style={{ ...St.copySel, width: 150, maxWidth: 150 }}>
           <option value="">{TXT.subAccountNoEntry}</option>
           {savingsEntries.map((s) => <option key={s.id} value={s.id}>{s.label || TXT.unnamed}</option>)}
         </select>
       </Field>
-      <Field label={TXT.subAccountShare} width={64}>
+      <Field label={TXT.subAccountShare} width={60}>
         <input inputMode="numeric" value={sub.sharePercent ?? "100"} placeholder="100"
-          onChange={(e) => onChange({ sharePercent: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 64, maxWidth: 64 }} />
+          onChange={(e) => onChange({ sharePercent: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 60, maxWidth: 60 }} />
       </Field>
       {preview != null && (
-        <Field label={TXT.subAccountPreview} width={110}>
+        <Field label={TXT.subAccountPreview} width={100}>
           <div style={St.subAccountPreviewValue}>{eur(preview)} {TXT.perMonth}</div>
         </Field>
       )}
-      <Field label={TXT.subAccountInterestRate} info={TXT.subAccountInterestRateInfo} width={90}>
+      <Field label={TXT.subAccountInterestRate} info={TXT.subAccountInterestRateInfo} width={80}>
         <input inputMode="decimal" value={sub.interestRate} placeholder="0"
-          onChange={(e) => onChange({ interestRate: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 90, maxWidth: 90 }} />
+          onChange={(e) => onChange({ interestRate: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 80, maxWidth: 80 }} />
       </Field>
       <Field label={TXT.checkpointMonth} info={TXT.checkpointInfo} width={130}>
-        <input type="month" lang={LANG} value={sub.checkpointMonth}
-          onChange={(e) => onChange({ checkpointMonth: e.target.value })} style={{ ...St.copySel, width: 130, maxWidth: 130 }} />
+        <input type="date" lang={LANG} value={checkpointDate}
+          onChange={(e) => onChange({ checkpointMonth: e.target.value ? e.target.value.slice(0, 7) : "" })} style={{ ...St.copySel, width: 130, maxWidth: 130 }} />
       </Field>
-      <Field label={TXT.checkpointBalance} width={100}>
+      <Field label={TXT.checkpointBalance} width={90}>
         <input inputMode="decimal" value={sub.checkpointBalance} placeholder="0,00"
-          onChange={(e) => onChange({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 100 }} />
+          onChange={(e) => onChange({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 90, maxWidth: 90 }} />
       </Field>
       <button type="button" aria-label={TXT.delete} onClick={onRemove} style={{ ...St.iconBtn, alignSelf: "flex-end" }}><Trash2 size={16} /></button>
     </div>
