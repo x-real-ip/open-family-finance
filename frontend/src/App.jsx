@@ -260,17 +260,76 @@ function listSortOf(raw) {
   }
   return out;
 }
-function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT } }; }
+// Savings goals (Spaaroverzicht): unlike the per-month figures, goals and
+// their sub-accounts aren't month-scoped — they persist across time like
+// partner names. A sub-account's monthly contribution is never stored here;
+// it's read live from the linked savings entry (see monthlyContributionAt),
+// so the balance projection always reflects whatever that entry's amount
+// currently is, in every month, without duplicating the figure.
+function migrateSubAccount(s) {
+  return {
+    id: s.id || uid(), holder: s.holder || "", bank: s.bank || "", iban: s.iban || "", planId: s.planId || "",
+    entryId: s.entryId || null, checkpointMonth: s.checkpointMonth || "", checkpointBalance: s.checkpointBalance ?? "",
+  };
+}
+function migrateGoal(g) {
+  return {
+    id: g.id || uid(), name: g.name || "", targetAmount: g.targetAmount ?? "",
+    subAccounts: (g.subAccounts || []).map(migrateSubAccount),
+  };
+}
+function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [] }; }
 function normalize(raw) {
   if (!raw) return freshData();
   if (raw.months && raw.selectedMonth) {
     const months = {}; for (const [k, v] of Object.entries(raw.months)) months[k] = migrateFig(v);
     // expenseSort: kept for compatibility with blobs saved by an earlier version of this feature.
     const sortSource = raw.listSort || (raw.expenseSort ? { expenses: raw.expenseSort } : null);
-    return { selectedMonth: raw.selectedMonth, months, log: raw.log || [], listSort: listSortOf(sortSource) };
+    return { selectedMonth: raw.selectedMonth, months, log: raw.log || [], listSort: listSortOf(sortSource), savingsGoals: (raw.savingsGoals || []).map(migrateGoal) };
   }
-  if (raw.partners) { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: migrateFig(raw) }, log: [], listSort: { ...DEFAULT_LIST_SORT } }; }
+  if (raw.partners) { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: migrateFig(raw) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [] }; }
   return freshData();
+}
+// The monthly contribution a sub-account's linked savings entry has in a
+// given month — read from that month's actual figures if it exists yet, or
+// from the nearest earlier month otherwise (an unvisited future month always
+// behaves as if it inherited the latest known figures, same as forward
+// propagation would eventually produce once the user navigates there).
+function monthlyContributionAt(months, entryId, key) {
+  if (!entryId) return 0;
+  const findIn = (fig) => fig?.savings?.find((x) => x.id === entryId);
+  if (months[key]) { const e = findIn(months[key]); return e ? monthlyOf(e, months[key]) : 0; }
+  const earlier = Object.keys(months).filter((k) => k < key).sort();
+  if (!earlier.length) return 0;
+  const nearestKey = earlier[earlier.length - 1];
+  const e = findIn(months[nearestKey]);
+  return e ? monthlyOf(e, months[nearestKey]) : 0;
+}
+// Projects a sub-account's balance across `keys` (sorted, ascending month
+// keys), starting from its own checkpoint. Never recomputes months before or
+// at the checkpoint — those are the recorded, real balance. Once a target
+// amount is reached the balance is capped there and stops growing further,
+// mirroring a goal whose contributions stop once it's fully funded.
+function projectSubAccountSeries(months, subAccount, keys, target) {
+  const out = {};
+  if (!subAccount.checkpointMonth) return out;
+  let balance = num(subAccount.checkpointBalance);
+  let k = subAccount.checkpointMonth;
+  let capped = target != null && balance >= target;
+  if (capped) balance = target;
+  out[k] = balance;
+  for (const key of keys) {
+    if (key <= subAccount.checkpointMonth) continue;
+    while (k < key) {
+      k = shiftMonth(k, 1);
+      if (!capped) {
+        balance += monthlyContributionAt(months, subAccount.entryId, k);
+        if (target != null && balance >= target) { balance = target; capped = true; }
+      }
+    }
+    out[key] = balance;
+  }
+  return out;
 }
 
 /* ----------------------------------------------------------------
@@ -280,6 +339,7 @@ export default function App() {
   const [data, setData] = useState(freshData);
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(true);
+  const [view, setView] = useState("month");
   const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, verloop: true, log: false });
   const [showDetails, setShowDetails] = useState(false);
   // null = unbounded, so the range always defaults to (and grows with) all available months.
@@ -646,6 +706,15 @@ export default function App() {
   const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
+
+  // Savings goals aren't month-scoped, so they're mutated directly rather
+  // than through editForward/forward-propagation.
+  const addSavingsGoal = () => setData((d) => ({ ...d, savingsGoals: [...(d.savingsGoals || []), { id: uid(), name: "", targetAmount: "", subAccounts: [] }] }));
+  const removeSavingsGoal = (goalId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.filter((g) => g.id !== goalId) }));
+  const updateSavingsGoal = (goalId, patch) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, ...patch } : g) }));
+  const addSubAccount = (goalId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", entryId: null, checkpointMonth: "", checkpointBalance: "" }] } : g) }));
+  const removeSubAccount = (goalId, subId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
+  const updateSubAccount = (goalId, subId, patch) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
   // Reset the selected month: take over the figures of the nearest earlier
   // month and clear this month's overrides, so it follows the baseline again.
   // Without an earlier month it falls back to the empty defaults.
@@ -701,8 +770,26 @@ export default function App() {
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? TXT.themeLight : TXT.themeDark}
             </button>
           </div>
+          <div style={{ ...St.toggle, marginTop: 10 }} role="group" aria-label={TXT.viewToggleAria}>
+            <button type="button" onClick={() => setView("month")} style={{ ...St.toggleBtn, ...(view === "month" ? St.toggleOn : {}) }}>{TXT.monthView}</button>
+            <button type="button" onClick={() => setView("savings")} style={{ ...St.toggleBtn, ...(view === "savings" ? St.toggleOn : {}) }}>{TXT.savingsOverviewView}</button>
+          </div>
         </header>
 
+        {view === "savings" ? (
+          <SavingsOverviewPage
+            goals={data.savingsGoals || []}
+            months={data.months}
+            savingsEntries={cur.savings}
+            onAddGoal={addSavingsGoal}
+            onRemoveGoal={removeSavingsGoal}
+            onUpdateGoal={updateSavingsGoal}
+            onAddSubAccount={addSubAccount}
+            onRemoveSubAccount={removeSubAccount}
+            onUpdateSubAccount={updateSubAccount}
+          />
+        ) : (
+        <>
         {/* Month */}
         <div style={St.monthNav} className="fade">
           <button type="button" onClick={() => goMonth(-1)} style={St.navBtn} aria-label={TXT.previousMonth}><ChevronLeft size={18} /></button>
@@ -1048,14 +1135,16 @@ export default function App() {
             </div>
           )}
         </Collapsible>
+        </>
+        )}
 
         <footer style={St.footer}>
           <span style={St.saveState}>
             {!loaded ? (<><Loader2 size={14} className="spin" /> {TXT.loading}</>) : saved ? (<><Check size={14} style={{ color: C.save }} /> {TXT.saved}</>) : (<><Loader2 size={14} className="spin" /> {TXT.saving}</>) }
           </span>
           <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
-            <MonthCopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={copyMonth} />
-            <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>
+            {view === "month" && <MonthCopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={copyMonth} />}
+            {view === "month" && <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>}
             <a href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer" style={St.githubLink} aria-label={TXT.sourceOnGitHub} title={TXT.sourceOnGitHub}>
               <Github size={16} />
             </a>
@@ -1358,6 +1447,133 @@ function DurationField({ entry, onChange }) {
         </span>
       )}
     </span>
+  );
+}
+
+// Spaaroverzicht: savings goals with one or more sub-accounts (bank/IBAN/plan
+// ID), each linked to an existing savings entry for its monthly contribution,
+// and projected forward from a recorded checkpoint balance.
+function SavingsOverviewPage({ goals, months, savingsEntries, onAddGoal, onRemoveGoal, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+  const [horizon, setHorizon] = useState(24);
+  return (
+    <div className="fade">
+      <div style={St.savingsPageHead}>
+        <ColTitle>{TXT.savingsOverviewView}</ColTitle>
+        <label style={St.savingsHorizon}>
+          {TXT.projectionMonths}
+          <select value={horizon} onChange={(e) => setHorizon(Number(e.target.value))} style={St.copySel}>
+            {[6, 12, 24, 36, 48].map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+      </div>
+      {goals.length === 0 && <div style={St.copyEmpty}>{TXT.noSavingsGoals}</div>}
+      {goals.map((goal) => (
+        <SavingsGoalCard key={goal.id} goal={goal} months={months} savingsEntries={savingsEntries} horizon={horizon}
+          onRemove={() => onRemoveGoal(goal.id)}
+          onUpdate={(patch) => onUpdateGoal(goal.id, patch)}
+          onAddSubAccount={() => onAddSubAccount(goal.id)}
+          onRemoveSubAccount={(subId) => onRemoveSubAccount(goal.id, subId)}
+          onUpdateSubAccount={(subId, patch) => onUpdateSubAccount(goal.id, subId, patch)}
+        />
+      ))}
+      <button type="button" onClick={onAddGoal} style={St.addBtn}><Plus size={16} /> {TXT.addSavingsGoal}</button>
+    </div>
+  );
+}
+
+function SavingsGoalCard({ goal, months, savingsEntries, horizon, onRemove, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+  const target = goal.targetAmount ? num(goal.targetAmount) : null;
+  // The table starts at the earliest checkpoint among this goal's
+  // sub-accounts — accounts opened later simply show "—" for months before
+  // their own checkpoint.
+  const earliest = useMemo(() => {
+    const checkpoints = goal.subAccounts.map((s) => s.checkpointMonth).filter(Boolean).sort();
+    return checkpoints[0] || null;
+  }, [goal.subAccounts]);
+  const keys = useMemo(() => {
+    if (!earliest) return [];
+    const out = [earliest];
+    let k = earliest;
+    for (let i = 0; i < horizon; i++) { k = shiftMonth(k, 1); out.push(k); }
+    return out;
+  }, [earliest, horizon]);
+  const seriesBySub = useMemo(() => {
+    const map = {};
+    for (const s of goal.subAccounts) map[s.id] = projectSubAccountSeries(months, s, keys, target);
+    return map;
+  }, [goal.subAccounts, months, keys, target]);
+  const totalAtEnd = keys.length ? goal.subAccounts.reduce((sum, s) => sum + (seriesBySub[s.id][keys[keys.length - 1]] ?? 0), 0) : 0;
+  const reached = target != null && keys.length > 0 && totalAtEnd >= target;
+
+  return (
+    <section style={St.section} className="fade">
+      <div style={St.collapseHead}>
+        <input value={goal.name} placeholder={TXT.savingsGoalNamePlaceholder} onChange={(e) => onUpdate({ name: e.target.value })} style={{ ...St.nameInput, fontWeight: 700, fontSize: 15 }} />
+        <span style={{ flex: 1 }} />
+        <label style={St.copyRow}>
+          <span style={St.copyLbl}>{TXT.targetAmount}</span>
+          <input inputMode="decimal" value={goal.targetAmount} placeholder={TXT.targetAmountPlaceholder}
+            onChange={(e) => onUpdate({ targetAmount: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 100 }} />
+        </label>
+        <button type="button" aria-label={TXT.delete} onClick={onRemove} style={St.iconBtn}><Trash2 size={16} /></button>
+      </div>
+
+      {goal.subAccounts.map((sub) => (
+        <SubAccountRow key={sub.id} sub={sub} savingsEntries={savingsEntries}
+          onChange={(patch) => onUpdateSubAccount(sub.id, patch)}
+          onRemove={() => onRemoveSubAccount(sub.id)} />
+      ))}
+      {goal.subAccounts.length === 0 && <div style={St.copyEmpty}>{TXT.noSubAccounts}</div>}
+      <button type="button" onClick={onAddSubAccount} style={St.addBtn}><Plus size={16} /> {TXT.addSubAccount}</button>
+
+      {keys.length > 0 && goal.subAccounts.length > 0 && (
+        <div style={St.savingsTableWrap}>
+          <table style={St.savingsTable}>
+            <thead>
+              <tr>
+                <th style={{ ...St.savingsTh, textAlign: "left" }}>{TXT.monthColumn}</th>
+                <th style={St.savingsTh}>{TXT.combinedTotal}</th>
+                {goal.subAccounts.map((s) => <th key={s.id} style={St.savingsTh}>{s.holder || TXT.unnamed}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map((k) => {
+                const values = goal.subAccounts.map((s) => seriesBySub[s.id][k]);
+                const total = values.reduce((sum, v) => sum + (v ?? 0), 0);
+                return (
+                  <tr key={k}>
+                    <td style={{ ...St.savingsTd, textAlign: "left" }}>{monthLong(k)}</td>
+                    <td style={{ ...St.savingsTd, fontWeight: 700 }}>{eur(total)}</td>
+                    {values.map((v, i) => <td key={goal.subAccounts[i].id} style={St.savingsTd}>{v != null ? eur(v) : "—"}</td>)}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {reached && <div style={St.savingsTargetReached}>{TXT.targetReached}</div>}
+    </section>
+  );
+}
+
+function SubAccountRow({ sub, savingsEntries, onChange, onRemove }) {
+  return (
+    <div style={St.subAccountRow}>
+      <input value={sub.holder} placeholder={TXT.subAccountHolder} onChange={(e) => onChange({ holder: e.target.value })} style={{ ...St.copySel, width: 100 }} />
+      <input value={sub.bank} placeholder={TXT.subAccountBank} onChange={(e) => onChange({ bank: e.target.value })} style={{ ...St.copySel, width: 150, maxWidth: 150 }} />
+      <input value={sub.iban} placeholder={TXT.subAccountIban} onChange={(e) => onChange({ iban: e.target.value })} style={{ ...St.copySel, width: 170, maxWidth: 170 }} />
+      <input value={sub.planId} placeholder={TXT.subAccountPlanId} onChange={(e) => onChange({ planId: e.target.value })} style={{ ...St.copySel, width: 140, maxWidth: 140 }} />
+      <select value={sub.entryId || ""} onChange={(e) => onChange({ entryId: e.target.value || null })} style={{ ...St.copySel, width: 160, maxWidth: 160 }} aria-label={TXT.subAccountLinkedEntry}>
+        <option value="">{TXT.subAccountNoEntry}</option>
+        {savingsEntries.map((s) => <option key={s.id} value={s.id}>{s.label || TXT.unnamed}</option>)}
+      </select>
+      <input type="month" lang={LANG} value={sub.checkpointMonth} aria-label={TXT.checkpointMonth}
+        onChange={(e) => onChange({ checkpointMonth: e.target.value })} style={{ ...St.copySel, width: 130, maxWidth: 130 }} />
+      <input inputMode="decimal" value={sub.checkpointBalance} placeholder={TXT.checkpointBalance}
+        onChange={(e) => onChange({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 100 }} />
+      <button type="button" aria-label={TXT.delete} onClick={onRemove} style={St.iconBtn}><Trash2 size={16} /></button>
+    </div>
   );
 }
 
@@ -1925,6 +2141,15 @@ const St = {
   copySel: { maxWidth: 134, fontSize: 13, padding: "5px 6px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.ink, fontFamily: "inherit" },
   copyApply: { width: "100%", border: "none", background: C.b, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "8px 10px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", marginTop: 2 },
   copyEmpty: { fontSize: 12.5, color: C.muted, lineHeight: 1.45 },
+
+  savingsPageHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 4 },
+  savingsHorizon: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.muted, fontWeight: 600 },
+  subAccountRow: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 10 },
+  savingsTableWrap: { overflowX: "auto", marginTop: 14 },
+  savingsTable: { width: "100%", borderCollapse: "collapse", fontSize: 13, whiteSpace: "nowrap" },
+  savingsTh: { textAlign: "right", padding: "6px 10px", color: C.muted, fontWeight: 600, borderBottom: `1px solid ${C.line}`, position: "sticky", top: 0, background: C.card },
+  savingsTd: { textAlign: "right", padding: "5px 10px", color: C.ink, fontVariantNumeric: "tabular-nums", borderBottom: `1px solid ${C.line}` },
+  savingsTargetReached: { marginTop: 10, fontSize: 12.5, fontWeight: 600, color: C.save },
 };
 
 // Global CSS: fonts, input focus states, popovers and the mobile (≤560px) card layout.
