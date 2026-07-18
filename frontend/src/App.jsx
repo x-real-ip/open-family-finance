@@ -885,7 +885,7 @@ export default function App() {
                   <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("partners", p.id, pk, fk)} />
                 </span>
               </div>
-              <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} dot />
+              <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} correspondent={p.correspondent} dot />
             </div>
           ))}
           <SubTotal monthly={calc.total} />
@@ -919,7 +919,7 @@ export default function App() {
                     <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
                   </span>
                 </div>
-                <DerivedLine monthly={monthlyOf(g, cur)} period={g.period} percent={pctOf(monthlyOf(g, cur), calc.govTotal)} dot />
+                <DerivedLine monthly={monthlyOf(g, cur)} period={g.period} percent={pctOf(monthlyOf(g, cur), calc.govTotal)} correspondent={g.correspondent} dot />
               </div>
             );
           })}
@@ -957,7 +957,7 @@ export default function App() {
                     <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("expenses", e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
                   </span>
                 </div>
-                <DerivedLine monthly={monthlyOf(e, cur)} period={e.period} percent={pctOf(monthlyOf(e, cur), calc.expensesTotal)} />
+                <DerivedLine monthly={monthlyOf(e, cur)} period={e.period} percent={pctOf(monthlyOf(e, cur), calc.expensesTotal)} correspondent={e.correspondent} />
               </div>
             );
           })}
@@ -1018,7 +1018,7 @@ export default function App() {
                     <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("savings", s.id)} style={St.iconBtn}><Trash2 size={16} /></button>
                   </span>
                 </div>
-                <DerivedLine monthly={monthlyOf(s, cur)} period={s.period} percent={pctOf(monthlyOf(s, cur), calc.savingsTotal)} dot />
+                <DerivedLine monthly={monthlyOf(s, cur)} period={s.period} percent={pctOf(monthlyOf(s, cur), calc.savingsTotal)} correspondent={s.correspondent} dot />
               </div>
             );
           })}
@@ -1104,11 +1104,14 @@ function AmountField({ value, period, onValue, onPeriod, onCommit, disabled }) {
   );
 }
 
-function DerivedLine({ monthly, period, percent, dot }) {
+// Shows the correspondent inline (when set) so it's visible at a glance, just
+// like the description — instead of only being visible after opening the
+// correspondent popover.
+function DerivedLine({ monthly, period, percent, dot, correspondent }) {
   const other = period === "year" ? `${eur(monthly)} ${TXT.perMonth}` : `${eur(monthly * 12)} ${TXT.perYear}`;
   return (
     <div style={{ ...St.derived, marginLeft: dot ? 20 : 2 }}>
-      = {other}{percent != null ? ` · ${Math.round(percent * 100)}%` : ""}
+      = {other}{percent != null ? ` · ${Math.round(percent * 100)}%` : ""}{PAPERLESS_ENABLED && correspondent ? ` · ${correspondent}` : ""}
     </div>
   );
 }
@@ -1141,11 +1144,13 @@ function DragHandle({ active, ...dragProps }) {
   return <span {...dragProps} style={St.dragHandle} aria-label={TXT.dragHandle} title={TXT.dragHandle}><GripVertical size={14} /></span>;
 }
 
-// Correspondent, hidden behind an icon like Note/Link so entries that don't
-// need one don't carry a permanently visible field. Free-text with
-// paperless-ngx suggestions (see the #correspondents datalist); when the
-// typed value matches a known paperless correspondent, also looks up (and
-// links to) the most recent document paperless has for it. Renders nothing
+// Correspondent editing is hidden behind an icon like Note/Link so entries
+// that don't need one don't carry a permanently visible input — but once set,
+// the name itself is shown directly on DerivedLine (below), so you don't have
+// to reopen this popover just to see who it is. Free-text with paperless-ngx
+// suggestions (see the #correspondents datalist); when the typed value
+// matches a known paperless correspondent, also looks up (and links to) the
+// most recent document paperless has for it. Renders nothing
 // when the integration is off, per PAPERLESS_ENABLED.
 function CorrespondentField({ entry, onChange, onSync, correspondents, labels }) {
   const [open, setOpen] = useState(false);
