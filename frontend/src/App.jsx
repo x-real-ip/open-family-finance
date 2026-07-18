@@ -173,6 +173,10 @@ const keyToDate = (k) => { const [y, m] = k.split("-").map(Number); return new D
 const shiftMonth = (k, delta) => { const d = keyToDate(k); d.setMonth(d.getMonth() + delta); return monthKey(d); };
 const monthLong = (k, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(keyToDate(k));
 const monthShort = (k, locale = getRuntimeDateLocale()) => { const d = keyToDate(k); const m = new Intl.DateTimeFormat(locale, { month: "short" }).format(d); return d.getMonth() === 0 ? `${m} '${String(d.getFullYear()).slice(2)}` : m; };
+// Like monthShort, but always includes the year — a savings projection can
+// span several years, so every axis tick needs to disambiguate on its own
+// rather than relying on the January tick alone.
+const monthShortWithYear = (k, locale = getRuntimeDateLocale()) => { const d = keyToDate(k); const m = new Intl.DateTimeFormat(locale, { month: "short" }).format(d); return `${m} '${String(d.getFullYear()).slice(2)}`; };
 const dt = (ts, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(new Date(ts));
 const fmtDate = (iso, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(`${iso}T00:00:00`));
 
@@ -1528,10 +1532,13 @@ function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, horiz
   const reached = target != null && keys.length > 0 && totalAtEnd >= target;
   const hasInterest = goal.subAccounts.some((s) => num(s.interestRate) > 0);
   const chartData = useMemo(() => keys.map((k) => {
-    const point = { label: monthShort(k) };
+    const point = { label: monthShortWithYear(k) };
     for (const s of goal.subAccounts) point[s.id] = seriesBySub[s.id][k]?.balance ?? null;
     return point;
   }), [keys, seriesBySub, goal.subAccounts]);
+  // Skip ticks so labels never crowd — aim for roughly 8 visible regardless
+  // of how many months the horizon spans.
+  const chartTickInterval = Math.max(0, Math.ceil(chartData.length / 8) - 1);
 
   return (
     <section style={St.section} className="fade">
@@ -1559,9 +1566,9 @@ function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, horiz
           <ChartTitle>{TXT.savingsChartTitle}</ChartTitle>
           <div style={St.chartBox}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 6, right: 8, left: -14, bottom: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 6, right: 20, left: -14, bottom: 0 }}>
                 <CartesianGrid stroke={C.line} vertical={false} />
-                <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
+                <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} interval={chartTickInterval} />
                 <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
                 <Tooltip {...tooltipProps} /><Legend {...legendProps} />
                 {goal.subAccounts.map((s) => (
