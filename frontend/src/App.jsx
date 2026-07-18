@@ -561,50 +561,63 @@ export default function App() {
     return { ...d, log: [entry, ...(d.log || [])].slice(0, 300) };
   });
 
-  // Copy one entry's value from the selected month to existing past/future months,
-  // bounded by the chosen months (inclusive). Only that entry's amount is changed
-  // in months where it exists; in months where it was removed it is re-added.
+  // Copy one entry's value from the selected month to an explicit, individually
+  // picked set of past and/or future months. Only that entry's amount (or
+  // formula) is changed in months where it already exists; in months where it
+  // doesn't exist yet it is added with just the amount/period (and formula, if
+  // any) — never with the entry's note, link, correspondent/document, or
+  // contract dates, so copying an amount never silently drags contract
+  // metadata along for the ride.
   // Note: copying overwrites manual overrides in the target months on purpose —
   // it is an explicit action — but does not mark the targets as overridden.
-  const copyEntryRange = (kind, id, pastKey, futureKey) => setData((d) => {
+  const copyEntryRange = (kind, id, pastKeys, futureKeys) => setData((d) => {
     const s = d.selectedMonth;
     const item = (d.months[s][kind] || []).find((x) => x.id === id);
     if (!item) return d;
     const field = kind === "partners" ? "income" : "amount";
+    const targets = new Set([...(pastKeys || []), ...(futureKeys || [])]);
     const months = { ...d.months };
-    for (const k of Object.keys(months)) {
-      if (k === s) continue;
-      const inPast = pastKey && k >= pastKey && k < s;
-      const inFuture = futureKey && k > s && k <= futureKey;
-      if (!inPast && !inFuture) continue;
+    for (const k of targets) {
+      if (k === s || !months[k]) continue;
       const list = months[k][kind] || [];
       const exists = list.some((x) => x.id === id);
-      // If the item we're copying is formula-driven, copy the formula to the target
-      // months but do not overwrite other entries' amounts (source entries remain unchanged).
       if (kind !== "partners" && item.formula) {
         months[k] = { ...months[k], [kind]: exists
           ? list.map((x) => x.id === id ? { ...x, formula: clone(item.formula), period: item.period } : x)
           : [...list, clone(item)] };
+      } else if (exists) {
+        months[k] = { ...months[k], [kind]: list.map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x) };
       } else {
-        months[k] = { ...months[k], [kind]: exists
-          ? list.map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x)
-          : [...list, clone(item)] };
+        const bare = { ...clone(item), note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" };
+        months[k] = { ...months[k], [kind]: [...list, bare] };
       }
     }
     return { ...d, months };
   });
 
-  const copyMonthToPast = (targetMonths) => setData((d) => {
-    const s = d.selectedMonth;
-    const source = d.months[s];
-    if (!source || !targetMonths?.length) return d;
-    const months = { ...d.months };
-    for (const k of targetMonths) {
-      if (k === s || !months[k]) continue;
-      months[k] = clone(source);
-    }
-    return { ...d, months };
-  });
+  // Copy the whole selected month's figures (method, marge, partners, gov
+  // income, expenses, savings) onto an explicit set of other months — past or
+  // future. This overwrites those months entirely, so — like resetMonth — it
+  // asks for confirmation first. Each target month keeps its own `overrides`
+  // bookkeeping rather than inheriting the source month's, since that map
+  // describes what was manually changed in that specific month, not in the
+  // one it was copied from.
+  const copyMonth = (targetKeys) => {
+    if (!targetKeys?.length) return;
+    if (!window.confirm(t(LANG, "confirmCopyMonth", { month: monthLong(sel), count: targetKeys.length }))) return;
+    setData((d) => {
+      const s = d.selectedMonth;
+      const source = d.months[s];
+      if (!source) return d;
+      const months = { ...d.months };
+      for (const k of targetKeys) {
+        if (k === s || !months[k]) continue;
+        const { overrides, ...rest } = clone(source);
+        months[k] = { ...rest, overrides: months[k].overrides || {} };
+      }
+      return { ...d, months };
+    });
+  };
 
   const togglePartnerPeriod = (i) => {
     const key = cur.partners[i]?.id || `p${i + 1}`;
@@ -1033,7 +1046,7 @@ export default function App() {
             {!loaded ? (<><Loader2 size={14} className="spin" /> {TXT.loading}</>) : saved ? (<><Check size={14} style={{ color: C.save }} /> {TXT.saved}</>) : (<><Loader2 size={14} className="spin" /> {TXT.saving}</>) }
           </span>
           <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
-            <MonthCopyField pastMonths={pastMonths} onCopy={copyMonthToPast} />
+            <MonthCopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={copyMonth} />
             <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>
             <a href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer" style={St.githubLink} aria-label={TXT.sourceOnGitHub} title={TXT.sourceOnGitHub}>
               <Github size={16} />
@@ -1440,10 +1453,34 @@ function Sparkline({ data }) {
   );
 }
 
+// Shared by CopyField and MonthCopyField: a checkbox list of months with
+// select-all/none, used identically for the "past" and "future" side of
+// either copy popover so both features behave the same way.
+function MonthChecklist({ months, selected, onToggle, onSelectAll, onClear }) {
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+        <button type="button" onClick={onSelectAll} style={{ ...St.copyApply, flex: 1 }}>{TXT.copyAll}</button>
+        <button type="button" onClick={onClear} style={{ ...St.copyApply, background: C.exp, flex: 1 }}>{TXT.copyNone}</button>
+      </div>
+      <div style={{ maxHeight: 160, overflowY: "auto", marginBottom: 10 }}>
+        {months.map((k) => (
+          <label key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <input type="checkbox" checked={selected.includes(k)} onChange={() => onToggle(k)} />
+            <span style={{ fontSize: 13 }}>{monthLong(k)}</span>
+          </label>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function toggleIn(setSel) { return (key) => setSel((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]); }
+
 function CopyField({ pastMonths, futureMonths, onCopy }) {
   const [open, setOpen] = useState(false);
-  const [past, setPast] = useState("");
-  const [future, setFuture] = useState("");
+  const [pastSel, setPastSel] = useState([]);
+  const [futureSel, setFutureSel] = useState([]);
   const editingRef = useRef(false);
   const timer = useRef(null);
   const rootRef = useRef(null);
@@ -1451,9 +1488,9 @@ function CopyField({ pastMonths, futureMonths, onCopy }) {
   useClickOutside(rootRef, open, () => setOpen(false));
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 220); };
-  const apply = () => { onCopy(past || null, future || null); setOpen(false); setPast(""); setFuture(""); };
+  const apply = () => { if (pastSel.length || futureSel.length) { onCopy(pastSel, futureSel); setOpen(false); setPastSel([]); setFutureSel([]); } };
   return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }}>
       <button type="button" aria-label={TXT.copyAmountAria} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
       {open && (
         <span style={mobilePopupStyle(St.copyPop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
@@ -1462,21 +1499,19 @@ function CopyField({ pastMonths, futureMonths, onCopy }) {
             <div style={St.copyEmpty}>{TXT.noMonthsToCopy}</div>
           ) : (
             <>
-              <label style={St.copyRow}>
-                <span style={St.copyLbl}>{TXT.copyAmount}</span>
-                <select value={past} onChange={(e) => setPast(e.target.value)} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }} style={St.copySel} disabled={!pastMonths.length}>
-                  <option value="">—</option>
-                  {pastMonths.slice().reverse().map((k) => <option key={k} value={k}>{monthLong(k)}</option>)}
-                </select>
-              </label>
-              <label style={St.copyRow}>
-                <span style={St.copyLbl}>{TXT.copyMonth}</span>
-                <select value={future} onChange={(e) => setFuture(e.target.value)} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }} style={St.copySel} disabled={!futureMonths.length}>
-                  <option value="">—</option>
-                  {futureMonths.map((k) => <option key={k} value={k}>{monthLong(k)}</option>)}
-                </select>
-              </label>
-              <button type="button" onClick={apply} disabled={!past && !future} style={{ ...St.copyApply, opacity: (!past && !future) ? 0.5 : 1 }}>{TXT.copy}</button>
+              {pastMonths.length > 0 && (
+                <>
+                  <div style={St.copySubLabel}>{TXT.copyToPast}</div>
+                  <MonthChecklist months={pastMonths.slice().reverse()} selected={pastSel} onToggle={toggleIn(setPastSel)} onSelectAll={() => setPastSel(pastMonths.slice())} onClear={() => setPastSel([])} />
+                </>
+              )}
+              {futureMonths.length > 0 && (
+                <>
+                  <div style={St.copySubLabel}>{TXT.copyToFuture}</div>
+                  <MonthChecklist months={futureMonths} selected={futureSel} onToggle={toggleIn(setFutureSel)} onSelectAll={() => setFutureSel(futureMonths.slice())} onClear={() => setFutureSel([])} />
+                </>
+              )}
+              <button type="button" onClick={apply} disabled={!pastSel.length && !futureSel.length} style={{ ...St.copyApply, opacity: (!pastSel.length && !futureSel.length) ? 0.5 : 1 }}>{TXT.copy}</button>
             </>
           )}
         </span>
@@ -1485,24 +1520,23 @@ function CopyField({ pastMonths, futureMonths, onCopy }) {
   );
 }
 
-function MonthCopyField({ pastMonths, onCopy }) {
+function MonthCopyField({ pastMonths, futureMonths, onCopy }) {
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState([]);
+  const [pastSel, setPastSel] = useState([]);
+  const [futureSel, setFutureSel] = useState([]);
   const editingRef = useRef(false);
   const timer = useRef(null);
   const rootRef = useRef(null);
-  const has = pastMonths.length > 0;
+  const has = pastMonths.length || futureMonths.length;
   useClickOutside(rootRef, open, () => setOpen(false));
   const openNow = () => { clearTimeout(timer.current); setOpen(true); };
   const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 220); };
-  const toggleMonth = (key) => {
-    setSelected((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
+  const apply = () => {
+    const targets = [...pastSel, ...futureSel];
+    if (targets.length) { onCopy(targets); setOpen(false); setPastSel([]); setFutureSel([]); }
   };
-  const selectAll = () => setSelected(pastMonths.slice());
-  const clearAll = () => setSelected([]);
-  const apply = () => { if (selected.length) { onCopy(selected); setOpen(false); setSelected([]); } };
   return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }}>
       <button type="button" aria-label={TXT.copyMonthAria} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
       {open && (
         <span style={mobilePopupStyle({ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" })} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
@@ -1511,19 +1545,19 @@ function MonthCopyField({ pastMonths, onCopy }) {
             <div style={St.copyEmpty}>{TXT.noPrevMonths}</div>
           ) : (
             <>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
-                <button type="button" onClick={selectAll} style={{ ...St.copyApply, flex: 1 }}>{TXT.copyAll}</button>
-                <button type="button" onClick={clearAll} style={{ ...St.copyApply, background: C.exp, flex: 1 }}>{TXT.copyNone}</button>
-              </div>
-              <div style={{ maxHeight: 240, overflowY: "auto", marginBottom: 10 }}>
-                {pastMonths.slice().reverse().map((k) => (
-                  <label key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                    <input type="checkbox" checked={selected.includes(k)} onChange={() => toggleMonth(k)} />
-                    <span style={{ fontSize: 13 }}>{monthLong(k)}</span>
-                  </label>
-                ))}
-              </div>
-              <button type="button" onClick={apply} disabled={!selected.length} style={{ ...St.copyApply, opacity: selected.length ? 1 : 0.5 }}>{TXT.copy}</button>
+              {pastMonths.length > 0 && (
+                <>
+                  <div style={St.copySubLabel}>{TXT.copyToPast}</div>
+                  <MonthChecklist months={pastMonths.slice().reverse()} selected={pastSel} onToggle={toggleIn(setPastSel)} onSelectAll={() => setPastSel(pastMonths.slice())} onClear={() => setPastSel([])} />
+                </>
+              )}
+              {futureMonths.length > 0 && (
+                <>
+                  <div style={St.copySubLabel}>{TXT.copyToFuture}</div>
+                  <MonthChecklist months={futureMonths} selected={futureSel} onToggle={toggleIn(setFutureSel)} onSelectAll={() => setFutureSel(futureMonths.slice())} onClear={() => setFutureSel([])} />
+                </>
+              )}
+              <button type="button" onClick={apply} disabled={!pastSel.length && !futureSel.length} style={{ ...St.copyApply, opacity: (!pastSel.length && !futureSel.length) ? 0.5 : 1 }}>{TXT.copy}</button>
             </>
           )}
         </span>
@@ -1861,6 +1895,7 @@ const St = {
   githubLink: { display: "inline-flex", alignItems: "center", justifyContent: "center", color: C.muted, padding: 6, borderRadius: 8 },
   copyPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: "min(360px, 90vw)", maxWidth: "90vw", boxSizing: "border-box", background: C.card, border: `1px solid ${C.line}`, borderRadius: 10, boxShadow: "0 6px 24px rgba(0,0,0,0.16)", padding: 12, zIndex: 50 },
   copyTitle: { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 8 },
+  copySubLabel: { fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 6 },
   copyRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 },
   copyLbl: { fontSize: 13, color: C.ink },
   copySel: { maxWidth: 134, fontSize: 13, padding: "5px 6px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.ink, fontFamily: "inherit" },
