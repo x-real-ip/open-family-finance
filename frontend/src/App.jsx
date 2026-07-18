@@ -269,7 +269,7 @@ function listSortOf(raw) {
 function migrateSubAccount(s) {
   return {
     id: s.id || uid(), holder: s.holder || "", bank: s.bank || "", iban: s.iban || "", planId: s.planId || "",
-    entryId: s.entryId || null, sharePercent: s.sharePercent ?? "100",
+    entryId: s.entryId || null, sharePercent: s.sharePercent ?? "100", interestRate: s.interestRate ?? "",
     checkpointMonth: s.checkpointMonth || "", checkpointBalance: s.checkpointBalance ?? "",
   };
 }
@@ -311,6 +311,12 @@ function monthlyContributionAt(months, entryId, key) {
 // at the checkpoint — those are the recorded, real balance. Once a target
 // amount is reached the balance is capped there and stops growing further,
 // mirroring a goal whose contributions stop once it's fully funded.
+// Returns, per month key, { balance, interest } — interest is the portion of
+// that balance built up from the (optional) annual interest rate so far, so
+// the overview can show how much is interest versus the holder's own
+// contributions (balance - interest). Interest compounds monthly on the
+// running balance (nominal annual rate ÷ 12), which is the standard way
+// savings accounts quote and apply a rate.
 function projectSubAccountSeries(months, subAccount, keys, target) {
   const out = {};
   if (!subAccount.checkpointMonth) return out;
@@ -318,21 +324,26 @@ function projectSubAccountSeries(months, subAccount, keys, target) {
   // (e.g. different banks) by percentage, rather than each needing its own
   // dedicated savings entry.
   const share = subAccount.sharePercent === "" || subAccount.sharePercent == null ? 1 : num(subAccount.sharePercent) / 100;
-  let balance = num(subAccount.checkpointBalance);
+  const monthlyRate = subAccount.interestRate ? num(subAccount.interestRate) / 100 / 12 : 0;
+  let principal = num(subAccount.checkpointBalance);
+  let interest = 0;
   let k = subAccount.checkpointMonth;
-  let capped = target != null && balance >= target;
-  if (capped) balance = target;
-  out[k] = balance;
+  // Once the target is reached, both stop growing — the total can overshoot
+  // the target by at most one month's contribution + interest, kept simple
+  // on purpose so balance always equals principal + interest exactly.
+  let capped = target != null && principal >= target;
+  out[k] = { balance: principal + interest, interest };
   for (const key of keys) {
     if (key <= subAccount.checkpointMonth) continue;
     while (k < key) {
       k = shiftMonth(k, 1);
       if (!capped) {
-        balance += monthlyContributionAt(months, subAccount.entryId, k) * share;
-        if (target != null && balance >= target) { balance = target; capped = true; }
+        interest += (principal + interest) * monthlyRate;
+        principal += monthlyContributionAt(months, subAccount.entryId, k) * share;
+        if (target != null && principal + interest >= target) capped = true;
       }
     }
-    out[key] = balance;
+    out[key] = { balance: principal + interest, interest };
   }
   return out;
 }
@@ -717,7 +728,7 @@ export default function App() {
   const addSavingsGoal = () => setData((d) => ({ ...d, savingsGoals: [...(d.savingsGoals || []), { id: uid(), name: "", targetAmount: "", subAccounts: [] }] }));
   const removeSavingsGoal = (goalId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.filter((g) => g.id !== goalId) }));
   const updateSavingsGoal = (goalId, patch) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, ...patch } : g) }));
-  const addSubAccount = (goalId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", entryId: null, sharePercent: "100", checkpointMonth: "", checkpointBalance: "" }] } : g) }));
+  const addSubAccount = (goalId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", entryId: null, sharePercent: "100", interestRate: "", checkpointMonth: "", checkpointBalance: "" }] } : g) }));
   const removeSubAccount = (goalId, subId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
   const updateSubAccount = (goalId, subId, patch) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
   // Reset the selected month: take over the figures of the nearest earlier
@@ -1508,8 +1519,9 @@ function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, horiz
     for (const s of goal.subAccounts) map[s.id] = projectSubAccountSeries(months, s, keys, target);
     return map;
   }, [goal.subAccounts, months, keys, target]);
-  const totalAtEnd = keys.length ? goal.subAccounts.reduce((sum, s) => sum + (seriesBySub[s.id][keys[keys.length - 1]] ?? 0), 0) : 0;
+  const totalAtEnd = keys.length ? goal.subAccounts.reduce((sum, s) => sum + (seriesBySub[s.id][keys[keys.length - 1]]?.balance ?? 0), 0) : 0;
   const reached = target != null && keys.length > 0 && totalAtEnd >= target;
+  const hasInterest = goal.subAccounts.some((s) => num(s.interestRate) > 0);
 
   return (
     <section style={St.section} className="fade">
@@ -1545,12 +1557,25 @@ function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, horiz
             <tbody>
               {keys.map((k) => {
                 const values = goal.subAccounts.map((s) => seriesBySub[s.id][k]);
-                const total = values.reduce((sum, v) => sum + (v ?? 0), 0);
+                const total = values.reduce((sum, v) => sum + (v?.balance ?? 0), 0);
+                const totalInterest = values.reduce((sum, v) => sum + (v?.interest ?? 0), 0);
                 return (
                   <tr key={k}>
                     <td style={{ ...St.savingsTd, textAlign: "left" }}>{monthLong(k)}</td>
-                    <td style={{ ...St.savingsTd, fontWeight: 700 }}>{eur(total)}</td>
-                    {values.map((v, i) => <td key={goal.subAccounts[i].id} style={St.savingsTd}>{v != null ? eur(v) : "—"}</td>)}
+                    <td style={{ ...St.savingsTd, fontWeight: 700 }}>
+                      {eur(total)}
+                      {hasInterest && <div style={St.savingsTdSub}>{TXT.interestPortion} {eur(totalInterest)}</div>}
+                    </td>
+                    {values.map((v, i) => (
+                      <td key={goal.subAccounts[i].id} style={St.savingsTd}>
+                        {v != null ? (
+                          <>
+                            {eur(v.balance)}
+                            {hasInterest && num(goal.subAccounts[i].interestRate) > 0 && <div style={St.savingsTdSub}>{TXT.interestPortion} {eur(v.interest)}</div>}
+                          </>
+                        ) : "—"}
+                      </td>
+                    ))}
                   </tr>
                 );
               })}
@@ -1606,6 +1631,10 @@ function SubAccountRow({ sub, savingsEntries, currentMonthData, onChange, onRemo
           <div style={St.subAccountPreviewValue}>{eur(preview)} {TXT.perMonth}</div>
         </Field>
       )}
+      <Field label={TXT.subAccountInterestRate} info={TXT.subAccountInterestRateInfo} width={90}>
+        <input inputMode="decimal" value={sub.interestRate} placeholder="0"
+          onChange={(e) => onChange({ interestRate: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 90, maxWidth: 90 }} />
+      </Field>
       <Field label={TXT.checkpointMonth} info={TXT.checkpointInfo} width={130}>
         <input type="month" lang={LANG} value={sub.checkpointMonth}
           onChange={(e) => onChange({ checkpointMonth: e.target.value })} style={{ ...St.copySel, width: 130, maxWidth: 130 }} />
@@ -2193,6 +2222,7 @@ const St = {
   savingsTable: { width: "100%", borderCollapse: "collapse", fontSize: 13, whiteSpace: "nowrap" },
   savingsTh: { textAlign: "right", padding: "6px 10px", color: C.muted, fontWeight: 600, borderBottom: `1px solid ${C.line}`, position: "sticky", top: 0, background: C.card },
   savingsTd: { textAlign: "right", padding: "5px 10px", color: C.ink, fontVariantNumeric: "tabular-nums", borderBottom: `1px solid ${C.line}` },
+  savingsTdSub: { fontSize: 10.5, fontWeight: 500, color: C.muted },
   savingsTargetReached: { marginTop: 10, fontSize: 12.5, fontWeight: 600, color: C.save },
 };
 
