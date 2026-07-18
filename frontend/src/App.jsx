@@ -269,7 +269,8 @@ function listSortOf(raw) {
 function migrateSubAccount(s) {
   return {
     id: s.id || uid(), holder: s.holder || "", bank: s.bank || "", iban: s.iban || "", planId: s.planId || "",
-    entryId: s.entryId || null, checkpointMonth: s.checkpointMonth || "", checkpointBalance: s.checkpointBalance ?? "",
+    entryId: s.entryId || null, sharePercent: s.sharePercent ?? "100",
+    checkpointMonth: s.checkpointMonth || "", checkpointBalance: s.checkpointBalance ?? "",
   };
 }
 function migrateGoal(g) {
@@ -313,6 +314,10 @@ function monthlyContributionAt(months, entryId, key) {
 function projectSubAccountSeries(months, subAccount, keys, target) {
   const out = {};
   if (!subAccount.checkpointMonth) return out;
+  // A goal's monthly contribution can be split across several sub-accounts
+  // (e.g. different banks) by percentage, rather than each needing its own
+  // dedicated savings entry.
+  const share = subAccount.sharePercent === "" || subAccount.sharePercent == null ? 1 : num(subAccount.sharePercent) / 100;
   let balance = num(subAccount.checkpointBalance);
   let k = subAccount.checkpointMonth;
   let capped = target != null && balance >= target;
@@ -323,7 +328,7 @@ function projectSubAccountSeries(months, subAccount, keys, target) {
     while (k < key) {
       k = shiftMonth(k, 1);
       if (!capped) {
-        balance += monthlyContributionAt(months, subAccount.entryId, k);
+        balance += monthlyContributionAt(months, subAccount.entryId, k) * share;
         if (target != null && balance >= target) { balance = target; capped = true; }
       }
     }
@@ -712,7 +717,7 @@ export default function App() {
   const addSavingsGoal = () => setData((d) => ({ ...d, savingsGoals: [...(d.savingsGoals || []), { id: uid(), name: "", targetAmount: "", subAccounts: [] }] }));
   const removeSavingsGoal = (goalId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.filter((g) => g.id !== goalId) }));
   const updateSavingsGoal = (goalId, patch) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, ...patch } : g) }));
-  const addSubAccount = (goalId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", entryId: null, checkpointMonth: "", checkpointBalance: "" }] } : g) }));
+  const addSubAccount = (goalId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", entryId: null, sharePercent: "100", checkpointMonth: "", checkpointBalance: "" }] } : g) }));
   const removeSubAccount = (goalId, subId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
   const updateSubAccount = (goalId, subId, patch) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
   // Reset the selected month: take over the figures of the nearest earlier
@@ -781,6 +786,7 @@ export default function App() {
             goals={data.savingsGoals || []}
             months={data.months}
             savingsEntries={cur.savings}
+            currentMonthData={cur}
             onAddGoal={addSavingsGoal}
             onRemoveGoal={removeSavingsGoal}
             onUpdateGoal={updateSavingsGoal}
@@ -1453,7 +1459,7 @@ function DurationField({ entry, onChange }) {
 // Spaaroverzicht: savings goals with one or more sub-accounts (bank/IBAN/plan
 // ID), each linked to an existing savings entry for its monthly contribution,
 // and projected forward from a recorded checkpoint balance.
-function SavingsOverviewPage({ goals, months, savingsEntries, onAddGoal, onRemoveGoal, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+function SavingsOverviewPage({ goals, months, savingsEntries, currentMonthData, onAddGoal, onRemoveGoal, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
   const [horizon, setHorizon] = useState(24);
   return (
     <div className="fade">
@@ -1468,7 +1474,7 @@ function SavingsOverviewPage({ goals, months, savingsEntries, onAddGoal, onRemov
       </div>
       {goals.length === 0 && <div style={St.copyEmpty}>{TXT.noSavingsGoals}</div>}
       {goals.map((goal) => (
-        <SavingsGoalCard key={goal.id} goal={goal} months={months} savingsEntries={savingsEntries} horizon={horizon}
+        <SavingsGoalCard key={goal.id} goal={goal} months={months} savingsEntries={savingsEntries} currentMonthData={currentMonthData} horizon={horizon}
           onRemove={() => onRemoveGoal(goal.id)}
           onUpdate={(patch) => onUpdateGoal(goal.id, patch)}
           onAddSubAccount={() => onAddSubAccount(goal.id)}
@@ -1481,7 +1487,7 @@ function SavingsOverviewPage({ goals, months, savingsEntries, onAddGoal, onRemov
   );
 }
 
-function SavingsGoalCard({ goal, months, savingsEntries, horizon, onRemove, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, horizon, onRemove, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
   const target = goal.targetAmount ? num(goal.targetAmount) : null;
   // The table starts at the earliest checkpoint among this goal's
   // sub-accounts — accounts opened later simply show "—" for months before
@@ -1519,7 +1525,7 @@ function SavingsGoalCard({ goal, months, savingsEntries, horizon, onRemove, onUp
       </div>
 
       {goal.subAccounts.map((sub) => (
-        <SubAccountRow key={sub.id} sub={sub} savingsEntries={savingsEntries}
+        <SubAccountRow key={sub.id} sub={sub} savingsEntries={savingsEntries} currentMonthData={currentMonthData}
           onChange={(patch) => onUpdateSubAccount(sub.id, patch)}
           onRemove={() => onRemoveSubAccount(sub.id)} />
       ))}
@@ -1557,22 +1563,58 @@ function SavingsGoalCard({ goal, months, savingsEntries, horizon, onRemove, onUp
   );
 }
 
-function SubAccountRow({ sub, savingsEntries, onChange, onRemove }) {
+function Field({ label, info, width, children }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3, width }}>
+      <span style={St.fieldLabel}>{label}{info && <InfoDot text={info} />}</span>
+      {children}
+    </div>
+  );
+}
+
+function SubAccountRow({ sub, savingsEntries, currentMonthData, onChange, onRemove }) {
+  const linkedEntry = sub.entryId ? savingsEntries.find((s) => s.id === sub.entryId) : null;
+  const share = sub.sharePercent === "" || sub.sharePercent == null ? 1 : num(sub.sharePercent) / 100;
+  const preview = linkedEntry ? monthlyOf(linkedEntry, currentMonthData) * share : null;
+
   return (
     <div style={St.subAccountRow}>
-      <input value={sub.holder} placeholder={TXT.subAccountHolder} onChange={(e) => onChange({ holder: e.target.value })} style={{ ...St.copySel, width: 100 }} />
-      <input value={sub.bank} placeholder={TXT.subAccountBank} onChange={(e) => onChange({ bank: e.target.value })} style={{ ...St.copySel, width: 150, maxWidth: 150 }} />
-      <input value={sub.iban} placeholder={TXT.subAccountIban} onChange={(e) => onChange({ iban: e.target.value })} style={{ ...St.copySel, width: 170, maxWidth: 170 }} />
-      <input value={sub.planId} placeholder={TXT.subAccountPlanId} onChange={(e) => onChange({ planId: e.target.value })} style={{ ...St.copySel, width: 140, maxWidth: 140 }} />
-      <select value={sub.entryId || ""} onChange={(e) => onChange({ entryId: e.target.value || null })} style={{ ...St.copySel, width: 160, maxWidth: 160 }} aria-label={TXT.subAccountLinkedEntry}>
-        <option value="">{TXT.subAccountNoEntry}</option>
-        {savingsEntries.map((s) => <option key={s.id} value={s.id}>{s.label || TXT.unnamed}</option>)}
-      </select>
-      <input type="month" lang={LANG} value={sub.checkpointMonth} aria-label={TXT.checkpointMonth}
-        onChange={(e) => onChange({ checkpointMonth: e.target.value })} style={{ ...St.copySel, width: 130, maxWidth: 130 }} />
-      <input inputMode="decimal" value={sub.checkpointBalance} placeholder={TXT.checkpointBalance}
-        onChange={(e) => onChange({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 100 }} />
-      <button type="button" aria-label={TXT.delete} onClick={onRemove} style={St.iconBtn}><Trash2 size={16} /></button>
+      <Field label={TXT.subAccountHolder} width={100}>
+        <input value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder} onChange={(e) => onChange({ holder: e.target.value })} style={{ ...St.copySel, width: 100 }} />
+      </Field>
+      <Field label={TXT.subAccountBank} width={150}>
+        <input value={sub.bank} placeholder={TXT.subAccountBankPlaceholder} onChange={(e) => onChange({ bank: e.target.value })} style={{ ...St.copySel, width: 150, maxWidth: 150 }} />
+      </Field>
+      <Field label={TXT.subAccountIban} width={170}>
+        <input value={sub.iban} placeholder={TXT.subAccountIbanPlaceholder} onChange={(e) => onChange({ iban: e.target.value })} style={{ ...St.copySel, width: 170, maxWidth: 170 }} />
+      </Field>
+      <Field label={TXT.subAccountPlanId} width={140}>
+        <input value={sub.planId} placeholder={TXT.subAccountPlanIdPlaceholder} onChange={(e) => onChange({ planId: e.target.value })} style={{ ...St.copySel, width: 140, maxWidth: 140 }} />
+      </Field>
+      <Field label={TXT.subAccountLinkedEntry} info={TXT.subAccountLinkedEntryInfo} width={160}>
+        <select value={sub.entryId || ""} onChange={(e) => onChange({ entryId: e.target.value || null })} style={{ ...St.copySel, width: 160, maxWidth: 160 }}>
+          <option value="">{TXT.subAccountNoEntry}</option>
+          {savingsEntries.map((s) => <option key={s.id} value={s.id}>{s.label || TXT.unnamed}</option>)}
+        </select>
+      </Field>
+      <Field label={TXT.subAccountShare} width={64}>
+        <input inputMode="numeric" value={sub.sharePercent ?? "100"} placeholder="100"
+          onChange={(e) => onChange({ sharePercent: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 64, maxWidth: 64 }} />
+      </Field>
+      {preview != null && (
+        <Field label={TXT.subAccountPreview} width={110}>
+          <div style={St.subAccountPreviewValue}>{eur(preview)} {TXT.perMonth}</div>
+        </Field>
+      )}
+      <Field label={TXT.checkpointMonth} info={TXT.checkpointInfo} width={130}>
+        <input type="month" lang={LANG} value={sub.checkpointMonth}
+          onChange={(e) => onChange({ checkpointMonth: e.target.value })} style={{ ...St.copySel, width: 130, maxWidth: 130 }} />
+      </Field>
+      <Field label={TXT.checkpointBalance} width={100}>
+        <input inputMode="decimal" value={sub.checkpointBalance} placeholder="0,00"
+          onChange={(e) => onChange({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 100 }} />
+      </Field>
+      <button type="button" aria-label={TXT.delete} onClick={onRemove} style={{ ...St.iconBtn, alignSelf: "flex-end" }}><Trash2 size={16} /></button>
     </div>
   );
 }
@@ -2144,7 +2186,9 @@ const St = {
 
   savingsPageHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 4 },
   savingsHorizon: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.muted, fontWeight: 600 },
-  subAccountRow: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 10 },
+  subAccountRow: { display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.line}` },
+  fieldLabel: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: C.muted, fontWeight: 600 },
+  subAccountPreviewValue: { fontSize: 13, fontWeight: 700, color: C.save, padding: "5px 0" },
   savingsTableWrap: { overflowX: "auto", marginTop: 14 },
   savingsTable: { width: "100%", borderCollapse: "collapse", fontSize: 13, whiteSpace: "nowrap" },
   savingsTh: { textAlign: "right", padding: "6px 10px", color: C.muted, fontWeight: 600, borderBottom: `1px solid ${C.line}`, position: "sticky", top: 0, background: C.card },
