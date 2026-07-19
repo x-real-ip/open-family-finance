@@ -91,7 +91,7 @@ const monthlyOf = (x, monthData, visited = new Set()) => {
   return toMonthly(x.amount, x.period);
 };
 const monthlyInc = (p) => toMonthly(p.income, p.period);
-const entryKinds = ["govIncome", "expenses", "savings", "personalExpensesA", "personalExpensesB"];
+const entryKinds = ["govIncome", "expenses", "savings"];
 const findEntryById = (monthData, id) => {
   if (!monthData || !id) return null;
   for (const kind of entryKinds) {
@@ -526,8 +526,6 @@ export default function App() {
       ...cur.govIncome.map((g) => ({ ...g, label: g.label || TXT.unnamed })),
       ...cur.expenses.map((e) => ({ ...e, label: e.label || TXT.unnamed })),
       ...cur.savings.map((s) => ({ ...s, label: s.label || TXT.unnamed })),
-      ...cur.personalExpensesA.map((e) => ({ ...e, label: `${cur.partners[0].name || t(LANG, "partnerName", { n: 1 })} · ${e.label || TXT.unnamed}` })),
-      ...cur.personalExpensesB.map((e) => ({ ...e, label: `${cur.partners[1].name || t(LANG, "partnerName", { n: 2 })} · ${e.label || TXT.unnamed}` })),
     ];
     return entries.map((entry) => {
       const left = daysUntil(entry.endDate);
@@ -568,11 +566,7 @@ export default function App() {
   // Existing category names across all months, for autocomplete suggestions.
   const categories = useMemo(() => {
     const set = new Set();
-    for (const m of Object.values(data.months)) {
-      for (const kind of ["expenses", "personalExpensesA", "personalExpensesB"]) {
-        for (const e of m[kind] || []) if (e.category) set.add(e.category);
-      }
-    }
+    for (const m of Object.values(data.months)) for (const e of m.expenses) if (e.category) set.add(e.category);
     return [...set].sort();
   }, [data.months]);
 
@@ -598,8 +592,8 @@ export default function App() {
   const correspondents = useMemo(() => {
     const set = new Set(paperlessCorrespondents.map((c) => c.name));
     for (const m of Object.values(data.months)) {
-      for (const kind of ["partners", "govIncome", "expenses", "savings", "personalExpensesA", "personalExpensesB"]) {
-        for (const e of m[kind] || []) if (e.correspondent) set.add(e.correspondent);
+      for (const kind of ["partners", "govIncome", "expenses", "savings"]) {
+        for (const e of m[kind]) if (e.correspondent) set.add(e.correspondent);
       }
     }
     return [...set].sort();
@@ -942,8 +936,8 @@ export default function App() {
           <div style={{ ...St.toggle, marginTop: 10 }} role="group" aria-label={TXT.viewToggleAria}>
             <button type="button" onClick={() => setView("month")} style={{ ...St.toggleBtn, ...(view === "month" ? St.toggleOn : {}) }}>{TXT.monthView}</button>
             <button type="button" onClick={() => setView("savings")} style={{ ...St.toggleBtn, ...(view === "savings" ? St.toggleOn : {}) }}>{TXT.savingsOverviewView}</button>
-            <button type="button" onClick={() => setView("personalA")} style={{ ...St.toggleBtn, ...(view === "personalA" ? St.toggleOn : {}) }}>{nameA}</button>
-            <button type="button" onClick={() => setView("personalB")} style={{ ...St.toggleBtn, ...(view === "personalB" ? St.toggleOn : {}) }}>{nameB}</button>
+            <button type="button" onClick={() => setView("personalA")} style={{ ...St.toggleBtn, ...(view === "personalA" ? { ...St.toggleOn, color: C.a } : {}) }}>{nameA}</button>
+            <button type="button" onClick={() => setView("personalB")} style={{ ...St.toggleBtn, ...(view === "personalB" ? { ...St.toggleOn, color: C.b } : {}) }}>{nameB}</button>
           </div>
         </header>
 
@@ -982,7 +976,7 @@ export default function App() {
           <div className="fade">
             <ColTitle>{nameA}</ColTitle>
             <div style={St.correspondentDocMuted}>{TXT.personalPageHint}</div>
-            <Collapsible id="personalA" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(sumM(cur.personalExpensesA, cur))} open={open.personalA} onToggle={toggleSec} style={St.sectionExpenses}>
+            <Collapsible id="personalA" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.a }} />} info={TXT.exp} total={eur(sumM(cur.personalExpensesA, cur))} open={open.personalA} onToggle={toggleSec} style={St.sectionPersonalA}>
               {renderExpensesList("personalExpensesA", sortedPersonalA, sumM(cur.personalExpensesA, cur), byCategoryA, () => addPersonalExpense("A"), nameA)}
             </Collapsible>
           </div>
@@ -990,7 +984,7 @@ export default function App() {
           <div className="fade">
             <ColTitle>{nameB}</ColTitle>
             <div style={St.correspondentDocMuted}>{TXT.personalPageHint}</div>
-            <Collapsible id="personalB" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(sumM(cur.personalExpensesB, cur))} open={open.personalB} onToggle={toggleSec} style={St.sectionExpenses}>
+            <Collapsible id="personalB" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.b }} />} info={TXT.exp} total={eur(sumM(cur.personalExpensesB, cur))} open={open.personalB} onToggle={toggleSec} style={St.sectionPersonalB}>
               {renderExpensesList("personalExpensesB", sortedPersonalB, sumM(cur.personalExpensesB, cur), byCategoryB, () => addPersonalExpense("B"), nameB)}
             </Collapsible>
           </div>
@@ -2401,6 +2395,8 @@ const St = {
   section: { background: C.card, borderRadius: 18, padding: "16px 18px", border: `1px solid ${C.line}`, marginBottom: 12 },
   sectionIncome: { background: "rgba(46, 125, 82, 0.08)", border: `1px solid rgba(46, 125, 82, 0.18)` },
   sectionExpenses: { background: "rgba(192, 68, 59, 0.08)", border: `1px solid rgba(192, 68, 59, 0.18)` },
+  sectionPersonalA: { background: `color-mix(in srgb, ${C.a} 8%, transparent)`, border: `1px solid color-mix(in srgb, ${C.a} 18%, transparent)` },
+  sectionPersonalB: { background: `color-mix(in srgb, ${C.b} 8%, transparent)`, border: `1px solid color-mix(in srgb, ${C.b} 18%, transparent)` },
   collapseHead: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", outline: "none" },
   collapseBody: { marginTop: 14 },
   h2: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 19, fontWeight: 700, margin: 0, display: "inline-flex", alignItems: "center", gap: 6 },
