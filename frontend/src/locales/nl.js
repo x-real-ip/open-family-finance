@@ -79,6 +79,8 @@ export default {
     interestPortion: "wv. rente",
     checkpointInfo: "Het werkelijke banksaldo in de maand die je op dit moment bekijkt. Gebruik dit om te starten, maar ook later om bij te sturen als er bijvoorbeeld extra geld is bijgeboekt. Alles vóór deze maand blijft ongewijzigd; alles erná wordt vanaf hier opnieuw doorgerekend (dit saldo + inleg per maand, plus eventuele rente).",
     checkpointBalance: "Werkelijk saldo",
+    checkpointBalanceMain: "Werkelijk saldo hoofdrekening",
+    mainAccountLabel: "Hoofdrekening",
     addSubAccount: "Rekening toevoegen",
     projectionMonths: "Maanden vooruit",
     combinedTotal: "Totaal",

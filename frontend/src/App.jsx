@@ -390,6 +390,10 @@ function migrateSubAccount(s) {
     id: s.id || uid(), holder: s.holder || "", bank: s.bank || "", iban: s.iban || "",
     planId: s.planId || "", referenceId: s.referenceId || "",
     sharePercent: s.sharePercent ?? "100", interestRate: s.interestRate ?? "",
+    // Each sub-account's own recorded balance, independent of the others and
+    // of the goal's main-account balance — the combined total is the sum of
+    // all of them, not a proportional split of one shared number.
+    checkpoints: migrateCheckpoints(s),
   };
 }
 // A goal is derived 1:1 from a monthly savings entry (see
@@ -406,13 +410,42 @@ function migrateGoal(g) {
   const ownCheckpoints = migrateCheckpoints(g);
   const fallbackSub = (g.subAccounts || []).find((s) => s.checkpointMonth || (s.checkpoints && Object.keys(s.checkpoints).length));
   const checkpoints = Object.keys(ownCheckpoints).length ? ownCheckpoints : (fallbackSub ? migrateCheckpoints(fallbackSub) : {});
+
+  // For a while, a sub-account's balance wasn't recorded at all — it was
+  // derived as a % split of the goal's one recorded total. Any sub-account
+  // from that period (recognized by having neither `checkpoints` nor the
+  // even older `checkpointMonth` field at all, as opposed to having one that
+  // was legitimately since cleared) gets seeded with what its share of that
+  // total already was, so the combined total shown doesn't silently change
+  // the moment this loads. Whatever wasn't already covered by sub-account
+  // shares stays on the goal's own main-account balance. From here on,
+  // every account's balance is entered and corrected independently.
+  const rawSubAccounts = g.subAccounts || [];
+  const fromSplitEra = (s) => !("checkpoints" in s) && !("checkpointMonth" in s);
+  const needsBackfill = Object.keys(checkpoints).length > 0 && rawSubAccounts.some(fromSplitEra);
+  const shareOf = (s) => { const p = s.sharePercent === "" || s.sharePercent == null ? 1 : num(s.sharePercent) / 100; return Math.max(0, p); };
+  const subAccounts = rawSubAccounts.map((s) => {
+    const migrated = migrateSubAccount(s);
+    if (!needsBackfill || !fromSplitEra(s)) return migrated;
+    const share = shareOf(s);
+    const backfilled = Object.fromEntries(Object.entries(checkpoints).map(([k, v]) => [k, String(round2(num(v) * share))]));
+    return { ...migrated, checkpoints: backfilled };
+  });
+  let mainCheckpoints = checkpoints;
+  if (needsBackfill) {
+    const totalShare = rawSubAccounts.filter(fromSplitEra).reduce((sum, s) => sum + shareOf(s), 0);
+    const remainder = Math.max(0, 1 - totalShare);
+    mainCheckpoints = Object.fromEntries(Object.entries(checkpoints).map(([k, v]) => [k, String(round2(num(v) * remainder))]));
+  }
+
   return {
     entryId, targetAmount: g.targetAmount ?? "",
-    forwarded: g.forwarded ?? Boolean((g.subAccounts || []).length),
-    // A single real observation, whether or not the money is split across
-    // several bank sub-accounts.
-    checkpoints,
-    subAccounts: (g.subAccounts || []).map(migrateSubAccount),
+    forwarded: g.forwarded ?? Boolean(rawSubAccounts.length),
+    // The goal's own account — once forwarded, this is specifically the
+    // main/shared account, tracked alongside (not combined into) each
+    // sub-account's own balance.
+    checkpoints: mainCheckpoints,
+    subAccounts,
   };
 }
 function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [] }; }
@@ -975,7 +1008,7 @@ export default function App() {
     return [...goals, fn({ entryId, targetAmount: "", forwarded: false, checkpoints: {}, subAccounts: [] })];
   };
   const updateGoal = (entryId, patch) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, ...patch })) }));
-  const addSubAccount = (entryId) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "" }] })) }));
+  const addSubAccount = (entryId) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", checkpoints: {} }] })) }));
   const removeSubAccount = (entryId, subId) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
   const updateSubAccount = (entryId, subId, patch) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
   // Reset the selected month: take over the figures of the nearest earlier
@@ -1850,19 +1883,21 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
   // Without a separate bank to track, there's still a projection worth
   // showing by default: a single virtual "account" starting at €0 this
   // month, growing by the entry's own amount — same machinery, no bank
-  // details needed. Once forwarded, the real (editable) sub-accounts take
-  // over instead. Either way, the recorded balance itself is a single
-  // real observation at the goal level (entered once above, not per bank)
-  // — each account's own checkpoint is that total split by its own share
-  // of the contribution, the same way its share of the monthly
-  // contribution is derived.
+  // details needed. Once forwarded, the goal's own recorded balance becomes
+  // the "main account" — the original shared account, tracked independently
+  // alongside each real sub-account's own recorded balance — rather than a
+  // total that gets proportionally split across them. The combined total
+  // shown in the chart/table is simply the sum of all of them. The main
+  // account doesn't take a share of the monthly contribution by default
+  // (share 0%) since forwarding implies the money moves on to the
+  // sub-accounts instead; its balance only changes when corrected by hand.
   const effectiveSubAccounts = useMemo(() => {
-    const checkpoints = Object.keys(goal.checkpoints || {}).length ? goal.checkpoints : { [sel]: "0" };
-    const source = forwarded ? subAccounts : [{ id: `self-${entry.id}`, holder: entry.label || TXT.unnamed, sharePercent: "100", interestRate: "" }];
-    return source.map((s) => {
-      const share = s.sharePercent === "" || s.sharePercent == null ? 1 : num(s.sharePercent) / 100;
-      return { ...s, checkpoints: Object.fromEntries(Object.entries(checkpoints).map(([k, v]) => [k, String(num(v) * share)])) };
-    });
+    if (!forwarded) {
+      const checkpoints = Object.keys(goal.checkpoints || {}).length ? goal.checkpoints : { [sel]: "0" };
+      return [{ id: `self-${entry.id}`, holder: entry.label || TXT.unnamed, sharePercent: "100", interestRate: "", checkpoints }];
+    }
+    const mainAccount = { id: `self-${entry.id}`, holder: TXT.mainAccountLabel, sharePercent: "0", interestRate: "", checkpoints: goal.checkpoints || {} };
+    return [mainAccount, ...subAccounts];
   }, [forwarded, subAccounts, entry.id, entry.label, goal.checkpoints, sel]);
   // The table starts at the earliest checkpoint among this goal's
   // accounts — accounts opened later simply show "—" for months before
@@ -1933,12 +1968,13 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
 
       {open && (
       <>
-      {/* The recorded balance and the target apply to the goal as a whole,
-          whether or not it's forwarded to real sub-accounts — a single real
-          observation, not one per bank. */}
+      {/* The target applies to the goal as a whole either way. The recorded
+          balance here is the goal's own account — once forwarded, that's
+          specifically the main/shared account, tracked alongside (not
+          combined into) each sub-account's own balance below. */}
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 10 }}>
         <label style={St.copyRow}>
-          <span style={St.copyLbl}>{TXT.checkpointBalance}</span>
+          <span style={St.copyLbl}>{forwarded ? TXT.checkpointBalanceMain : TXT.checkpointBalance}</span>
           <input inputMode="decimal" value={goal.checkpoints?.[sel] ?? ""} placeholder="0,00"
             onChange={(e) => {
               const v = e.target.value.replace(/[^0-9.,]/g, "");
@@ -1957,7 +1993,7 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
       {forwarded && (
         <>
           {subAccounts.map((sub) => (
-            <SubAccountRow key={sub.id} sub={sub} entryMonthlyAmount={entryMonthlyAmount}
+            <SubAccountRow key={sub.id} sub={sub} entryMonthlyAmount={entryMonthlyAmount} sel={sel}
               onChange={(patch) => onUpdateSubAccount(sub.id, patch)}
               onRemove={() => onRemoveSubAccount(sub.id)} />
           ))}
@@ -2079,9 +2115,11 @@ function IconPopoverField({ icon: Icon, ariaLabel, active, popStyle, children })
   );
 }
 
-function SubAccountRow({ sub, entryMonthlyAmount, onChange, onRemove }) {
+function SubAccountRow({ sub, entryMonthlyAmount, sel, onChange, onRemove }) {
   const share = sub.sharePercent === "" || sub.sharePercent == null ? 1 : num(sub.sharePercent) / 100;
   const preview = entryMonthlyAmount * share;
+  const checkpointValue = sub.checkpoints?.[sel] ?? "";
+  const hasCheckpoints = Boolean(sub.checkpoints && Object.keys(sub.checkpoints).length);
 
   return (
     <div style={St.itemWrap} className="entryWrap">
@@ -2111,6 +2149,24 @@ function SubAccountRow({ sub, entryMonthlyAmount, onChange, onRemove }) {
                     onChange={(e) => onChange({ interestRate: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 70 }} />
                 </label>
                 <div style={St.correspondentDocMuted}>{TXT.subAccountInterestRateInfo}</div>
+              </>
+            )}
+          </IconPopoverField>
+          <IconPopoverField icon={CalendarClock} ariaLabel={TXT.checkpointBalance} active={hasCheckpoints}>
+            {(markEditing) => (
+              <>
+                <div style={St.copyTitle}>{TXT.checkpointBalance}</div>
+                <div style={St.correspondentDocMuted}>{TXT.checkpointInfo}</div>
+                <label style={{ ...St.copyRow, marginTop: 8 }}>
+                  <span style={St.copyLbl}>{TXT.checkpointBalance}</span>
+                  <input inputMode="decimal" value={checkpointValue} placeholder="0,00" onFocus={markEditing}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^0-9.,]/g, "");
+                      const next = { ...(sub.checkpoints || {}) };
+                      if (v) next[sel] = v; else delete next[sel];
+                      onChange({ checkpoints: next });
+                    }} style={{ ...St.copySel, width: 90 }} />
+                </label>
               </>
             )}
           </IconPopoverField>

@@ -79,6 +79,8 @@ export default {
     interestPortion: "of which interest",
     checkpointInfo: "The actual bank balance in the month you're currently viewing. Use this to start, but also later to correct it, e.g. when extra money was deposited. Everything before this month stays as it was; everything after is recalculated from here (this balance + monthly contribution, plus any interest).",
     checkpointBalance: "Actual balance",
+    checkpointBalanceMain: "Actual balance main account",
+    mainAccountLabel: "Main account",
     addSubAccount: "Add account",
     projectionMonths: "Months ahead",
     combinedTotal: "Total",
