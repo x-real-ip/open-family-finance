@@ -801,22 +801,9 @@ export default function App() {
           </div>
         </header>
 
-        {view === "savings" ? (
-          <SavingsOverviewPage
-            goals={data.savingsGoals || []}
-            months={data.months}
-            savingsEntries={cur.savings}
-            currentMonthData={cur}
-            onAddGoal={addSavingsGoal}
-            onRemoveGoal={removeSavingsGoal}
-            onUpdateGoal={updateSavingsGoal}
-            onAddSubAccount={addSubAccount}
-            onRemoveSubAccount={removeSubAccount}
-            onUpdateSubAccount={updateSubAccount}
-          />
-        ) : (
-        <>
-        {/* Month */}
+        {/* Month — shared by both views: the savings overview edits each
+            linked entry's amount for whichever month is selected here, the
+            same way the monthly view does. */}
         <div style={St.monthNav} className="fade">
           <button type="button" onClick={() => goMonth(-1)} style={St.navBtn} aria-label={TXT.previousMonth}><ChevronLeft size={18} /></button>
           <div style={St.monthLabelWrap}>
@@ -832,6 +819,26 @@ export default function App() {
             <button type="button" onClick={() => deleteMonth(sel)} style={St.navBtn} aria-label={`${TXT.deleteMonth} · ${monthLong(sel)}`}><Trash2 size={16} /></button>
           )}
         </div>
+
+        {view === "savings" ? (
+          <SavingsOverviewPage
+            goals={data.savingsGoals || []}
+            months={data.months}
+            savingsEntries={cur.savings}
+            currentMonthData={cur}
+            sel={sel}
+            onAddGoal={addSavingsGoal}
+            onRemoveGoal={removeSavingsGoal}
+            onUpdateGoal={updateSavingsGoal}
+            onAddSubAccount={addSubAccount}
+            onRemoveSubAccount={removeSubAccount}
+            onUpdateSubAccount={updateSubAccount}
+            onEntryAmountChange={(entryId, value) => setListItem("savings", entryId, { amount: value })}
+            onEntryPeriodToggle={(entryId) => toggleItemPeriod("savings", entryId)}
+            onLogChange={logChange}
+          />
+        ) : (
+        <>
 
         {/* Distribution (result) — full width */}
         <section style={St.hero} className="fade">
@@ -1479,7 +1486,7 @@ function DurationField({ entry, onChange }) {
 // Spaaroverzicht: savings goals with one or more sub-accounts (bank/IBAN/plan
 // ID), each linked to an existing savings entry for its monthly contribution,
 // and projected forward from a recorded checkpoint balance.
-function SavingsOverviewPage({ goals, months, savingsEntries, currentMonthData, onAddGoal, onRemoveGoal, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+function SavingsOverviewPage({ goals, months, savingsEntries, currentMonthData, sel, onAddGoal, onRemoveGoal, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount, onEntryAmountChange, onEntryPeriodToggle, onLogChange }) {
   const [horizon, setHorizon] = useState(24);
   return (
     <div className="fade">
@@ -1494,12 +1501,15 @@ function SavingsOverviewPage({ goals, months, savingsEntries, currentMonthData, 
       </div>
       {goals.length === 0 && <div style={St.copyEmpty}>{TXT.noSavingsGoals}</div>}
       {goals.map((goal) => (
-        <SavingsGoalCard key={goal.id} goal={goal} months={months} savingsEntries={savingsEntries} currentMonthData={currentMonthData} horizon={horizon}
+        <SavingsGoalCard key={goal.id} goal={goal} months={months} savingsEntries={savingsEntries} currentMonthData={currentMonthData} sel={sel} horizon={horizon}
           onRemove={() => onRemoveGoal(goal.id)}
           onUpdate={(patch) => onUpdateGoal(goal.id, patch)}
           onAddSubAccount={() => onAddSubAccount(goal.id)}
           onRemoveSubAccount={(subId) => onRemoveSubAccount(goal.id, subId)}
           onUpdateSubAccount={(subId, patch) => onUpdateSubAccount(goal.id, subId, patch)}
+          onEntryAmountChange={onEntryAmountChange}
+          onEntryPeriodToggle={onEntryPeriodToggle}
+          onLogChange={onLogChange}
         />
       ))}
       <button type="button" onClick={onAddGoal} style={St.addBtn}><Plus size={16} /> {TXT.addSavingsGoal}</button>
@@ -1507,7 +1517,7 @@ function SavingsOverviewPage({ goals, months, savingsEntries, currentMonthData, 
   );
 }
 
-function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, horizon, onRemove, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, sel, horizon, onRemove, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount, onEntryAmountChange, onEntryPeriodToggle, onLogChange }) {
   const target = goal.targetAmount ? num(goal.targetAmount) : null;
   // The table starts at the earliest checkpoint among this goal's
   // sub-accounts — accounts opened later simply show "—" for months before
@@ -1554,9 +1564,12 @@ function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, horiz
       </div>
 
       {goal.subAccounts.map((sub) => (
-        <SubAccountRow key={sub.id} sub={sub} savingsEntries={savingsEntries} currentMonthData={currentMonthData}
+        <SubAccountRow key={sub.id} sub={sub} savingsEntries={savingsEntries} currentMonthData={currentMonthData} sel={sel}
           onChange={(patch) => onUpdateSubAccount(sub.id, patch)}
-          onRemove={() => onRemoveSubAccount(sub.id)} />
+          onRemove={() => onRemoveSubAccount(sub.id)}
+          onEntryAmountChange={onEntryAmountChange}
+          onEntryPeriodToggle={onEntryPeriodToggle}
+          onLogChange={onLogChange} />
       ))}
       {goal.subAccounts.length === 0 && <div style={St.copyEmpty}>{TXT.noSubAccounts}</div>}
       <button type="button" onClick={onAddSubAccount} style={St.addBtn}><Plus size={16} /> {TXT.addSubAccount}</button>
@@ -1634,8 +1647,9 @@ function Field({ label, info, width, children }) {
   );
 }
 
-function SubAccountRow({ sub, savingsEntries, currentMonthData, onChange, onRemove }) {
+function SubAccountRow({ sub, savingsEntries, currentMonthData, sel, onChange, onRemove, onEntryAmountChange, onEntryPeriodToggle, onLogChange }) {
   const linkedEntry = sub.entryId ? savingsEntries.find((s) => s.id === sub.entryId) : null;
+  const linkedFormulaActive = Boolean(linkedEntry?.formula);
   const share = sub.sharePercent === "" || sub.sharePercent == null ? 1 : num(sub.sharePercent) / 100;
   const preview = linkedEntry ? monthlyOf(linkedEntry, currentMonthData) * share : null;
   // Stored internally as a "YYYY-MM" month key (same as everywhere else in
@@ -1660,6 +1674,19 @@ function SubAccountRow({ sub, savingsEntries, currentMonthData, onChange, onRemo
           {savingsEntries.map((s) => <option key={s.id} value={s.id}>{s.label || TXT.unnamed}</option>)}
         </select>
       </Field>
+      {linkedEntry && (
+        <Field label={TXT.subAccountAmountLabel} info={TXT.subAccountAmountInfo} width={150}>
+          <div title={monthLong(sel)}>
+            <AmountField
+              value={linkedFormulaActive ? String(round2(entryAmount(linkedEntry, currentMonthData))) : linkedEntry.amount}
+              period={linkedEntry.period}
+              onValue={(v) => onEntryAmountChange(linkedEntry.id, v)}
+              onPeriod={() => onEntryPeriodToggle(linkedEntry.id)}
+              onCommit={(o, n) => onLogChange(`${TXT.savingsSection} · ${linkedEntry.label || TXT.unnamed}`, o, n)}
+              disabled={linkedFormulaActive} />
+          </div>
+        </Field>
+      )}
       <Field label={TXT.subAccountShare} width={60}>
         <input inputMode="numeric" value={sub.sharePercent ?? "100"} placeholder="100"
           onChange={(e) => onChange({ sharePercent: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 60, maxWidth: 60 }} />
