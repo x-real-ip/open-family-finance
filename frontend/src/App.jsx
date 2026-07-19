@@ -289,6 +289,9 @@ function migrateGoal(g) {
   return {
     entryId, targetAmount: g.targetAmount ?? "",
     forwarded: g.forwarded ?? Boolean((g.subAccounts || []).length),
+    // Used for the simple (not-forwarded) projection only — a starting
+    // balance + month so the graph doesn't have to assume €0 today.
+    checkpointMonth: g.checkpointMonth || "", checkpointBalance: g.checkpointBalance ?? "",
     subAccounts: (g.subAccounts || []).map(migrateSubAccount),
   };
 }
@@ -761,7 +764,7 @@ export default function App() {
   const mapGoals = (d, entryId, fn) => {
     const goals = d.savingsGoals || [];
     if (goals.some((g) => g.entryId === entryId)) return goals.map((g) => g.entryId === entryId ? fn(g) : g);
-    return [...goals, fn({ entryId, targetAmount: "", forwarded: false, subAccounts: [] })];
+    return [...goals, fn({ entryId, targetAmount: "", forwarded: false, checkpointMonth: "", checkpointBalance: "", subAccounts: [] })];
   };
   const updateGoal = (entryId, patch) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, ...patch })) }));
   const addSubAccount = (entryId) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", checkpointMonth: "", checkpointBalance: "" }] })) }));
@@ -1530,7 +1533,7 @@ function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMont
       </div>
       {savingsEntries.length === 0 && <div style={St.copyEmpty}>{TXT.noSavingsGoals}</div>}
       {savingsEntries.map((entry) => {
-        const goal = savingsGoals.find((g) => g.entryId === entry.id) || { entryId: entry.id, targetAmount: "", forwarded: false, subAccounts: [] };
+        const goal = savingsGoals.find((g) => g.entryId === entry.id) || { entryId: entry.id, targetAmount: "", forwarded: false, checkpointMonth: "", checkpointBalance: "", subAccounts: [] };
         return (
           <SavingsGoalCard key={entry.id} entry={entry} goal={goal} months={months} currentMonthData={currentMonthData} sel={sel} horizon={horizon}
             onUpdate={(patch) => onUpdateGoal(entry.id, patch)}
@@ -1552,14 +1555,23 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, horizon, onUpd
   // off, so it can't silently apply to the simple projection below.
   const target = forwarded && goal.targetAmount ? num(goal.targetAmount) : null;
   const entryMonthlyAmount = monthlyOf(entry, currentMonthData);
+  // Shown read-only exactly as it's entered in the monthly view (its own
+  // amount + period, e.g. "600 /jr") rather than converted to a monthly
+  // figure — the same value the monthly view itself shows.
+  const formulaActive = Boolean(entry.formula);
+  const entryDisplayAmount = formulaActive ? round2(entryAmount(entry, currentMonthData)) : num(entry.amount);
+  const entryPeriodSuffix = entry.period === "year" ? TXT.periodYearAbbr : TXT.periodMonthAbbr;
   // Without a separate bank to track, there's still a projection worth
   // showing by default: a single virtual "account" starting at €0 this
   // month, growing by the entry's own amount — same machinery, no bank
   // details needed. Once forwarded, the real (editable) sub-accounts take
   // over instead.
   const effectiveSubAccounts = useMemo(() => (
-    forwarded ? subAccounts : [{ id: `self-${entry.id}`, holder: entry.label || TXT.unnamed, sharePercent: "100", interestRate: "", checkpointMonth: monthKey(new Date()), checkpointBalance: "0" }]
-  ), [forwarded, subAccounts, entry.id, entry.label]);
+    forwarded ? subAccounts : [{
+      id: `self-${entry.id}`, holder: entry.label || TXT.unnamed, sharePercent: "100", interestRate: "",
+      checkpointMonth: goal.checkpointMonth || monthKey(new Date()), checkpointBalance: goal.checkpointBalance || "0",
+    }]
+  ), [forwarded, subAccounts, entry.id, entry.label, goal.checkpointMonth, goal.checkpointBalance]);
   // The table starts at the earliest checkpoint among this goal's
   // accounts — accounts opened later simply show "—" for months before
   // their own checkpoint.
@@ -1604,12 +1616,27 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, horizon, onUpd
         <span style={{ flex: 1 }} />
         {/* Read-only here on purpose — this is the same monthly entry shown
             in the monthly view, and it should only be editable there. */}
-        <span style={St.savingsGoalAmount} title={TXT.savingsGoalAmountInfo}>{eur(entryMonthlyAmount)} {TXT.perMonth}</span>
+        <span style={St.savingsGoalAmount} title={TXT.savingsGoalAmountInfo}>{eur(entryDisplayAmount)} {entryPeriodSuffix}</span>
         <label style={St.goalForwardedToggle} title={TXT.goalForwardedInfo}>
           <input type="checkbox" checked={forwarded} onChange={(e) => onUpdate({ forwarded: e.target.checked })} />
           {TXT.goalForwardedLabel}
         </label>
       </div>
+
+      {!forwarded && (
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 10 }}>
+          <label style={St.copyRow}>
+            <span style={St.copyLbl}>{TXT.checkpointMonth}</span>
+            <input type="date" lang={LANG} value={`${goal.checkpointMonth || monthKey(new Date())}-01`}
+              onChange={(e) => onUpdate({ checkpointMonth: e.target.value ? e.target.value.slice(0, 7) : "" })} style={St.copySel} />
+          </label>
+          <label style={St.copyRow}>
+            <span style={St.copyLbl}>{TXT.checkpointBalance}</span>
+            <input inputMode="decimal" value={goal.checkpointBalance} placeholder="0,00"
+              onChange={(e) => onUpdate({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 90 }} />
+          </label>
+        </div>
+      )}
 
       {forwarded && (
         <>
