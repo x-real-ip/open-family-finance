@@ -1549,6 +1549,9 @@ const horizonLabel = (n) => n < 12 ? t(LANG, "months", { count: n }) : t(LANG, "
 
 function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMonthData, sel, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
   const [horizon, setHorizon] = useState(24);
+  // Accordion: opening one goal collapses whichever other one was open, so
+  // the page doesn't turn into a wall of charts once there are several.
+  const [openGoalId, setOpenGoalId] = useState(null);
   return (
     <div className="fade">
       <div style={St.savingsPageHead}>
@@ -1565,6 +1568,8 @@ function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMont
         const goal = savingsGoals.find((g) => g.entryId === entry.id) || { entryId: entry.id, targetAmount: "", forwarded: false, checkpoints: {}, subAccounts: [] };
         return (
           <SavingsGoalCard key={entry.id} entry={entry} goal={goal} months={months} currentMonthData={currentMonthData} sel={sel} horizon={horizon}
+            open={openGoalId === entry.id}
+            onToggleOpen={() => setOpenGoalId((cur) => cur === entry.id ? null : entry.id)}
             onUpdate={(patch) => onUpdateGoal(entry.id, patch)}
             onAddSubAccount={() => onAddSubAccount(entry.id)}
             onRemoveSubAccount={(subId) => onRemoveSubAccount(entry.id, subId)}
@@ -1576,7 +1581,7 @@ function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMont
   );
 }
 
-function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, open, onToggleOpen, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
   const forwarded = Boolean(goal.forwarded);
   const subAccounts = goal.subAccounts;
   // The target applies to the goal as a whole, regardless of whether it's
@@ -1645,18 +1650,24 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
 
   return (
     <section style={St.section} className="fade">
-      <div style={St.collapseHead}>
+      <div role="button" tabIndex={0} aria-expanded={open}
+        onClick={onToggleOpen}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleOpen(); } }}
+        style={St.collapseHead}>
         <span style={St.savingsGoalName}>{entry.label || TXT.unnamed}</span>
         <span style={{ flex: 1 }} />
         {/* Read-only here on purpose — this is the same monthly entry shown
             in the monthly view, and it should only be editable there. */}
         <span style={St.savingsGoalAmount} title={TXT.savingsGoalAmountInfo}>{eur(entryDisplayAmount)} {entryPeriodSuffix}</span>
-        <label style={St.goalForwardedToggle} title={TXT.goalForwardedInfo}>
+        <label style={St.goalForwardedToggle} title={TXT.goalForwardedInfo} onClick={(e) => e.stopPropagation()}>
           <input type="checkbox" checked={forwarded} onChange={(e) => onUpdate({ forwarded: e.target.checked })} />
           {TXT.goalForwardedLabel}
         </label>
+        <ChevronDown size={18} style={{ color: C.muted, transform: open ? "rotate(180deg)" : "none", transition: "transform .2s", flexShrink: 0 }} />
       </div>
 
+      {open && (
+      <>
       {/* The recorded balance and the target apply to the goal as a whole,
           whether or not it's forwarded to real sub-accounts — a single real
           observation, not one per bank. */}
@@ -1762,6 +1773,8 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
         </>
       )}
       {reached && <div style={St.savingsTargetReached}>{TXT.targetReached}</div>}
+      </>
+      )}
     </section>
   );
 }
