@@ -329,7 +329,10 @@ function buildCashflow(cur, calc, detail) {
   };
   const addLink = (sourceKey, targetKey, value) => {
     if (!(value > 0)) return;
-    links.push({ source: indexOf.get(sourceKey), target: indexOf.get(targetKey), value: round2(value) });
+    const source = indexOf.get(sourceKey);
+    // Colored like the money's origin (the person or category it's leaving),
+    // not a flat neutral grey — same colors used for that node itself.
+    links.push({ source, target: indexOf.get(targetKey), value: round2(value), color: nodes[source].color });
   };
 
   const potKey = "pot", expKey = "exp", saveKey = "save", bufferKey = "buffer";
@@ -1986,6 +1989,21 @@ function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMont
   );
 }
 
+// A colored ribbon per Sankey link — recharts' default Sankey link is a
+// single flat grey, so this recolors each one to match the node its money
+// is leaving (same colors used for that node itself).
+function SankeyLink({ sourceX, targetX, sourceY, targetY, sourceControlX, targetControlX, linkWidth, payload }) {
+  return (
+    <path
+      d={`M${sourceX},${sourceY}C${sourceControlX},${sourceY} ${targetControlX},${targetY} ${targetX},${targetY}`}
+      fill="none"
+      stroke={payload.color}
+      strokeOpacity={0.4}
+      strokeWidth={linkWidth}
+    />
+  );
+}
+
 // A colored rectangle + name + amount label per Sankey node — recharts'
 // default Sankey node is a single flat fill, so this is needed for the
 // same per-person/per-category coloring used throughout the rest of the
@@ -2039,7 +2057,7 @@ function CashflowPage({ cur, calc }) {
       ) : (
         <div style={{ ...St.chartBox, height: 480, marginTop: 12 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <Sankey data={{ nodes, links }} node={<SankeyNode />} link={{ stroke: C.muted, strokeOpacity: 0.25, fill: C.muted, fillOpacity: 0.15 }}
+            <Sankey data={{ nodes, links }} node={<SankeyNode />} link={<SankeyLink />}
               nodePadding={24} nodeWidth={10} margin={{ top: 8, right: 120, bottom: 8, left: 120 }}>
               <Tooltip {...tooltipProps} />
             </Sankey>
