@@ -2350,7 +2350,7 @@ const St = {
 
   historyBanner: { display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", background: C.canvas, border: `1px solid ${C.line}`, borderRadius: 12, padding: "10px 14px", marginTop: 12, marginBottom: 4, fontSize: 13.5, color: C.muted, flexWrap: "wrap" },
   historyBannerBtn: { border: "none", background: C.card, color: C.ink, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "7px 14px", borderRadius: 999, boxShadow: "0 1px 3px rgba(0,0,0,0.10)", flexShrink: 0 },
-  historyLockedContent: { opacity: 0.55, filter: "grayscale(0.6)", pointerEvents: "none", userSelect: "none" },
+  historyLockedContent: { opacity: 0.75, filter: "grayscale(0.35)", pointerEvents: "none", userSelect: "none" },
 
   header: { padding: "8px 4px 16px" },
   headerTop: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" },
