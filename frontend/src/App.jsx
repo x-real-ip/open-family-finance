@@ -1695,10 +1695,10 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
           <ChartTitle>{TXT.savingsChartTitle}</ChartTitle>
           <div style={St.chartBox}>
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 6, right: 20, left: -14, bottom: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 6, right: 20, left: -6, bottom: 0 }}>
                 <CartesianGrid stroke={C.line} vertical={false} />
                 <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} interval={chartTickInterval} />
-                <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
+                <YAxis tick={tick} axisLine={false} tickLine={false} width={58} tickFormatter={eur0} />
                 <Tooltip {...tooltipProps} />
                 {forwarded && <Legend {...legendProps} />}
                 {effectiveSubAccounts.map((s) => (
