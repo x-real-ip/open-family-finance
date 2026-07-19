@@ -1532,12 +1532,16 @@ function AmountField({ value, period, onValue, onPeriod, onCommit, disabled }) {
 
 // Shows the correspondent inline (when set) so it's visible at a glance, just
 // like the description — instead of only being visible after opening the
-// correspondent popover.
+// correspondent popover. Styled to stand out from the rest of this otherwise
+// muted line, since it's easy to miss otherwise.
 function DerivedLine({ monthly, period, percent, dot, correspondent }) {
   const other = period === "year" ? `${eur(monthly)} ${TXT.perMonth}` : `${eur(monthly * 12)} ${TXT.perYear}`;
   return (
     <div style={{ ...St.derived, marginLeft: dot ? 20 : 2 }}>
-      = {other}{percent != null ? ` · ${Math.round(percent * 100)}%` : ""}{PAPERLESS_ENABLED && correspondent ? ` · ${correspondent}` : ""}
+      = {other}{percent != null ? ` · ${Math.round(percent * 100)}%` : ""}
+      {PAPERLESS_ENABLED && correspondent && (
+        <> · <span style={St.derivedCorrespondent}><Building2 size={11} style={{ verticalAlign: "-1px" }} /> {correspondent}</span></>
+      )}
     </div>
   );
 }
@@ -2660,6 +2664,7 @@ const St = {
   nameInput: { flex: 1, minWidth: 90, border: "none", borderBottom: `1px solid ${C.line}`, background: "transparent", padding: "8px 2px", fontSize: 15, color: C.ink, fontFamily: "inherit", outline: "none" },
   catInput: { width: 104, flexShrink: 0, border: "none", borderBottom: `1px solid ${C.line}`, background: C.canvas, borderRadius: "6px 6px 0 0", padding: "8px 8px", fontSize: 12.5, color: C.muted, fontFamily: "inherit", outline: "none" },
   derived: { fontSize: 12, color: C.muted, marginTop: 4, fontVariantNumeric: "tabular-nums" },
+  derivedCorrespondent: { color: C.b, fontWeight: 600 },
 
   amountField: { display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 },
   periodPill: { border: "none", background: C.canvas, color: C.muted, fontSize: 11, fontWeight: 700, padding: "5px 7px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", minWidth: 38, textAlign: "center" },
