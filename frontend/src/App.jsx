@@ -36,8 +36,30 @@ import { LANG, TXT, t, getRuntimeCurrencyLocale, getRuntimeDateLocale, getRuntim
 ------------------------------------------------------------------- */
 const C = {
   canvas: "var(--canvas)", card: "var(--card)", ink: "var(--ink)", muted: "var(--muted)", line: "var(--line)",
-  a: "var(--a)", b: "var(--b)", gov: "var(--gov)", save: "var(--save)", inc: "var(--inc)", exp: "var(--exp)", warn: "var(--warn)", softA: "var(--soft-a)", softB: "var(--soft-b)",
+  a: "var(--a)", b: "var(--b)", c: "var(--c)", d: "var(--d)", e: "var(--e)",
+  gov: "var(--gov)", save: "var(--save)", inc: "var(--inc)", exp: "var(--exp)", warn: "var(--warn)",
+  softA: "var(--soft-a)", softB: "var(--soft-b)", softC: "var(--soft-c)", softD: "var(--soft-d)", softE: "var(--soft-e)",
 };
+
+// Up to 5 people get a hand-picked, theme-aware color pair (main + soft
+// background tint); indices 0/1 are the original two colors, unchanged, so a
+// 2-person household looks pixel-identical to before this was generalized.
+// Beyond 5, fall back to categoryColor keyed by id (stable, but not
+// theme-tuned and has no separate soft tint).
+const PERSON_PALETTE = [
+  { main: C.a, soft: C.softA }, { main: C.b, soft: C.softB },
+  { main: C.c, soft: C.softC }, { main: C.d, soft: C.softD }, { main: C.e, soft: C.softE },
+];
+function personColor(person, index) {
+  if (index < PERSON_PALETTE.length) return PERSON_PALETTE[index];
+  const main = categoryColor(person.id);
+  return { main, soft: main };
+}
+// A person's personal-page section, tinted with their own color instead of a
+// fixed background — one function instead of a style per person/slot.
+function sectionPersonalStyle(color) {
+  return { background: `color-mix(in srgb, ${color} 8%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 18%, transparent)` };
+}
 
 const KEY = "open-family-finance:v1";
 const APP_TITLE = getRuntimeAppTitle();
@@ -55,22 +77,25 @@ function categoryColor(name) {
 
 /* Empty defaults. Real amounts are stored in the database, not in the
    code, so this repository can be public. */
+// A household can have any number of people (not just 2) — `partners` is an
+// id-addressed list, not a fixed pair. Seeding a brand-new install with 2
+// blank people is just a UX nicety matching the common case, not a hard
+// requirement (addPerson/removePerson work for any length ≥ 1).
+const DEFAULT_PERSON = { id: "p1", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" };
 const DEFAULT_FIGURES = {
   method: "income",
   margePct: "0.5",
-  customPct: "50",
-  partners: [
-    { id: "p1", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" },
-    { id: "p2", name: "", income: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" },
-  ],
+  // Per-person share for the "custom" split method, keyed by person id (was
+  // a single scalar back when there were always exactly 2 people).
+  customPct: {},
+  partners: [{ ...DEFAULT_PERSON }, { ...DEFAULT_PERSON, id: "p2" }],
   govIncome: [],
   expenses: [],
   savings: [],
-  // Each partner's own personal fixed costs — kept separate from the shared
-  // `expenses` list so one partner filling theirs in doesn't affect the
-  // other's or the joint total.
-  personalExpensesA: [],
-  personalExpensesB: [],
+  // Each person's own personal fixed costs, keyed by their id — kept separate
+  // from the shared `expenses` list so one person filling theirs in doesn't
+  // affect anyone else's or the joint total.
+  personalExpenses: {},
   overrides: {},
 };
 
@@ -215,25 +240,50 @@ const addOneYear = (iso) => {
    net income ("verhouding") or 50/50 ("equal") — plus a small safety
    margin (margePct). leftover = own salary − own contribution.
 ------------------------------------------------------------------- */
+// All per-person results are keyed by person id (not a fixed a/b pair), so
+// this works for any number of people ≥ 1.
 function computeTotals(fig) {
-  const a = monthlyInc(fig.partners[0]), b = monthlyInc(fig.partners[1]), total = a + b;
-  const shareA = total > 0 ? a / total : 0.5, shareB = total > 0 ? b / total : 0.5;
+  const people = fig.partners.map((p) => ({ id: p.id, income: monthlyInc(p) }));
+  const total = people.reduce((s, p) => s + p.income, 0);
+  const n = people.length;
+  const shares = {};
+  for (const p of people) shares[p.id] = total > 0 ? p.income / total : (n ? 1 / n : 0);
+
   const expensesTotal = sumM(fig.expenses, fig), savingsTotal = sumM(fig.savings, fig);
   const potTotal = expensesTotal + savingsTotal, govTotal = sumM(fig.govIncome, fig);
   const coupleFunds = Math.max(0, potTotal - govTotal);
   const marge = num(fig.margePct) / 100;
-  let baseA, baseB;
-  if (fig.method === "equal") { baseA = coupleFunds / 2; baseB = coupleFunds / 2; }
-  else if (fig.method === "custom") { const pA = clamp01(num(fig.customPct) / 100); baseA = coupleFunds * pA; baseB = coupleFunds * (1 - pA); }
-  else { baseA = coupleFunds * shareA; baseB = coupleFunds * shareB; }
-  const transferA = baseA * (1 + marge), transferB = baseB * (1 + marge);
-  const buffer = transferA + transferB - coupleFunds;
-  const leftoverA = a - transferA, leftoverB = b - transferB;
+
+  const bases = {};
+  if (fig.method === "equal") {
+    for (const p of people) bases[p.id] = n ? coupleFunds / n : 0;
+  } else if (fig.method === "custom") {
+    // Each person's raw share of coupleFunds, taken at face value — the sum
+    // is deliberately never clamped/rescaled to 100%. If it doesn't add up,
+    // that's surfaced to the user as a "remaining %" indicator in the UI,
+    // not silently corrected here.
+    const customPct = fig.customPct || {};
+    for (const p of people) bases[p.id] = coupleFunds * clamp01(num(customPct[p.id]) / 100);
+  } else {
+    for (const p of people) bases[p.id] = coupleFunds * shares[p.id];
+  }
+
+  const transfers = {}, leftovers = {}, keeps = {};
+  let transferSum = 0;
+  for (const p of people) {
+    const t = bases[p.id] * (1 + marge);
+    transfers[p.id] = t;
+    transferSum += t;
+    leftovers[p.id] = p.income - t;
+    keeps[p.id] = p.income > 0 ? leftovers[p.id] / p.income : 0;
+  }
+  const buffer = transferSum - coupleFunds;
+  const contribShares = {};
+  for (const p of people) contribShares[p.id] = transferSum > 0 ? transfers[p.id] / transferSum : (n ? 1 / n : 0);
+
   return {
-    a, b, total, shareA, shareB, expensesTotal, savingsTotal, potTotal, govTotal, coupleFunds, buffer,
-    transferA, transferB, leftoverA, leftoverB,
-    keepA: a > 0 ? leftoverA / a : 0, keepB: b > 0 ? leftoverB / b : 0,
-    contribShareA: transferA + transferB > 0 ? transferA / (transferA + transferB) : 0.5,
+    total, expensesTotal, savingsTotal, potTotal, govTotal, coupleFunds, buffer,
+    people, shares, transfers, leftovers, keeps, contribShares,
   };
 }
 
@@ -249,21 +299,69 @@ function computeTotals(fig) {
 function migrateFig(f) {
   if (!f) return clone(DEFAULT_FIGURES);
   const per = (p) => (p === "year" ? "year" : "month");
+  // Unlike every other entry kind, partners never used to get an `id`
+  // fallback here — now that personal expenses are keyed by person id, every
+  // person needs a stable one.
+  const partners = (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({
+    id: p.id || uid(), name: p.name || "", income: p.income ?? "", period: per(p.period),
+    note: p.note || "", url: p.url || "", correspondent: p.correspondent || "",
+    documentMode: p.documentMode || "auto", documentLabel: p.documentLabel || null, documentId: p.documentId ?? null,
+    startDate: p.startDate || "", endDate: p.endDate || "", warningDays: p.warningDays || "",
+  }));
+
+  // customPct used to be a single scalar (0-100, "first person's share,
+  // second gets the rest"). Migrate that into a per-person map, preserving
+  // the exact old 2-person math; a 3rd+ person already present in a
+  // hand-edited blob gets no opinion ("") rather than silently grabbing a
+  // share. Also drop stale keys for people no longer present.
+  let customPct;
+  if (f.customPct && typeof f.customPct === "object") {
+    customPct = { ...f.customPct };
+  } else {
+    const oldScalar = f.customPct ?? "50";
+    customPct = {};
+    partners.forEach((p, i) => {
+      if (i === 0) customPct[p.id] = String(oldScalar);
+      else if (i === 1) customPct[p.id] = String(round2(100 - num(oldScalar)));
+    });
+  }
+  const cleanedCustomPct = {};
+  for (const p of partners) cleanedCustomPct[p.id] = customPct[p.id] ?? "";
+  customPct = cleanedCustomPct;
+
+  const migrateEntry = (e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", warningDays: e.warningDays || "", formula: e.formula || undefined });
+
+  // personalExpenses used to be two fixed sibling arrays (personalExpensesA/B).
+  // Migrate those onto the first two people's ids; a blob that's already in
+  // the new shape (an object keyed by person id) passes through as-is.
+  let personalExpenses;
+  if (f.personalExpenses && typeof f.personalExpenses === "object" && !Array.isArray(f.personalExpenses)) {
+    personalExpenses = {};
+    for (const p of partners) personalExpenses[p.id] = (f.personalExpenses[p.id] || []).map(migrateEntry);
+  } else {
+    personalExpenses = {};
+    partners.forEach((p, i) => {
+      const legacyKey = i === 0 ? "personalExpensesA" : i === 1 ? "personalExpensesB" : null;
+      personalExpenses[p.id] = legacyKey ? (f[legacyKey] || []).map(migrateEntry) : [];
+    });
+  }
+
   return {
-    method: f.method || "income", margePct: f.margePct ?? "0.5", customPct: f.customPct ?? "50",
-    partners: (f.partners && f.partners.length ? f.partners : clone(DEFAULT_FIGURES.partners)).map((p) => ({ ...p, period: per(p.period), note: p.note || "", url: p.url || "", correspondent: p.correspondent || "", documentMode: p.documentMode || "auto", documentLabel: p.documentLabel || null, documentId: p.documentId ?? null, startDate: p.startDate || "", endDate: p.endDate || "", warningDays: p.warningDays || "" })),
+    method: f.method || "income", margePct: f.margePct ?? "0.5",
+    customPct, partners,
     govIncome: (f.govIncome || []).map((g) => ({ id: g.id || uid(), label: g.label || "", amount: g.amount ?? "", period: per(g.period), note: g.note || "", url: g.url || "", correspondent: g.correspondent || "", documentMode: g.documentMode || "auto", documentLabel: g.documentLabel || null, documentId: g.documentId ?? null, startDate: g.startDate || "", endDate: g.endDate || "", warningDays: g.warningDays || "", formula: g.formula || undefined })),
-    expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", warningDays: e.warningDays || "", formula: e.formula || undefined })),
+    expenses: (f.expenses || []).map(migrateEntry),
     savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", correspondent: s.correspondent || "", documentMode: s.documentMode || "auto", documentLabel: s.documentLabel || null, documentId: s.documentId ?? null, startDate: s.startDate || "", endDate: s.endDate || "", warningDays: s.warningDays || "", formula: s.formula || undefined }))
       : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" }] : []),
-    personalExpensesA: (f.personalExpensesA || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", warningDays: e.warningDays || "", formula: e.formula || undefined })),
-    personalExpensesB: (f.personalExpensesB || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", warningDays: e.warningDays || "", formula: e.formula || undefined })),
+    personalExpenses,
     overrides: (f.overrides && typeof f.overrides === "object") ? { ...f.overrides } : {},
   };
 }
 // "manual" = the stored entry order (drag handles reorder it); the other modes derive an order on the fly.
-const SORT_MODES = { govIncome: ["manual", "name"], expenses: ["manual", "category", "name"], savings: ["manual", "name"], personalExpensesA: ["manual", "category", "name"], personalExpensesB: ["manual", "category", "name"] };
-const DEFAULT_LIST_SORT = { govIncome: "manual", expenses: "manual", savings: "manual", personalExpensesA: "manual", personalExpensesB: "manual" };
+// Everyone's personal expenses share one sort-mode preference (personalExpenses),
+// rather than one per person — a deliberate simplification.
+const SORT_MODES = { govIncome: ["manual", "name"], expenses: ["manual", "category", "name"], savings: ["manual", "name"], personalExpenses: ["manual", "category", "name"] };
+const DEFAULT_LIST_SORT = { govIncome: "manual", expenses: "manual", savings: "manual", personalExpenses: "manual" };
 function listSortOf(raw) {
   const out = { ...DEFAULT_LIST_SORT };
   for (const kind of Object.keys(DEFAULT_LIST_SORT)) {
@@ -410,7 +508,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(true);
   const [view, setView] = useState("month");
-  const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, statsIncome: true, statsTotals: false, log: false, personalA: true, personalB: true });
+  const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, statsIncome: true, statsTotals: false, log: false });
   const [showDetails, setShowDetails] = useState(false);
   // null = unbounded, so the range always defaults to (and grows with) all available months.
   const [statsFrom, setStatsFrom] = useState(null);
@@ -423,7 +521,7 @@ export default function App() {
   });
   const saveTimer = useRef(null);
   const margeStart = useRef(null);
-  const customStart = useRef(null);
+  const customStart = useRef({}); // one remembered "before" value per person id, for the log
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -485,15 +583,18 @@ export default function App() {
   const [unlockedMonth, setUnlockedMonth] = useState(null);
   const historyLocked = isHistoryMonth && unlockedMonth !== sel;
 
+  // Chart only the people currently in `cur` — a person absent from an older
+  // month simply reads 0 there (display-only, no data loss).
   const series = useMemo(() => sortedMonths.map((m) => {
-    const t = computeTotals(data.months[m]);
-    return {
+    const totals = computeTotals(data.months[m]);
+    const row = {
       key: m, label: monthShort(m),
-      income: Math.round(t.total), gov: Math.round(t.govTotal),
-      expenses: Math.round(t.expensesTotal), savings: Math.round(t.savingsTotal),
-      inlegA: Math.round(t.transferA), inlegB: Math.round(t.transferB),
+      income: Math.round(totals.total), gov: Math.round(totals.govTotal),
+      expenses: Math.round(totals.expensesTotal), savings: Math.round(totals.savingsTotal),
     };
-  }), [sortedMonths, data.months]);
+    for (const p of cur.partners) row[`inleg_${p.id}`] = Math.round(totals.transfers[p.id] || 0);
+    return row;
+  }), [sortedMonths, data.months, cur.partners]);
 
   const statsSeries = useMemo(() => series.filter((s) => (!statsFrom || s.key >= statsFrom) && (!statsTo || s.key <= statsTo)), [series, statsFrom, statsTo]);
   const statsFiltered = Boolean(statsFrom || statsTo);
@@ -504,8 +605,6 @@ export default function App() {
     return Object.entries(map).sort((x, y) => y[1] - x[1]);
   };
   const byCategory = useMemo(() => byCategoryOf(cur.expenses), [cur]);
-  const byCategoryA = useMemo(() => byCategoryOf(cur.personalExpensesA), [cur]);
-  const byCategoryB = useMemo(() => byCategoryOf(cur.personalExpensesB), [cur]);
 
   // "manual" shows the stored entry order as-is (see reorderListItem); the other
   // modes derive a display order on the fly — mutations still address entries by
@@ -521,15 +620,13 @@ export default function App() {
   const sortedGovIncome = useMemo(() => sortItems("govIncome", cur.govIncome), [cur.govIncome, listSort.govIncome]);
   const sortedExpenses = useMemo(() => sortItems("expenses", cur.expenses), [cur.expenses, listSort.expenses]);
   const sortedSavings = useMemo(() => sortItems("savings", cur.savings), [cur.savings, listSort.savings]);
-  const sortedPersonalA = useMemo(() => sortItems("personalExpensesA", cur.personalExpensesA), [cur.personalExpensesA, listSort.personalExpensesA]);
-  const sortedPersonalB = useMemo(() => sortItems("personalExpensesB", cur.personalExpensesB), [cur.personalExpensesB, listSort.personalExpensesB]);
 
   // Contracts (of any kind: income, gov income, expenses, savings) that are
   // expired or about to expire for the selected month, surfaced as a banner
   // at the top of the page so they aren't only visible on hover.
   const contractWarnings = useMemo(() => {
     const entries = [
-      ...cur.partners.map((p, i) => ({ ...p, label: p.name || t(LANG, "partnerName", { n: i + 1 }) })),
+      ...cur.partners.map((p, i) => ({ ...p, label: p.name || t(LANG, "personName", { n: i + 1 }) })),
       ...cur.govIncome.map((g) => ({ ...g, label: g.label || TXT.unnamed })),
       ...cur.expenses.map((e) => ({ ...e, label: e.label || TXT.unnamed })),
       ...cur.savings.map((s) => ({ ...s, label: s.label || TXT.unnamed })),
@@ -550,24 +647,29 @@ export default function App() {
   // Reordering changes the entry order for the selected month only; it does not
   // forward-propagate like value edits do, since order isn't a per-entry field.
   const [dragItem, setDragItem] = useState(null);
-  const reorderListItem = (kind, dragId, dropId) => setData((d) => {
+  // `personId` scopes reordering/dragging to one person's personal-expense
+  // list (kind === "personalExpenses"); null for every other (flat) list.
+  const reorderListItem = (kind, dragId, dropId, personId = null) => setData((d) => {
     const s = d.selectedMonth;
-    const list = d.months[s][kind];
+    const list = personId ? (d.months[s].personalExpenses[personId] || []) : d.months[s][kind];
     const from = list.findIndex((x) => x.id === dragId), to = list.findIndex((x) => x.id === dropId);
     if (from === -1 || to === -1 || from === to) return d;
     const next = list.slice();
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
-    return { ...d, months: { ...d.months, [s]: { ...d.months[s], [kind]: next } } };
+    const fig = personId
+      ? { ...d.months[s], personalExpenses: { ...d.months[s].personalExpenses, [personId]: next } }
+      : { ...d.months[s], [kind]: next };
+    return { ...d, months: { ...d.months, [s]: fig } };
   });
-  const dragHandleProps = (kind, id) => ({
+  const dragHandleProps = (kind, id, personId = null) => ({
     draggable: true,
-    onDragStart: (e) => { setDragItem({ kind, id }); e.dataTransfer.effectAllowed = "move"; },
+    onDragStart: (e) => { setDragItem({ kind, id, personId }); e.dataTransfer.effectAllowed = "move"; },
     onDragEnd: () => setDragItem(null),
   });
-  const dragRowProps = (kind, id) => ({
-    onDragOver: (e) => { if (dragItem?.kind === kind && dragItem.id !== id) e.preventDefault(); },
-    onDrop: (e) => { if (dragItem?.kind !== kind) return; e.preventDefault(); reorderListItem(kind, dragItem.id, id); setDragItem(null); },
+  const dragRowProps = (kind, id, personId = null) => ({
+    onDragOver: (e) => { if (dragItem?.kind === kind && dragItem?.personId === personId && dragItem.id !== id) e.preventDefault(); },
+    onDrop: (e) => { if (dragItem?.kind !== kind || dragItem?.personId !== personId) return; e.preventDefault(); reorderListItem(kind, dragItem.id, id, personId); setDragItem(null); },
   });
 
   // Existing category names across all months, for autocomplete suggestions.
@@ -624,11 +726,14 @@ export default function App() {
     return () => { active = false; };
   }, []);
 
+  // `personId` scopes lookup to one person's personal-expense list
+  // (kind === "personalExpenses"); null for every other (flat) list.
+  const listAt = (fig, kind, personId) => (personId ? (fig?.personalExpenses?.[personId] || []) : ((fig && fig[kind]) || []));
   // History of one entry (matched by id) across all months, for the sparkline.
-  const entryHistory = (kind, id) => {
+  const entryHistory = (kind, id, personId = null) => {
     const out = [];
     for (const m of sortedMonths) {
-      const it = ((data.months[m] && data.months[m][kind]) || []).find((x) => x.id === id);
+      const it = listAt(data.months[m], kind, personId).find((x) => x.id === id);
       if (!it) continue;
       const v = kind === "partners" ? monthlyInc(it) : monthlyOf(it, data.months[m]);
       out.push({ month: m, label: monthShort(m), value: Math.round(v) });
@@ -636,11 +741,11 @@ export default function App() {
     return out;
   };
   // Compare the current value to the most recent earlier month that had an entered value.
-  const entryTrend = (kind, id, curVal) => {
+  const entryTrend = (kind, id, curVal, personId = null) => {
     if (!(curVal > 0)) return null;
     const idx = sortedMonths.indexOf(sel);
     for (let i = idx - 1; i >= 0; i--) {
-      const it = ((data.months[sortedMonths[i]] && data.months[sortedMonths[i]][kind]) || []).find((x) => x.id === id);
+      const it = listAt(data.months[sortedMonths[i]], kind, personId).find((x) => x.id === id);
       if (!it) continue;
       const prev = toMonthly(kind === "partners" ? it.income : it.amount, it.period);
       if (prev > 0) {
@@ -703,16 +808,45 @@ export default function App() {
     return { ...d, months };
   });
 
-  const setPartner = (i, patch) => {
-    const key = cur.partners[i]?.id || `p${i + 1}`;
-    editForward((f) => ({ ...f, partners: f.partners.map((p, idx) => idx === i ? { ...p, ...patch } : p) }), key);
-  };
+  const setPartner = (id, patch) => editForward((f) => ({ ...f, partners: f.partners.map((p) => p.id === id ? { ...p, ...patch } : p) }), id);
   // Names belong to a person, not a month: change them in every month and persist.
-  const setPartnerName = (i, name) => setData((d) => {
+  const setPartnerName = (id, name) => setData((d) => {
     const months = {};
-    for (const [k, m] of Object.entries(d.months)) months[k] = { ...m, partners: m.partners.map((p, idx) => idx === i ? { ...p, name } : p) };
+    for (const [k, m] of Object.entries(d.months)) months[k] = { ...m, partners: m.partners.map((p) => p.id === id ? { ...p, name } : p) };
     return { ...d, months };
   });
+  // A person's existence is structural, like their name — not a per-month
+  // value — so it's set/removed across every month, not forward-propagated.
+  const addPerson = () => {
+    const id = uid();
+    setData((d) => {
+      const months = {};
+      for (const [k, m] of Object.entries(d.months)) {
+        months[k] = {
+          ...m,
+          partners: [...m.partners, { ...DEFAULT_PERSON, id }],
+          customPct: { ...m.customPct, [id]: "" },
+          personalExpenses: { ...m.personalExpenses, [id]: [] },
+        };
+      }
+      return { ...d, months };
+    });
+  };
+  const removePerson = (id) => {
+    if (cur.partners.length <= 1) return;
+    const i = cur.partners.findIndex((p) => p.id === id);
+    const label = personName(cur.partners[i], i);
+    if (!window.confirm(t(LANG, "confirmRemovePerson", { name: label }))) return;
+    setData((d) => {
+      const months = {};
+      for (const [k, m] of Object.entries(d.months)) {
+        const { [id]: _p1, ...restPersonal } = m.personalExpenses;
+        const { [id]: _p2, ...restCustomPct } = m.customPct;
+        months[k] = { ...m, partners: m.partners.filter((p) => p.id !== id), personalExpenses: restPersonal, customPct: restCustomPct };
+      }
+      return { ...d, months };
+    });
+  };
   // Append a change to the log (date/time, field, old → new). Kept to the last 300 entries.
   const logChange = (label, oldV, newV) => setData((d) => {
     if (String(oldV) === String(newV)) return d;
@@ -778,13 +912,11 @@ export default function App() {
     });
   };
 
-  const togglePartnerPeriod = (i) => {
-    const key = cur.partners[i]?.id || `p${i + 1}`;
-    editForward((f) => ({ ...f, partners: f.partners.map((p, idx) => idx === i ? { ...p, period: p.period === "year" ? "month" : "year", income: flip(p.income, p.period) } : p) }), key);
-  };
+  const togglePartnerPeriod = (id) => editForward((f) => ({ ...f, partners: f.partners.map((p) => p.id === id ? { ...p, period: p.period === "year" ? "month" : "year", income: flip(p.income, p.period) } : p) }), id);
   const setMethod = (method) => editForward((f) => ({ ...f, method }), "__method");
   const setMarge = (margePct) => editForward((f) => ({ ...f, margePct }), "__marge");
-  const setCustomPct = (customPct) => editForward((f) => ({ ...f, customPct }), "__customPct");
+  // One override key per person, so editing one person's % doesn't lock the others' out of forward-propagation.
+  const setCustomPct = (personId, value) => editForward((f) => ({ ...f, customPct: { ...f.customPct, [personId]: value } }), `__customPct_${personId}`);
   // Not cloned: patch is always a fresh object from the caller, and JSON-cloning would
   // silently drop keys explicitly set to `undefined` (e.g. clearing a formula), since
   // JSON.stringify omits undefined values instead of preserving them.
@@ -797,7 +929,38 @@ export default function App() {
   const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
-  const addPersonalExpense = (which) => addListItem(`personalExpenses${which}`, { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
+  // personalExpenses is one level deeper (keyed by person id) than the flat
+  // lists above, so it gets its own small set of mutators rather than
+  // threading an extra key through the generic ones.
+  const setPersonalExpenseItem = (personId, id, patch) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: (f.personalExpenses[personId] || []).map((x) => x.id === id ? { ...x, ...patch } : x) } }), id);
+  const togglePersonalExpenseItemPeriod = (personId, id) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: (f.personalExpenses[personId] || []).map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x) } }), id);
+  const removePersonalExpenseItem = (personId, id) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: (f.personalExpenses[personId] || []).filter((x) => x.id !== id) } }), id);
+  const addPersonalExpense = (personId) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: [...(f.personalExpenses[personId] || []), clone({ id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" })] } }), uid());
+  const copyPersonalExpenseEntryRange = (personId, id, pastKeys, futureKeys) => setData((d) => {
+    const s = d.selectedMonth;
+    const item = (d.months[s].personalExpenses[personId] || []).find((x) => x.id === id);
+    if (!item) return d;
+    const targets = new Set([...(pastKeys || []), ...(futureKeys || [])]);
+    const months = { ...d.months };
+    for (const k of targets) {
+      if (k === s || !months[k]) continue;
+      const list = months[k].personalExpenses[personId] || [];
+      const exists = list.some((x) => x.id === id);
+      let nextList;
+      if (item.formula) {
+        nextList = exists
+          ? list.map((x) => x.id === id ? { ...x, formula: clone(item.formula), period: item.period } : x)
+          : [...list, clone(item)];
+      } else if (exists) {
+        nextList = list.map((x) => x.id === id ? { ...x, amount: item.amount, period: item.period } : x);
+      } else {
+        const bare = { ...clone(item), note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" };
+        nextList = [...list, bare];
+      }
+      months[k] = { ...months[k], personalExpenses: { ...months[k].personalExpenses, [personId]: nextList } };
+    }
+    return { ...d, months };
+  });
 
   // Savings goals aren't month-scoped, so they're mutated directly rather
   // than through editForward/forward-propagation.
@@ -833,20 +996,35 @@ export default function App() {
       fresh.overrides = {};
       if (!source) {
         // Keep the (global) partner names when falling back to the defaults.
-        fresh.partners = fresh.partners.map((p, i) => ({ ...p, name: d.months[s]?.partners?.[i]?.name || p.name }));
+        fresh.partners = fresh.partners.map((p) => ({ ...p, name: d.months[s]?.partners?.find((x) => x.id === p.id)?.name || p.name }));
       }
       return { ...d, months: { ...d.months, [s]: fresh } };
     });
   };
-  const pA = cur.partners[0], pB = cur.partners[1];
-  const nameA = pA.name || t(LANG, "partnerName", { n: 1 }), nameB = pB.name || t(LANG, "partnerName", { n: 2 });
+  const personName = (p, i) => p.name || t(LANG, "personName", { n: i + 1 });
+  const personView = view.startsWith("person:") ? view.slice(7) : null;
+  // If the person currently being viewed gets removed, fall back to the
+  // month view instead of rendering a blank/broken personal page.
+  useEffect(() => {
+    if (personView && !cur.partners.some((p) => p.id === personView)) setView("month");
+  }, [personView, cur.partners]);
+  const activePersonIndex = personView ? cur.partners.findIndex((p) => p.id === personView) : -1;
+  const activePerson = activePersonIndex >= 0 ? cur.partners[activePersonIndex] : null;
+  const activePersonExpenses = activePerson ? (cur.personalExpenses[activePerson.id] || []) : [];
 
   // Shared by the joint "Vaste lasten" section and each partner's personal
   // page — same fields, same behavior (sorting, drag reorder, formulas,
   // correspondent/paperless, trend/sparkline, per-entry copy-forward), just
   // scoped to a different list (`kind`) and its own subtotal/category split.
-  const renderExpensesList = (kind, items, total, byCat, onAdd, logPrefix = TXT.expensesSection) => {
+  const renderExpensesList = (kind, items, total, byCat, onAdd, logPrefix = TXT.expensesSection, personId = null) => {
     const manual = listSort[kind] === "manual";
+    // Personal expenses are one level deeper (keyed by person id) than the
+    // other flat lists, so their edits route through a separate set of
+    // mutators — chosen once here rather than branching inside every line.
+    const set = personId ? (id, patch) => setPersonalExpenseItem(personId, id, patch) : (id, patch) => setListItem(kind, id, patch);
+    const togglePeriod = personId ? (id) => togglePersonalExpenseItemPeriod(personId, id) : (id) => toggleItemPeriod(kind, id);
+    const remove = personId ? (id) => removePersonalExpenseItem(personId, id) : (id) => removeListItem(kind, id);
+    const copyRange = personId ? (id, pk, fk) => copyPersonalExpenseEntryRange(personId, id, pk, fk) : (id, pk, fk) => copyEntryRange(kind, id, pk, fk);
     return (
       <>
         {items.length > 1 && <SortToggle kind={kind} mode={listSort[kind]} onChange={(m) => setListSort(kind, m)} />}
@@ -854,25 +1032,25 @@ export default function App() {
           const formulaActive = Boolean(e.formula);
           const displayAmount = formulaActive ? String(round2(entryAmount(e, cur))) : e.amount;
           return (
-            <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === kind && dragItem.id === e.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={e.id} {...(manual ? dragRowProps(kind, e.id) : {})}>
+            <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === kind && dragItem?.personId === personId && dragItem.id === e.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={e.id} {...(manual ? dragRowProps(kind, e.id, personId) : {})}>
               <div className="entry exp">
                 <span className="e-lead">
-                  <DragHandle active={manual} {...dragHandleProps(kind, e.id)} />
+                  <DragHandle active={manual} {...dragHandleProps(kind, e.id, personId)} />
                   <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || TXT.otherCategory} />
-                  <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => setListItem(kind, e.id, { category: ev.target.value })} style={St.catInput} />
+                  <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => set(e.id, { category: ev.target.value })} style={St.catInput} />
                 </span>
-                <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => setListItem(kind, e.id, { label: ev.target.value })} style={St.nameInput} />
-                <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setListItem(kind, e.id, { amount: v })} onPeriod={() => toggleItemPeriod(kind, e.id)} onCommit={(o, n) => logChange(`${logPrefix} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
+                <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => set(e.id, { label: ev.target.value })} style={St.nameInput} />
+                <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => set(e.id, { amount: v })} onPeriod={() => togglePeriod(e.id)} onCommit={(o, n) => logChange(`${logPrefix} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                 <span className="entryActions" style={St.rowActions}>
-                  <NoteField value={e.note || ""} onChange={(v) => setListItem(kind, e.id, { note: v })} />
-                  <LinkField value={e.url || ""} onChange={(v) => setListItem(kind, e.id, { url: v })} />
-                  <CorrespondentField entry={e} onChange={(patch) => setListItem(kind, e.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
-                  <DurationField entry={e} onChange={(patch) => setListItem(kind, e.id, patch)} />
-                  <FormulaField entry={e} monthData={cur} onChange={(patch) => setListItem(kind, e.id, patch)} />
-                  <TrendIcon income={false} trend={entryTrend(kind, e.id, monthlyOf(e, cur))} />
-                  <SparkIcon history={entryHistory(kind, e.id)} />
-                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange(kind, e.id, pk, fk)} />
-                  <button type="button" aria-label={TXT.delete} onClick={() => removeListItem(kind, e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                  <NoteField value={e.note || ""} onChange={(v) => set(e.id, { note: v })} />
+                  <LinkField value={e.url || ""} onChange={(v) => set(e.id, { url: v })} />
+                  <CorrespondentField entry={e} onChange={(patch) => set(e.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
+                  <DurationField entry={e} onChange={(patch) => set(e.id, patch)} />
+                  <FormulaField entry={e} monthData={cur} onChange={(patch) => set(e.id, patch)} />
+                  <TrendIcon income={false} trend={entryTrend(kind, e.id, monthlyOf(e, cur), personId)} />
+                  <SparkIcon history={entryHistory(kind, e.id, personId)} />
+                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyRange(e.id, pk, fk)} />
+                  <button type="button" aria-label={TXT.delete} onClick={() => remove(e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
                 </span>
               </div>
               <DerivedLine monthly={monthlyOf(e, cur)} period={e.period} percent={pctOf(monthlyOf(e, cur), total)} correspondent={e.correspondent} />
@@ -943,8 +1121,12 @@ export default function App() {
           <div style={{ ...St.toggle, marginTop: 10 }} role="group" aria-label={TXT.viewToggleAria}>
             <button type="button" onClick={() => setView("month")} style={{ ...St.toggleBtn, ...(view === "month" ? St.toggleOn : {}) }}>{TXT.monthView}</button>
             <button type="button" onClick={() => setView("savings")} style={{ ...St.toggleBtn, ...(view === "savings" ? St.toggleOn : {}) }}>{TXT.savingsOverviewView}</button>
-            <button type="button" onClick={() => setView("personalA")} style={{ ...St.toggleBtn, ...(view === "personalA" ? { ...St.toggleOn, color: C.a } : {}) }}>{nameA}</button>
-            <button type="button" onClick={() => setView("personalB")} style={{ ...St.toggleBtn, ...(view === "personalB" ? { ...St.toggleOn, color: C.b } : {}) }}>{nameB}</button>
+            {cur.partners.map((p, i) => (
+              <button key={p.id} type="button" onClick={() => setView(`person:${p.id}`)}
+                style={{ ...St.toggleBtn, ...(personView === p.id ? { ...St.toggleOn, color: personColor(p, i).main } : {}) }}>
+                {personName(p, i)}
+              </button>
+            ))}
           </div>
         </header>
 
@@ -989,20 +1171,15 @@ export default function App() {
             onRemoveSubAccount={removeSubAccount}
             onUpdateSubAccount={updateSubAccount}
           />
-        ) : view === "personalA" ? (
+        ) : activePerson ? (
           <div className="fade">
-            <ColTitle>{nameA}</ColTitle>
+            <ColTitle>{personName(activePerson, activePersonIndex)}</ColTitle>
             <div style={St.correspondentDocMuted}>{TXT.personalPageHint}</div>
-            <Collapsible id="personalA" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.a }} />} info={TXT.exp} total={eur(sumM(cur.personalExpensesA, cur))} open={open.personalA} onToggle={toggleSec} style={St.sectionPersonalA}>
-              {renderExpensesList("personalExpensesA", sortedPersonalA, sumM(cur.personalExpensesA, cur), byCategoryA, () => addPersonalExpense("A"), nameA)}
-            </Collapsible>
-          </div>
-        ) : view === "personalB" ? (
-          <div className="fade">
-            <ColTitle>{nameB}</ColTitle>
-            <div style={St.correspondentDocMuted}>{TXT.personalPageHint}</div>
-            <Collapsible id="personalB" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.b }} />} info={TXT.exp} total={eur(sumM(cur.personalExpensesB, cur))} open={open.personalB} onToggle={toggleSec} style={St.sectionPersonalB}>
-              {renderExpensesList("personalExpensesB", sortedPersonalB, sumM(cur.personalExpensesB, cur), byCategoryB, () => addPersonalExpense("B"), nameB)}
+            <Collapsible id={`person-${activePerson.id}`} title={TXT.fixedCosts}
+              icon={<Receipt size={16} style={{ color: personColor(activePerson, activePersonIndex).main }} />} info={TXT.exp}
+              total={eur(sumM(activePersonExpenses, cur))} open={open[`person-${activePerson.id}`] ?? true} onToggle={toggleSec}
+              style={sectionPersonalStyle(personColor(activePerson, activePersonIndex).main)}>
+              {renderExpensesList("personalExpenses", sortItems("personalExpenses", activePersonExpenses), sumM(activePersonExpenses, cur), byCategoryOf(activePersonExpenses), () => addPersonalExpense(activePerson.id), personName(activePerson, activePersonIndex), activePerson.id)}
             </Collapsible>
           </div>
         ) : (
@@ -1010,25 +1187,29 @@ export default function App() {
         <ColTitle>{TXT.incomes}</ColTitle>
         {/* Income */}
         <Collapsible id="inkomen" title={TXT.salarySection} icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec} style={St.sectionIncome}>
-          {[pA, pB].map((p, i) => (
+          {cur.partners.map((p, i) => (
             <div style={St.itemWrap} className="entryWrap" key={p.id}>
               <div className="entry">
-                <span className="e-lead"><span style={{ ...St.dot, background: i === 0 ? C.a : C.b }} /></span>
-                <input className="e-desc" aria-label={t(LANG, "partnerName", { n: i + 1 })} value={p.name} placeholder={t(LANG, "partnerPlaceholder", { n: i + 1 })} onChange={(e) => setPartnerName(i, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
-                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setPartner(i, { income: v })} onPeriod={() => togglePartnerPeriod(i)} onCommit={(o, n) => logChange(`${TXT.salarySection} · ${p.name || t(LANG, "partnerName", { n: i + 1 })}`, o, n)} /></span>
+                <span className="e-lead"><span style={{ ...St.dot, background: personColor(p, i).main }} /></span>
+                <input className="e-desc" aria-label={t(LANG, "personName", { n: i + 1 })} value={p.name} placeholder={t(LANG, "personPlaceholder", { n: i + 1 })} onChange={(e) => setPartnerName(p.id, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
+                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setPartner(p.id, { income: v })} onPeriod={() => togglePartnerPeriod(p.id)} onCommit={(o, n) => logChange(`${TXT.salarySection} · ${personName(p, i)}`, o, n)} /></span>
                 <span className="entryActions" style={St.rowActions}>
-                  <NoteField value={p.note || ""} onChange={(v) => setPartner(i, { note: v })} />
-                  <LinkField value={p.url || ""} onChange={(v) => setPartner(i, { url: v })} />
-                  <CorrespondentField entry={p} onChange={(patch) => setPartner(i, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
-                  <DurationField entry={p} onChange={(patch) => setPartner(i, patch)} />
+                  <NoteField value={p.note || ""} onChange={(v) => setPartner(p.id, { note: v })} />
+                  <LinkField value={p.url || ""} onChange={(v) => setPartner(p.id, { url: v })} />
+                  <CorrespondentField entry={p} onChange={(patch) => setPartner(p.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
+                  <DurationField entry={p} onChange={(patch) => setPartner(p.id, patch)} />
                   <TrendIcon income trend={entryTrend("partners", p.id, monthlyInc(p))} />
                   <SparkIcon history={entryHistory("partners", p.id)} />
                   <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("partners", p.id, pk, fk)} />
+                  {cur.partners.length > 1 && (
+                    <button type="button" aria-label={TXT.delete} onClick={() => removePerson(p.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                  )}
                 </span>
               </div>
               <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} correspondent={p.correspondent} dot />
             </div>
           ))}
+          <button type="button" onClick={addPerson} style={St.addBtn}><Plus size={16} /> {TXT.addPerson}</button>
           <SubTotal monthly={calc.total} />
         </Collapsible>
 
@@ -1082,37 +1263,43 @@ export default function App() {
 
           {cur.method === "custom" && (
             <div style={St.customRow}>
-              <span style={St.customName}>{nameA}</span>
-              <div style={St.money}>
-                <input inputMode="decimal" value={cur.customPct}
-                  onFocus={() => { customStart.current = cur.customPct; }}
-                  onChange={(e) => setCustomPct(e.target.value.replace(/[^0-9.,]/g, ""))}
-                  onBlur={() => { if (customStart.current !== cur.customPct) logChange(TXT.customPctLabel, customStart.current, cur.customPct); }}
-                  style={{ ...St.moneyInput, width: 44 }} aria-label={t(LANG, "customPctAria", { name: nameA })} />
-                <span style={St.euro}>%</span>
-              </div>
-              <span style={St.customName}>{nameB}: {pct(1 - clamp01(num(cur.customPct) / 100))}</span>
+              {cur.partners.map((p, i) => (
+                <React.Fragment key={p.id}>
+                  <span style={St.customName}>{personName(p, i)}</span>
+                  <div style={St.money}>
+                    <input inputMode="decimal" value={cur.customPct[p.id] ?? ""}
+                      onFocus={() => { customStart.current[p.id] = cur.customPct[p.id]; }}
+                      onChange={(e) => setCustomPct(p.id, e.target.value.replace(/[^0-9.,]/g, ""))}
+                      onBlur={() => { if (customStart.current[p.id] !== cur.customPct[p.id]) logChange(`${TXT.customPctLabel} · ${personName(p, i)}`, customStart.current[p.id], cur.customPct[p.id]); }}
+                      style={{ ...St.moneyInput, width: 44 }} aria-label={t(LANG, "customPctAria", { name: personName(p, i) })} />
+                    <span style={St.euro}>%</span>
+                  </div>
+                </React.Fragment>
+              ))}
+              <CustomPctRemaining pcts={cur.partners.map((p) => num(cur.customPct[p.id]))} />
             </div>
           )}
 
           <div style={St.contribGrid}>
-            <ContribCard name={nameA} color={C.a} soft={C.softA} amount={calc.transferA} />
-            <ContribCard name={nameB} color={C.b} soft={C.softB} amount={calc.transferB} />
+            {cur.partners.map((p, i) => (
+              <ContribCard key={p.id} name={personName(p, i)} color={personColor(p, i).main} soft={personColor(p, i).soft} amount={calc.transfers[p.id]} />
+            ))}
           </div>
 
-<SplitBar label={TXT.incomeSplit} fracA={calc.shareA} nameA={nameA} nameB={nameB} />
-            <SplitBar label={TXT.contributionSplit} fracA={calc.contribShareA} nameA={nameA} nameB={nameB} />
+          <SplitBar label={TXT.incomeSplit} segments={cur.partners.map((p, i) => ({ id: p.id, name: personName(p, i), color: personColor(p, i).main, frac: calc.shares[p.id] }))} />
+          <SplitBar label={TXT.contributionSplit} segments={cur.partners.map((p, i) => ({ id: p.id, name: personName(p, i), color: personColor(p, i).main, frac: calc.contribShares[p.id] }))} />
 
           <div style={St.leftLabel}>
             <span>{TXT.keepsLeft}</span>
             <span style={St.fairInline}>
-              {cur.method === "income" ? `${pct(calc.keepA)}` : `${pct(calc.keepA)} · ${pct(calc.keepB)}`}
+              {cur.partners.map((p) => pct(calc.keeps[p.id])).join(" · ")}
               <InfoDot text={cur.method === "equal" ? TXT.fairEqual : cur.method === "custom" ? TXT.fairCustom : TXT.fair} align="right" />
             </span>
           </div>
           <div style={St.leftoverGrid}>
-            <LeftoverCard name={nameA} color={C.a} amount={calc.leftoverA} />
-            <LeftoverCard name={nameB} color={C.b} amount={calc.leftoverB} />
+            {cur.partners.map((p, i) => (
+              <LeftoverCard key={p.id} name={personName(p, i)} color={personColor(p, i).main} amount={calc.leftovers[p.id]} />
+            ))}
           </div>
 
           <button type="button" onClick={() => setShowDetails((s) => !s)} style={St.detailsBtn} aria-expanded={showDetails}>
@@ -1236,8 +1423,9 @@ export default function App() {
                     <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
                     <YAxis tick={tick} axisLine={false} tickLine={false} width={58} tickFormatter={eur0} />
                     <Tooltip {...tooltipProps} /><Legend {...legendProps} />
-                    <Bar dataKey="inlegA" name={nameA} fill={C.a} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="inlegB" name={nameB} fill={C.b} radius={[4, 4, 0, 0]} />
+                    {cur.partners.map((p, i) => (
+                      <Bar key={p.id} dataKey={`inleg_${p.id}`} name={personName(p, i)} fill={personColor(p, i).main} radius={[4, 4, 0, 0]} />
+                    ))}
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -1983,22 +2171,48 @@ function LeftoverCard({ name, color, amount }) {
   return (
     <div style={St.leftoverCard}>
       <div style={St.leftoverTop}><span style={{ ...St.dot, background: color, margin: 0 }} /><span style={St.leftoverName}>{name}</span></div>
-      <div style={{ ...St.leftoverAmount, color: amount < 0 ? C.a : C.ink }}>{eur(amount)}</div>
+      <div style={{ ...St.leftoverAmount, color: amount < 0 ? C.exp : C.ink }}>{eur(amount)}</div>
       <div style={St.leftoverYr}>{eur0(amount * 12)} {TXT.perYearShort}</div>
     </div>
   );
 }
 
-function SplitBar({ label, fracA, nameA, nameB }) {
-  const pa = Math.max(0, Math.min(1, fracA));
+// segments: [{ id, name, color, frac }] — need not sum to 1 (the "custom"
+// method can be over/under-allocated); only the rendered widths are clamped,
+// not the underlying values, so the percentages shown stay honest.
+function SplitBar({ label, segments }) {
+  const clamped = segments.map((s) => ({ ...s, frac: Math.max(0, s.frac) }));
+  const sum = clamped.reduce((s, x) => s + x.frac, 0) || 1;
   return (
     <div style={St.splitWrap}>
-      <div style={St.splitHead}><span style={St.splitLabel}>{label}</span><span style={St.splitPcts}>{pct(pa)} · {pct(1 - pa)}</span></div>
+      <div style={St.splitHead}>
+        <span style={St.splitLabel}>{label}</span>
+        <span style={St.splitPcts}>{segments.map((s) => pct(s.frac)).join(" · ")}</span>
+      </div>
       <div style={St.splitTrack}>
-        <div style={{ width: `${pa * 100}%`, background: C.a, borderTopLeftRadius: 999, borderBottomLeftRadius: 999 }} title={nameA} />
-        <div style={{ width: `${(1 - pa) * 100}%`, background: C.b, borderTopRightRadius: 999, borderBottomRightRadius: 999 }} title={nameB} />
+        {clamped.map((s, i) => (
+          <div key={s.id} style={{
+            width: `${(s.frac / sum) * 100}%`, background: s.color,
+            borderTopLeftRadius: i === 0 ? 999 : 0, borderBottomLeftRadius: i === 0 ? 999 : 0,
+            borderTopRightRadius: i === clamped.length - 1 ? 999 : 0, borderBottomRightRadius: i === clamped.length - 1 ? 999 : 0,
+          }} title={s.name} />
+        ))}
       </div>
     </div>
+  );
+}
+
+// Live remaining-% indicator for the "custom" split method — no
+// normalization happens automatically; this just tells the user where they
+// stand so they can self-correct.
+function CustomPctRemaining({ pcts }) {
+  const sum = pcts.reduce((s, v) => s + v, 0);
+  const remaining = round2(100 - sum);
+  const over = remaining < 0;
+  return (
+    <span style={{ fontSize: 12.5, fontWeight: 600, color: over ? C.exp : (remaining === 0 ? C.save : C.muted) }}>
+      {over ? t(LANG, "customPctOver", { pct: pct(Math.abs(remaining) / 100) }) : t(LANG, "customPctLeft", { pct: pct(remaining / 100) })}
+    </span>
   );
 }
 
@@ -2380,7 +2594,7 @@ const St = {
   statsPeriodRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" },
   dragHandle: { display: "inline-flex", alignItems: "center", color: C.muted, cursor: "grab", flexShrink: 0, touchAction: "none" },
 
-  contribGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 },
+  contribGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 18 },
   contribCard: { borderRadius: 14, padding: "14px 14px 13px" },
   contribName: { fontSize: 13, fontWeight: 700, marginBottom: 4 },
   contribAmount: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 25, fontWeight: 700, letterSpacing: "-0.01em", lineHeight: 1 },
@@ -2400,7 +2614,7 @@ const St = {
   detailSubtotalLabel: { color: C.muted },
   detailSubtotalValue: { fontVariantNumeric: "tabular-nums", color: C.ink },
   detailResult: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0 0", borderTop: `1px solid ${C.line}`, fontSize: 15, fontWeight: 700, color: C.ink },
-  leftoverGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
+  leftoverGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 },
   leftoverCard: { border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 13px" },
   leftoverTop: { display: "flex", alignItems: "center", gap: 7, marginBottom: 6 },
   leftoverName: { fontSize: 13, fontWeight: 600, color: C.muted },
@@ -2417,8 +2631,6 @@ const St = {
   section: { background: C.card, borderRadius: 18, padding: "16px 18px", border: `1px solid ${C.line}`, marginBottom: 12 },
   sectionIncome: { background: "rgba(46, 125, 82, 0.08)", border: `1px solid rgba(46, 125, 82, 0.18)` },
   sectionExpenses: { background: "rgba(192, 68, 59, 0.08)", border: `1px solid rgba(192, 68, 59, 0.18)` },
-  sectionPersonalA: { background: `color-mix(in srgb, ${C.a} 8%, transparent)`, border: `1px solid color-mix(in srgb, ${C.a} 18%, transparent)` },
-  sectionPersonalB: { background: `color-mix(in srgb, ${C.b} 8%, transparent)`, border: `1px solid color-mix(in srgb, ${C.b} 18%, transparent)` },
   collapseHead: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", outline: "none" },
   collapseBody: { marginTop: 14 },
   h2: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 19, fontWeight: 700, margin: 0, display: "inline-flex", alignItems: "center", gap: 6 },
