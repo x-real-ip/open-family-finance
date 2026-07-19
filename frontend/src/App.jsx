@@ -281,7 +281,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(true);
   const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, verloop: true, log: false });
-  const [showDetails, setShowDetails] = useState(false);
+  const [showDetails, setShowDetails] = useState(true);
   // null = unbounded, so the range always defaults to (and grows with) all available months.
   const [statsFrom, setStatsFrom] = useState(null);
   const [statsTo, setStatsTo] = useState(null);
@@ -781,6 +781,7 @@ export default function App() {
           <SubTotal monthly={calc.govTotal} />
         </Collapsible>
 
+        <ColTitle>{TXT.allocationSection}</ColTitle>
         {/* Distribution (result) — full width */}
         <section style={St.hero} className="fade">
           <div style={St.methodRow}>

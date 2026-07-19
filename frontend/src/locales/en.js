@@ -10,6 +10,7 @@ export default {
     nextMonth: "Next month",
     chooseMonth: "Choose a month",
     currentMonth: "Current month",
+    allocationSection: "Allocation",
     distributionMethod: "Distribution method",
     incomeMethod: "By income",
     equalMethod: "50 / 50",

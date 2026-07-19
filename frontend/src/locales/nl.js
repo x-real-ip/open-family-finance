@@ -10,6 +10,7 @@ export default {
     nextMonth: "Volgende maand",
     chooseMonth: "Kies een maand",
     currentMonth: "Huidige maand",
+    allocationSection: "Verdeling",
     distributionMethod: "Verdeelmethode",
     incomeMethod: "Naar inkomen",
     equalMethod: "50 / 50",
