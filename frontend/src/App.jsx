@@ -477,6 +477,13 @@ export default function App() {
   const pastMonths = useMemo(() => sortedMonths.filter((k) => k < sel), [sortedMonths, sel]);
   const futureMonths = useMemo(() => sortedMonths.filter((k) => k > sel), [sortedMonths, sel]);
   const isCurrentRealMonth = sel === monthKey(new Date());
+  // A "history" month: one that's already passed. Its figures are greyed out
+  // and read-only until explicitly unlocked, as a guard against accidental
+  // edits while just browsing back through old months — re-locks the moment
+  // you navigate to a different month.
+  const isHistoryMonth = sel < monthKey(new Date());
+  const [unlockedMonth, setUnlockedMonth] = useState(null);
+  const historyLocked = isHistoryMonth && unlockedMonth !== sel;
 
   const series = useMemo(() => sortedMonths.map((m) => {
     const t = computeTotals(data.months[m]);
@@ -960,6 +967,16 @@ export default function App() {
           )}
         </div>
 
+        {isHistoryMonth && (
+          <div style={St.historyBanner} className="fade">
+            <span>{historyLocked ? TXT.historyLockedHint : TXT.historyUnlockedHint}</span>
+            <button type="button" onClick={() => setUnlockedMonth(historyLocked ? sel : null)} style={St.historyBannerBtn}>
+              {historyLocked ? TXT.historyUnlockBtn : TXT.historyLockBtn}
+            </button>
+          </div>
+        )}
+
+        <div style={historyLocked ? St.historyLockedContent : undefined}>
         {view === "savings" ? (
           <SavingsOverviewPage
             savingsGoals={data.savingsGoals || []}
@@ -1268,6 +1285,7 @@ export default function App() {
         </Collapsible>
         </>
         )}
+        </div>
 
         <footer style={St.footer}>
           <span style={St.saveState}>
@@ -2329,6 +2347,10 @@ const St = {
   warnBannerBody: { display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 0 },
   warnBannerRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, fontSize: 13, flexWrap: "wrap" },
   warnBannerLabel: { color: C.ink, fontWeight: 700 },
+
+  historyBanner: { display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", background: C.canvas, border: `1px solid ${C.line}`, borderRadius: 12, padding: "10px 14px", marginTop: 12, marginBottom: 4, fontSize: 13.5, color: C.muted, flexWrap: "wrap" },
+  historyBannerBtn: { border: "none", background: C.card, color: C.ink, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "7px 14px", borderRadius: 999, boxShadow: "0 1px 3px rgba(0,0,0,0.10)", flexShrink: 0 },
+  historyLockedContent: { opacity: 0.55, filter: "grayscale(0.6)", pointerEvents: "none", userSelect: "none" },
 
   header: { padding: "8px 4px 16px" },
   headerTop: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" },
