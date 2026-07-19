@@ -22,7 +22,7 @@ import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
   ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
-  Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle,
+  Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Percent,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
@@ -820,6 +820,25 @@ export default function App() {
           )}
         </div>
 
+        {view === "savings" ? (
+          <SavingsOverviewPage
+            goals={data.savingsGoals || []}
+            months={data.months}
+            savingsEntries={cur.savings}
+            currentMonthData={cur}
+            sel={sel}
+            onAddGoal={addSavingsGoal}
+            onRemoveGoal={removeSavingsGoal}
+            onUpdateGoal={updateSavingsGoal}
+            onAddSubAccount={addSubAccount}
+            onRemoveSubAccount={removeSubAccount}
+            onUpdateSubAccount={updateSubAccount}
+            onEntryAmountChange={(entryId, value) => setListItem("savings", entryId, { amount: value })}
+            onEntryPeriodToggle={(entryId) => toggleItemPeriod("savings", entryId)}
+            onLogChange={logChange}
+          />
+        ) : (
+        <>
         <ColTitle>{TXT.incomes}</ColTitle>
         {/* Income */}
         <Collapsible id="inkomen" title={TXT.salarySection} icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec} style={St.sectionIncome}>
@@ -1619,12 +1638,34 @@ function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, sel, 
   );
 }
 
-function Field({ label, info, width, children }) {
+// Shared by the sub-account icon fields below: the same hover/click popover
+// mechanics as Note/Link/Correspondent/Duration elsewhere, including the
+// "only close on outside click, never on blur" fix from DurationField (a
+// native date input inside one of these can blur the input while its own
+// calendar overlay is open, which used to auto-close the whole popover).
+function IconPopoverField({ icon: Icon, ariaLabel, active, popStyle, children }) {
+  const [open, setOpen] = useState(false);
+  const editingRef = useRef(false);
+  const timer = useRef(null);
+  const rootRef = useRef(null);
+  const closeNow = () => { clearTimeout(timer.current); editingRef.current = false; setOpen(false); };
+  useClickOutside(rootRef, open, closeNow);
+  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
+  const markEditing = () => { editingRef.current = true; };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3, width }}>
-      <span style={St.fieldLabel}>{label}{info && <InfoDot text={info} />}</span>
-      {children}
-    </div>
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
+      <button type="button" aria-label={ariaLabel}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => { if (o) editingRef.current = false; return !o; }); }}
+        style={{ ...St.iconBtn, color: active ? C.b : C.muted }}>
+        <Icon size={16} />
+      </button>
+      {open && (
+        <span style={mobilePopupStyle({ ...St.notePop, ...popStyle })} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
+          {typeof children === "function" ? children(markEditing) : children}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -1639,25 +1680,17 @@ function SubAccountRow({ sub, savingsEntries, currentMonthData, sel, onChange, o
   const checkpointDate = sub.checkpointMonth ? `${sub.checkpointMonth}-01` : "";
 
   return (
-    <div style={St.subAccountRow}>
-      <input aria-label={TXT.subAccountHolder} value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder}
-        onChange={(e) => onChange({ holder: e.target.value })} style={{ ...St.nameInput, flex: "1 1 100px", minWidth: 90 }} />
-      <input aria-label={TXT.subAccountBank} value={sub.bank} placeholder={TXT.subAccountBankPlaceholder}
-        onChange={(e) => onChange({ bank: e.target.value })} style={{ ...St.catInput, width: 130 }} />
-      <input aria-label={TXT.subAccountIban} value={sub.iban} placeholder={TXT.subAccountIbanPlaceholder}
-        onChange={(e) => onChange({ iban: e.target.value })} style={{ ...St.catInput, width: 150 }} />
-      <input aria-label={TXT.subAccountPlanId} value={sub.planId} placeholder={TXT.subAccountPlanIdPlaceholder}
-        onChange={(e) => onChange({ planId: e.target.value })} style={{ ...St.catInput, width: 120 }} />
-
-      <Field label={TXT.subAccountLinkedEntry} info={TXT.subAccountLinkedEntryInfo} width={150}>
-        <select value={sub.entryId || ""} onChange={(e) => onChange({ entryId: e.target.value || null })} style={{ ...St.copySel, width: 150, maxWidth: 150 }}>
-          <option value="">{TXT.subAccountNoEntry}</option>
-          {savingsEntries.map((s) => <option key={s.id} value={s.id}>{s.label || TXT.unnamed}</option>)}
-        </select>
-      </Field>
-      {linkedEntry && (
-        <Field label={TXT.subAccountAmountLabel} info={TXT.subAccountAmountInfo} width={150}>
-          <div title={monthLong(sel)}>
+    <div style={St.itemWrap} className="entryWrap">
+      <div className="entry">
+        <span className="e-lead">
+          <span style={{ ...St.catDot, background: categoryColor(sub.holder || sub.id) }} />
+          <input aria-label={TXT.subAccountBank} value={sub.bank} placeholder={TXT.subAccountBankPlaceholder}
+            onChange={(e) => onChange({ bank: e.target.value })} style={St.catInput} />
+        </span>
+        <input className="e-desc" aria-label={TXT.subAccountHolder} value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder}
+          onChange={(e) => onChange({ holder: e.target.value })} style={St.nameInput} />
+        {linkedEntry && (
+          <span className="e-amount" title={monthLong(sel)}>
             <AmountField
               value={linkedFormulaActive ? String(round2(entryAmount(linkedEntry, currentMonthData))) : linkedEntry.amount}
               period={linkedEntry.period}
@@ -1665,31 +1698,81 @@ function SubAccountRow({ sub, savingsEntries, currentMonthData, sel, onChange, o
               onPeriod={() => onEntryPeriodToggle(linkedEntry.id)}
               onCommit={(o, n) => onLogChange(`${TXT.savingsSection} · ${linkedEntry.label || TXT.unnamed}`, o, n)}
               disabled={linkedFormulaActive} />
-          </div>
-        </Field>
-      )}
-      <Field label={TXT.subAccountShare} width={60}>
-        <input inputMode="numeric" value={sub.sharePercent ?? "100"} placeholder="100"
-          onChange={(e) => onChange({ sharePercent: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 60, maxWidth: 60 }} />
-      </Field>
-      {preview != null && (
-        <Field label={TXT.subAccountPreview} width={100}>
-          <div style={St.subAccountPreviewValue}>{eur(preview)} {TXT.perMonth}</div>
-        </Field>
-      )}
-      <Field label={TXT.subAccountInterestRate} info={TXT.subAccountInterestRateInfo} width={80}>
-        <input inputMode="decimal" value={sub.interestRate} placeholder="0"
-          onChange={(e) => onChange({ interestRate: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 80, maxWidth: 80 }} />
-      </Field>
-      <Field label={TXT.checkpointMonth} info={TXT.checkpointInfo} width={130}>
-        <input type="date" lang={LANG} value={checkpointDate}
-          onChange={(e) => onChange({ checkpointMonth: e.target.value ? e.target.value.slice(0, 7) : "" })} style={{ ...St.copySel, width: 130, maxWidth: 130 }} />
-      </Field>
-      <Field label={TXT.checkpointBalance} width={90}>
-        <input inputMode="decimal" value={sub.checkpointBalance} placeholder="0,00"
-          onChange={(e) => onChange({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 90, maxWidth: 90 }} />
-      </Field>
-      <button type="button" aria-label={TXT.delete} onClick={onRemove} style={{ ...St.iconBtn, alignSelf: "flex-end" }}><Trash2 size={16} /></button>
+          </span>
+        )}
+        <span className="entryActions" style={St.rowActions}>
+          <IconPopoverField icon={Calculator} ariaLabel={TXT.subAccountLinkedEntry} active={Boolean(sub.entryId)}>
+            {(markEditing) => (
+              <>
+                <div style={St.copyTitle}>{TXT.subAccountLinkedEntry}</div>
+                <div style={St.correspondentDocMuted}>{TXT.subAccountLinkedEntryInfo}</div>
+                <label style={{ ...St.copyRow, marginTop: 8 }}>
+                  <span style={St.copyLbl}>{TXT.subAccountLinkedEntry}</span>
+                  <select value={sub.entryId || ""} onChange={(e) => onChange({ entryId: e.target.value || null })} onFocus={markEditing} style={St.copySel}>
+                    <option value="">{TXT.subAccountNoEntry}</option>
+                    {savingsEntries.map((s) => <option key={s.id} value={s.id}>{s.label || TXT.unnamed}</option>)}
+                  </select>
+                </label>
+                <label style={St.copyRow}>
+                  <span style={St.copyLbl}>{TXT.subAccountShare}</span>
+                  <input inputMode="numeric" value={sub.sharePercent ?? "100"} placeholder="100" onFocus={markEditing}
+                    onChange={(e) => onChange({ sharePercent: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 60 }} />
+                </label>
+                {preview != null && <div style={St.correspondentDocMuted}>{TXT.subAccountPreview} {eur(preview)} {TXT.perMonth}</div>}
+              </>
+            )}
+          </IconPopoverField>
+          <IconPopoverField icon={Percent} ariaLabel={TXT.subAccountInterestRate} active={num(sub.interestRate) > 0}>
+            {(markEditing) => (
+              <>
+                <div style={St.copyTitle}>{TXT.subAccountInterestRate}</div>
+                <div style={St.correspondentDocMuted}>{TXT.subAccountInterestRateInfo}</div>
+                <label style={{ ...St.copyRow, marginTop: 8 }}>
+                  <span style={St.copyLbl}>{TXT.subAccountInterestRate}</span>
+                  <input inputMode="decimal" value={sub.interestRate} placeholder="0" onFocus={markEditing}
+                    onChange={(e) => onChange({ interestRate: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 70 }} />
+                </label>
+              </>
+            )}
+          </IconPopoverField>
+          <IconPopoverField icon={CalendarClock} ariaLabel={TXT.checkpointMonth} active={Boolean(sub.checkpointMonth)}>
+            {(markEditing) => (
+              <>
+                <div style={St.copyTitle}>{TXT.checkpointMonth}</div>
+                <div style={St.correspondentDocMuted}>{TXT.checkpointInfo}</div>
+                <label style={{ ...St.copyRow, marginTop: 8 }}>
+                  <span style={St.copyLbl}>{TXT.checkpointMonth}</span>
+                  <input type="date" lang={LANG} value={checkpointDate} onFocus={markEditing}
+                    onChange={(e) => onChange({ checkpointMonth: e.target.value ? e.target.value.slice(0, 7) : "" })} style={St.copySel} />
+                </label>
+                <label style={St.copyRow}>
+                  <span style={St.copyLbl}>{TXT.checkpointBalance}</span>
+                  <input inputMode="decimal" value={sub.checkpointBalance} placeholder="0,00" onFocus={markEditing}
+                    onChange={(e) => onChange({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 90 }} />
+                </label>
+              </>
+            )}
+          </IconPopoverField>
+          <IconPopoverField icon={Building2} ariaLabel={TXT.subAccountBankDetails} active={Boolean(sub.iban || sub.planId)}>
+            {(markEditing) => (
+              <>
+                <div style={St.copyTitle}>{TXT.subAccountBankDetails}</div>
+                <label style={St.copyRow}>
+                  <span style={St.copyLbl}>{TXT.subAccountIban}</span>
+                  <input value={sub.iban} placeholder={TXT.subAccountIbanPlaceholder} onFocus={markEditing}
+                    onChange={(e) => onChange({ iban: e.target.value })} style={St.copySel} />
+                </label>
+                <label style={St.copyRow}>
+                  <span style={St.copyLbl}>{TXT.subAccountPlanId}</span>
+                  <input value={sub.planId} placeholder={TXT.subAccountPlanIdPlaceholder} onFocus={markEditing}
+                    onChange={(e) => onChange({ planId: e.target.value })} style={St.copySel} />
+                </label>
+              </>
+            )}
+          </IconPopoverField>
+          <button type="button" aria-label={TXT.delete} onClick={onRemove} style={St.iconBtn}><Trash2 size={16} /></button>
+        </span>
+      </div>
     </div>
   );
 }
@@ -2261,9 +2344,6 @@ const St = {
 
   savingsPageHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 4 },
   savingsHorizon: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.muted, fontWeight: 600 },
-  subAccountRow: { display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.line}` },
-  fieldLabel: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: C.muted, fontWeight: 600 },
-  subAccountPreviewValue: { fontSize: 13, fontWeight: 700, color: C.save, padding: "5px 0" },
   savingsTableWrap: { overflowX: "auto", marginTop: 14 },
   savingsTable: { width: "100%", borderCollapse: "collapse", fontSize: 13, whiteSpace: "nowrap" },
   savingsTh: { textAlign: "right", padding: "6px 10px", color: C.muted, fontWeight: 600, borderBottom: `1px solid ${C.line}`, position: "sticky", top: 0, background: C.card },
