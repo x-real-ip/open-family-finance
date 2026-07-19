@@ -66,6 +66,11 @@ const DEFAULT_FIGURES = {
   govIncome: [],
   expenses: [],
   savings: [],
+  // Each partner's own personal fixed costs — kept separate from the shared
+  // `expenses` list so one partner filling theirs in doesn't affect the
+  // other's or the joint total.
+  personalExpensesA: [],
+  personalExpensesB: [],
   overrides: {},
 };
 
@@ -86,7 +91,7 @@ const monthlyOf = (x, monthData, visited = new Set()) => {
   return toMonthly(x.amount, x.period);
 };
 const monthlyInc = (p) => toMonthly(p.income, p.period);
-const entryKinds = ["govIncome", "expenses", "savings"];
+const entryKinds = ["govIncome", "expenses", "savings", "personalExpensesA", "personalExpensesB"];
 const findEntryById = (monthData, id) => {
   if (!monthData || !id) return null;
   for (const kind of entryKinds) {
@@ -251,12 +256,14 @@ function migrateFig(f) {
     expenses: (f.expenses || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", warningDays: e.warningDays || "", formula: e.formula || undefined })),
     savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", correspondent: s.correspondent || "", documentMode: s.documentMode || "auto", documentLabel: s.documentLabel || null, documentId: s.documentId ?? null, startDate: s.startDate || "", endDate: s.endDate || "", warningDays: s.warningDays || "", formula: s.formula || undefined }))
       : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" }] : []),
+    personalExpensesA: (f.personalExpensesA || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", warningDays: e.warningDays || "", formula: e.formula || undefined })),
+    personalExpensesB: (f.personalExpensesB || []).map((e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", warningDays: e.warningDays || "", formula: e.formula || undefined })),
     overrides: (f.overrides && typeof f.overrides === "object") ? { ...f.overrides } : {},
   };
 }
 // "manual" = the stored entry order (drag handles reorder it); the other modes derive an order on the fly.
-const SORT_MODES = { govIncome: ["manual", "name"], expenses: ["manual", "category", "name"], savings: ["manual", "name"] };
-const DEFAULT_LIST_SORT = { govIncome: "manual", expenses: "manual", savings: "manual" };
+const SORT_MODES = { govIncome: ["manual", "name"], expenses: ["manual", "category", "name"], savings: ["manual", "name"], personalExpensesA: ["manual", "category", "name"], personalExpensesB: ["manual", "category", "name"] };
+const DEFAULT_LIST_SORT = { govIncome: "manual", expenses: "manual", savings: "manual", personalExpensesA: "manual", personalExpensesB: "manual" };
 function listSortOf(raw) {
   const out = { ...DEFAULT_LIST_SORT };
   for (const kind of Object.keys(DEFAULT_LIST_SORT)) {
@@ -403,7 +410,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(true);
   const [view, setView] = useState("month");
-  const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, statsIncome: true, statsTotals: false, log: false });
+  const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, statsIncome: true, statsTotals: false, log: false, personalA: true, personalB: true });
   const [showDetails, setShowDetails] = useState(true);
   // null = unbounded, so the range always defaults to (and grows with) all available months.
   const [statsFrom, setStatsFrom] = useState(null);
@@ -484,11 +491,14 @@ export default function App() {
   const statsSeries = useMemo(() => series.filter((s) => (!statsFrom || s.key >= statsFrom) && (!statsTo || s.key <= statsTo)), [series, statsFrom, statsTo]);
   const statsFiltered = Boolean(statsFrom || statsTo);
 
-  const byCategory = useMemo(() => {
+  const byCategoryOf = (list) => {
     const map = {};
-    for (const e of cur.expenses) map[e.category || TXT.otherCategory] = (map[e.category || TXT.otherCategory] || 0) + monthlyOf(e, cur);
+    for (const e of list) map[e.category || TXT.otherCategory] = (map[e.category || TXT.otherCategory] || 0) + monthlyOf(e, cur);
     return Object.entries(map).sort((x, y) => y[1] - x[1]);
-  }, [cur]);
+  };
+  const byCategory = useMemo(() => byCategoryOf(cur.expenses), [cur]);
+  const byCategoryA = useMemo(() => byCategoryOf(cur.personalExpensesA), [cur]);
+  const byCategoryB = useMemo(() => byCategoryOf(cur.personalExpensesB), [cur]);
 
   // "manual" shows the stored entry order as-is (see reorderListItem); the other
   // modes derive a display order on the fly — mutations still address entries by
@@ -504,6 +514,8 @@ export default function App() {
   const sortedGovIncome = useMemo(() => sortItems("govIncome", cur.govIncome), [cur.govIncome, listSort.govIncome]);
   const sortedExpenses = useMemo(() => sortItems("expenses", cur.expenses), [cur.expenses, listSort.expenses]);
   const sortedSavings = useMemo(() => sortItems("savings", cur.savings), [cur.savings, listSort.savings]);
+  const sortedPersonalA = useMemo(() => sortItems("personalExpensesA", cur.personalExpensesA), [cur.personalExpensesA, listSort.personalExpensesA]);
+  const sortedPersonalB = useMemo(() => sortItems("personalExpensesB", cur.personalExpensesB), [cur.personalExpensesB, listSort.personalExpensesB]);
 
   // Contracts (of any kind: income, gov income, expenses, savings) that are
   // expired or about to expire for the selected month, surfaced as a banner
@@ -514,6 +526,8 @@ export default function App() {
       ...cur.govIncome.map((g) => ({ ...g, label: g.label || TXT.unnamed })),
       ...cur.expenses.map((e) => ({ ...e, label: e.label || TXT.unnamed })),
       ...cur.savings.map((s) => ({ ...s, label: s.label || TXT.unnamed })),
+      ...cur.personalExpensesA.map((e) => ({ ...e, label: `${cur.partners[0].name || t(LANG, "partnerName", { n: 1 })} · ${e.label || TXT.unnamed}` })),
+      ...cur.personalExpensesB.map((e) => ({ ...e, label: `${cur.partners[1].name || t(LANG, "partnerName", { n: 2 })} · ${e.label || TXT.unnamed}` })),
     ];
     return entries.map((entry) => {
       const left = daysUntil(entry.endDate);
@@ -554,7 +568,11 @@ export default function App() {
   // Existing category names across all months, for autocomplete suggestions.
   const categories = useMemo(() => {
     const set = new Set();
-    for (const m of Object.values(data.months)) for (const e of m.expenses) if (e.category) set.add(e.category);
+    for (const m of Object.values(data.months)) {
+      for (const kind of ["expenses", "personalExpensesA", "personalExpensesB"]) {
+        for (const e of m[kind] || []) if (e.category) set.add(e.category);
+      }
+    }
     return [...set].sort();
   }, [data.months]);
 
@@ -580,8 +598,8 @@ export default function App() {
   const correspondents = useMemo(() => {
     const set = new Set(paperlessCorrespondents.map((c) => c.name));
     for (const m of Object.values(data.months)) {
-      for (const kind of ["partners", "govIncome", "expenses", "savings"]) {
-        for (const e of m[kind]) if (e.correspondent) set.add(e.correspondent);
+      for (const kind of ["partners", "govIncome", "expenses", "savings", "personalExpensesA", "personalExpensesB"]) {
+        for (const e of m[kind] || []) if (e.correspondent) set.add(e.correspondent);
       }
     }
     return [...set].sort();
@@ -778,6 +796,7 @@ export default function App() {
   const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
+  const addPersonalExpense = (which) => addListItem(`personalExpenses${which}`, { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
 
   // Savings goals aren't month-scoped, so they're mutated directly rather
   // than through editForward/forward-propagation.
@@ -821,6 +840,75 @@ export default function App() {
   const pA = cur.partners[0], pB = cur.partners[1];
   const nameA = pA.name || t(LANG, "partnerName", { n: 1 }), nameB = pB.name || t(LANG, "partnerName", { n: 2 });
 
+  // Shared by the joint "Vaste lasten" section and each partner's personal
+  // page — same fields, same behavior (sorting, drag reorder, formulas,
+  // correspondent/paperless, trend/sparkline, per-entry copy-forward), just
+  // scoped to a different list (`kind`) and its own subtotal/category split.
+  const renderExpensesList = (kind, items, total, byCat, onAdd, logPrefix = TXT.expensesSection) => {
+    const manual = listSort[kind] === "manual";
+    return (
+      <>
+        {items.length > 1 && <SortToggle kind={kind} mode={listSort[kind]} onChange={(m) => setListSort(kind, m)} />}
+        {items.map((e) => {
+          const formulaActive = Boolean(e.formula);
+          const displayAmount = formulaActive ? String(round2(entryAmount(e, cur))) : e.amount;
+          return (
+            <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === kind && dragItem.id === e.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={e.id} {...(manual ? dragRowProps(kind, e.id) : {})}>
+              <div className="entry exp">
+                <span className="e-lead">
+                  <DragHandle active={manual} {...dragHandleProps(kind, e.id)} />
+                  <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || TXT.otherCategory} />
+                  <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => setListItem(kind, e.id, { category: ev.target.value })} style={St.catInput} />
+                </span>
+                <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => setListItem(kind, e.id, { label: ev.target.value })} style={St.nameInput} />
+                <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setListItem(kind, e.id, { amount: v })} onPeriod={() => toggleItemPeriod(kind, e.id)} onCommit={(o, n) => logChange(`${logPrefix} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
+                <span className="entryActions" style={St.rowActions}>
+                  <NoteField value={e.note || ""} onChange={(v) => setListItem(kind, e.id, { note: v })} />
+                  <LinkField value={e.url || ""} onChange={(v) => setListItem(kind, e.id, { url: v })} />
+                  <CorrespondentField entry={e} onChange={(patch) => setListItem(kind, e.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
+                  <DurationField entry={e} onChange={(patch) => setListItem(kind, e.id, patch)} />
+                  <FormulaField entry={e} monthData={cur} onChange={(patch) => setListItem(kind, e.id, patch)} />
+                  <TrendIcon income={false} trend={entryTrend(kind, e.id, monthlyOf(e, cur))} />
+                  <SparkIcon history={entryHistory(kind, e.id)} />
+                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange(kind, e.id, pk, fk)} />
+                  <button type="button" aria-label={TXT.delete} onClick={() => removeListItem(kind, e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                </span>
+              </div>
+              <DerivedLine monthly={monthlyOf(e, cur)} period={e.period} percent={pctOf(monthlyOf(e, cur), total)} correspondent={e.correspondent} />
+            </div>
+          );
+        })}
+        <button type="button" onClick={onAdd} style={St.addBtn}><Plus size={16} /> {TXT.addExpense}</button>
+        {byCat.length > 0 && (
+          <div style={St.catSummary}>
+            <div style={St.catSummaryTitle}>{TXT.perCategory}</div>
+            <div style={St.pieBox}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={byCat.map(([cat, val]) => ({ name: cat, value: val }))} dataKey="value" nameKey="name" innerRadius="55%" outerRadius="90%" paddingAngle={2}>
+                    {byCat.map(([cat]) => <Cell key={cat} fill={categoryColor(cat === TXT.otherCategory ? "" : cat)} />)}
+                  </Pie>
+                  <Tooltip {...tooltipProps} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            {byCat.map(([cat, val]) => (
+              <div style={St.catSummaryRow} key={cat}>
+                <span style={St.catName}>
+                  <span style={{ ...St.catDot, background: categoryColor(cat === TXT.otherCategory ? "" : cat) }} />
+                  {cat}
+                </span>
+                <span style={St.catMonthly}>{eur(val)}</span>
+                <span style={St.catYr}>{eur(val * 12)} {TXT.perYearShort}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <SubTotal monthly={total} />
+      </>
+    );
+  };
+
   // ── Render ──
   return (
     <div style={St.page}>
@@ -854,6 +942,8 @@ export default function App() {
           <div style={{ ...St.toggle, marginTop: 10 }} role="group" aria-label={TXT.viewToggleAria}>
             <button type="button" onClick={() => setView("month")} style={{ ...St.toggleBtn, ...(view === "month" ? St.toggleOn : {}) }}>{TXT.monthView}</button>
             <button type="button" onClick={() => setView("savings")} style={{ ...St.toggleBtn, ...(view === "savings" ? St.toggleOn : {}) }}>{TXT.savingsOverviewView}</button>
+            <button type="button" onClick={() => setView("personalA")} style={{ ...St.toggleBtn, ...(view === "personalA" ? St.toggleOn : {}) }}>{nameA}</button>
+            <button type="button" onClick={() => setView("personalB")} style={{ ...St.toggleBtn, ...(view === "personalB" ? St.toggleOn : {}) }}>{nameB}</button>
           </div>
         </header>
 
@@ -888,6 +978,22 @@ export default function App() {
             onRemoveSubAccount={removeSubAccount}
             onUpdateSubAccount={updateSubAccount}
           />
+        ) : view === "personalA" ? (
+          <div className="fade">
+            <ColTitle>{nameA}</ColTitle>
+            <div style={St.correspondentDocMuted}>{TXT.personalPageHint}</div>
+            <Collapsible id="personalA" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(sumM(cur.personalExpensesA, cur))} open={open.personalA} onToggle={toggleSec} style={St.sectionExpenses}>
+              {renderExpensesList("personalExpensesA", sortedPersonalA, sumM(cur.personalExpensesA, cur), byCategoryA, () => addPersonalExpense("A"), nameA)}
+            </Collapsible>
+          </div>
+        ) : view === "personalB" ? (
+          <div className="fade">
+            <ColTitle>{nameB}</ColTitle>
+            <div style={St.correspondentDocMuted}>{TXT.personalPageHint}</div>
+            <Collapsible id="personalB" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(sumM(cur.personalExpensesB, cur))} open={open.personalB} onToggle={toggleSec} style={St.sectionExpenses}>
+              {renderExpensesList("personalExpensesB", sortedPersonalB, sumM(cur.personalExpensesB, cur), byCategoryB, () => addPersonalExpense("B"), nameB)}
+            </Collapsible>
+          </div>
         ) : (
         <>
         <ColTitle>{TXT.incomes}</ColTitle>
@@ -1039,64 +1145,7 @@ export default function App() {
         <ColTitle>{TXT.expensesSection}</ColTitle>
         {/* Expenses */}
         <Collapsible id="uitgaven" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec} style={St.sectionExpenses}>
-          {cur.expenses.length > 1 && <SortToggle kind="expenses" mode={listSort.expenses} onChange={(m) => setListSort("expenses", m)} />}
-          {sortedExpenses.map((e) => {
-            const formulaActive = Boolean(e.formula);
-            const displayAmount = formulaActive ? String(round2(entryAmount(e, cur))) : e.amount;
-            const manual = listSort.expenses === "manual";
-            return (
-              <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === "expenses" && dragItem.id === e.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={e.id} {...(manual ? dragRowProps("expenses", e.id) : {})}>
-                <div className="entry exp">
-                  <span className="e-lead">
-                    <DragHandle active={manual} {...dragHandleProps("expenses", e.id)} />
-                    <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || TXT.otherCategory} />
-                    <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { category: ev.target.value })} style={St.catInput} />
-                  </span>
-                  <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => setListItem("expenses", e.id, { label: ev.target.value })} style={St.nameInput} />
-                  <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setListItem("expenses", e.id, { amount: v })} onPeriod={() => toggleItemPeriod("expenses", e.id)} onCommit={(o, n) => logChange(`${TXT.expensesSection} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
-                  <span className="entryActions" style={St.rowActions}>
-                    <NoteField value={e.note || ""} onChange={(v) => setListItem("expenses", e.id, { note: v })} />
-                    <LinkField value={e.url || ""} onChange={(v) => setListItem("expenses", e.id, { url: v })} />
-                    <CorrespondentField entry={e} onChange={(patch) => setListItem("expenses", e.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
-                    <DurationField entry={e} onChange={(patch) => setListItem("expenses", e.id, patch)} />
-                    <FormulaField entry={e} monthData={cur} onChange={(patch) => setListItem("expenses", e.id, patch)} />
-                    <TrendIcon income={false} trend={entryTrend("expenses", e.id, monthlyOf(e, cur))} />
-                    <SparkIcon history={entryHistory("expenses", e.id)} />
-                    <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("expenses", e.id, pk, fk)} />
-                    <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("expenses", e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
-                  </span>
-                </div>
-                <DerivedLine monthly={monthlyOf(e, cur)} period={e.period} percent={pctOf(monthlyOf(e, cur), calc.expensesTotal)} correspondent={e.correspondent} />
-              </div>
-            );
-          })}
-          <button type="button" onClick={addExpense} style={St.addBtn}><Plus size={16} /> {TXT.addExpense}</button>
-          {byCategory.length > 0 && (
-            <div style={St.catSummary}>
-              <div style={St.catSummaryTitle}>{TXT.perCategory}</div>
-              <div style={St.pieBox}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={byCategory.map(([cat, val]) => ({ name: cat, value: val }))} dataKey="value" nameKey="name" innerRadius="55%" outerRadius="90%" paddingAngle={2}>
-                      {byCategory.map(([cat]) => <Cell key={cat} fill={categoryColor(cat === TXT.otherCategory ? "" : cat)} />)}
-                    </Pie>
-                    <Tooltip {...tooltipProps} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              {byCategory.map(([cat, val]) => (
-                <div style={St.catSummaryRow} key={cat}>
-                  <span style={St.catName}>
-                    <span style={{ ...St.catDot, background: categoryColor(cat === TXT.otherCategory ? "" : cat) }} />
-                    {cat}
-                  </span>
-                  <span style={St.catMonthly}>{eur(val)}</span>
-                  <span style={St.catYr}>{eur(val * 12)} {TXT.perYearShort}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          <SubTotal monthly={calc.expensesTotal} />
+          {renderExpensesList("expenses", sortedExpenses, calc.expensesTotal, byCategory, addExpense)}
         </Collapsible>
 
         {/* Savings goals */}
