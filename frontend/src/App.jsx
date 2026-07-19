@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, Sankey, Rectangle, Layer,
 } from "recharts";
 import { storage, paperless, PAPERLESS_ENABLED } from "./api";
 import { LANG, TXT, t, getRuntimeCurrencyLocale, getRuntimeDateLocale, getRuntimeAppTitle } from "./i18n";
@@ -285,6 +285,125 @@ function computeTotals(fig) {
     total, expensesTotal, savingsTotal, potTotal, govTotal, coupleFunds, buffer,
     people, shares, transfers, leftovers, keeps, contribShares,
   };
+}
+
+// Groups a list of entries with a `category` field (expenses, personal
+// expenses) by category, monthly-resolving formulas — same grouping and
+// coloring convention as the expenses pie chart elsewhere, just
+// parameterized instead of closing over `cur` directly.
+function groupByCategory(list, monthData) {
+  const map = {};
+  for (const e of list) {
+    const cat = e.category || TXT.otherCategory;
+    map[cat] = (map[cat] || 0) + monthlyOf(e, monthData);
+  }
+  return Object.entries(map).sort((a, b) => b[1] - a[1]);
+}
+
+// Builds a Sankey node/link graph tracing salary to the last known
+// destination, for one month's figures + its already-computed totals.
+// Amounts all come from monthlyOf/calc (which already resolve formulas),
+// never raw entry.amount. Sankey can't render negative or zero-value links,
+// so leftover/unallocated amounts are clamped to ≥0 and zero-value links are
+// skipped outright — a negative leftover is already surfaced elsewhere (the
+// red LeftoverCard).
+//
+// `detail` controls how far the graph is exploded, each level a strict
+// superset of the previous one's nodes/links (so switching levels never
+// reshuffles the diagram, it only adds or removes leaves):
+//   1 — totals only: salary/contribution/leftover per person, gov, pot,
+//       and expenses/savings/buffer as single totals.
+//   2 — level 1, plus expenses and savings broken into their own
+//       categories/entries.
+//   3 — level 2, plus each person's leftover broken into their personal
+//       expense categories + whatever's unallocated.
+function buildCashflow(cur, calc, detail) {
+  const nodes = [];
+  const links = [];
+  const indexOf = new Map();
+  const addNode = (key, name, color) => {
+    if (indexOf.has(key)) return indexOf.get(key);
+    indexOf.set(key, nodes.length);
+    nodes.push({ name, color });
+    return indexOf.get(key);
+  };
+  const addLink = (sourceKey, targetKey, value) => {
+    if (!(value > 0)) return;
+    const source = indexOf.get(sourceKey);
+    // Colored like the money's origin (the person or category it's leaving),
+    // not a flat neutral grey — same colors used for that node itself.
+    links.push({ source, target: indexOf.get(targetKey), value: round2(value), color: nodes[source].color });
+  };
+
+  const potKey = "pot", expKey = "exp", saveKey = "save", bufferKey = "buffer";
+  addNode(potKey, TXT.cashflowSharedPot, C.inc);
+  addNode(expKey, TXT.fixedCosts, C.exp);
+  addNode(saveKey, TXT.savingsSection, C.save);
+  addNode(bufferKey, TXT.cashflowBuffer, C.warn);
+
+  if (calc.govTotal > 0) {
+    addNode("gov", TXT.government, C.gov);
+    addLink("gov", potKey, calc.govTotal);
+  }
+
+  const incomeById = Object.fromEntries(calc.people.map((p) => [p.id, p.income]));
+  cur.partners.forEach((p, i) => {
+    if (!(incomeById[p.id] > 0)) return; // no income yet (e.g. a freshly added person) — nothing to trace
+    const name = p.name || t(LANG, "personName", { n: i + 1 });
+    const color = personColor(p, i).main;
+    const salaryKey = `salary-${p.id}`, contribKey = `contrib-${p.id}`, leftoverKey = `leftover-${p.id}`;
+    addNode(salaryKey, t(LANG, "cashflowSalary", { name }), color);
+    addNode(contribKey, t(LANG, "cashflowContribution", { name }), color);
+    addNode(leftoverKey, t(LANG, "cashflowLeftover", { name }), color);
+    addLink(salaryKey, contribKey, calc.transfers[p.id] || 0);
+    addLink(contribKey, potKey, calc.transfers[p.id] || 0);
+    const leftover = Math.max(0, calc.leftovers[p.id] || 0);
+    addLink(salaryKey, leftoverKey, leftover);
+
+    if (detail >= 3) {
+      // Personal expenses, grouped by category, funded from this person's own
+      // leftover; whatever isn't tracked stays "unallocated" — the last known
+      // place this model can follow that money to.
+      let personalSum = 0;
+      for (const [cat, amount] of groupByCategory(cur.personalExpenses[p.id] || [], cur)) {
+        if (!(amount > 0)) continue;
+        personalSum += amount;
+        const catKey = `personal-${p.id}-${cat}`;
+        addNode(catKey, cat, categoryColor(cat));
+        addLink(leftoverKey, catKey, amount);
+      }
+      const unallocated = Math.max(0, leftover - personalSum);
+      if (unallocated > 0) {
+        const unallocatedKey = `unallocated-${p.id}`;
+        addNode(unallocatedKey, t(LANG, "cashflowUnallocated", { name }), color);
+        addLink(leftoverKey, unallocatedKey, unallocated);
+      }
+    }
+  });
+
+  if (detail >= 2) {
+    for (const [cat, amount] of groupByCategory(cur.expenses, cur)) {
+      if (!(amount > 0)) continue;
+      const catKey = `exp-${cat}`;
+      addNode(catKey, cat, categoryColor(cat));
+      addLink(expKey, catKey, amount);
+    }
+
+    for (const s of cur.savings) {
+      const amount = monthlyOf(s, cur);
+      if (!(amount > 0)) continue;
+      const label = s.label || TXT.unnamed;
+      const saveEntryKey = `save-${s.id}`;
+      addNode(saveEntryKey, label, categoryColor(label));
+      addLink(saveKey, saveEntryKey, amount);
+    }
+  }
+
+  addLink(potKey, expKey, calc.expensesTotal);
+  addLink(potKey, saveKey, calc.savingsTotal);
+  addLink(potKey, bufferKey, calc.buffer);
+
+  return { nodes, links };
 }
 
 /* ----------------------------------------------------------------
@@ -1154,6 +1273,7 @@ export default function App() {
           <div style={{ ...St.toggle, marginTop: 10 }} role="group" aria-label={TXT.viewToggleAria}>
             <button type="button" onClick={() => setView("month")} style={{ ...St.toggleBtn, ...(view === "month" ? St.toggleOn : {}) }}>{TXT.monthView}</button>
             <button type="button" onClick={() => setView("savings")} style={{ ...St.toggleBtn, ...(view === "savings" ? St.toggleOn : {}) }}>{TXT.savingsOverviewView}</button>
+            <button type="button" onClick={() => setView("cashflow")} style={{ ...St.toggleBtn, ...(view === "cashflow" ? St.toggleOn : {}) }}>{TXT.cashflowView}</button>
             {cur.partners.map((p, i) => (
               <button key={p.id} type="button" onClick={() => setView(`person:${p.id}`)}
                 style={{ ...St.toggleBtn, ...(personView === p.id ? { ...St.toggleOn, color: personColor(p, i).main } : {}) }}>
@@ -1204,6 +1324,8 @@ export default function App() {
             onRemoveSubAccount={removeSubAccount}
             onUpdateSubAccount={updateSubAccount}
           />
+        ) : view === "cashflow" ? (
+          <CashflowPage cur={cur} calc={calc} />
         ) : activePerson ? (
           <div className="fade">
             <ColTitle>{personName(activePerson, activePersonIndex)}</ColTitle>
@@ -1863,6 +1985,85 @@ function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMont
           />
         );
       })}
+    </div>
+  );
+}
+
+// A colored ribbon per Sankey link — recharts' default Sankey link is a
+// single flat grey, so this recolors each one to match the node its money
+// is leaving (same colors used for that node itself).
+function SankeyLink({ sourceX, targetX, sourceY, targetY, sourceControlX, targetControlX, linkWidth, payload }) {
+  return (
+    <path
+      d={`M${sourceX},${sourceY}C${sourceControlX},${sourceY} ${targetControlX},${targetY} ${targetX},${targetY}`}
+      fill="none"
+      stroke={payload.color}
+      strokeOpacity={0.4}
+      strokeWidth={linkWidth}
+    />
+  );
+}
+
+// A colored rectangle + name + amount label per Sankey node — recharts'
+// default Sankey node is a single flat fill, so this is needed for the
+// same per-person/per-category coloring used throughout the rest of the
+// app. Labels flow outward (right of left-half nodes, left of right-half
+// ones) so they never spill outside the chart.
+function SankeyNode({ x, y, width, height, payload, containerWidth }) {
+  const isRightHalf = x + width / 2 > containerWidth / 2;
+  const labelX = isRightHalf ? x - 6 : x + width + 6;
+  return (
+    <Layer>
+      <Rectangle x={x} y={y} width={width} height={height} fill={payload.color} fillOpacity={0.9} />
+      <text x={labelX} y={y + height / 2 - 2} textAnchor={isRightHalf ? "end" : "start"} dominantBaseline="middle"
+        style={{ fontSize: 12, fill: C.ink, fontFamily: "Inter, sans-serif" }}>
+        {payload.name}
+      </text>
+      <text x={labelX} y={y + height / 2 + 12} textAnchor={isRightHalf ? "end" : "start"} dominantBaseline="middle"
+        style={{ fontSize: 11, fill: C.muted, fontFamily: "Inter, sans-serif" }}>
+        {eur0(payload.value)}
+      </text>
+    </Layer>
+  );
+}
+
+const CASHFLOW_DETAIL_LABELS = { 1: "cashflowDetailTotals", 2: "cashflowDetailCategories", 3: "cashflowDetailFull" };
+// First-draft cashflow view: traces salary → household pot/personal leftover
+// → expenses/savings/buffer or personal spending → the last known category
+// or entry, for whichever month is selected. Purely derived from `cur`/
+// `calc` — no new data, no mutations. Starts at the least detailed level;
+// the diagram gets busy fast once categories/entries are exploded, so more
+// detail is opt-in rather than the default.
+function CashflowPage({ cur, calc }) {
+  const [detail, setDetail] = useState(1);
+  const { nodes, links } = useMemo(() => buildCashflow(cur, calc, detail), [cur, calc, detail]);
+  return (
+    <div className="fade">
+      <ColTitle>{TXT.cashflowView}</ColTitle>
+      <div style={St.correspondentDocMuted}>{TXT.cashflowHint}</div>
+      <div style={{ ...St.sortRow, marginTop: 10 }}>
+        <span style={St.sortLabel}>{TXT.cashflowDetailLabel}</span>
+        <div style={St.toggle} role="group" aria-label={TXT.cashflowDetailLabel}>
+          {[1, 2, 3].map((lvl) => (
+            <button key={lvl} type="button" onClick={() => setDetail(lvl)} style={{ ...St.toggleBtn, ...(detail === lvl ? St.toggleOn : {}) }}>{TXT[CASHFLOW_DETAIL_LABELS[lvl]]}</button>
+          ))}
+        </div>
+      </div>
+      {links.length === 0 ? (
+        <div style={St.emptyHist}>
+          <TrendingUp size={18} style={{ color: C.muted }} />
+          <span>{TXT.noSeries}</span>
+        </div>
+      ) : (
+        <div style={{ ...St.chartBox, height: 480, marginTop: 12 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <Sankey data={{ nodes, links }} node={<SankeyNode />} link={<SankeyLink />}
+              nodePadding={24} nodeWidth={10} margin={{ top: 8, right: 120, bottom: 8, left: 120 }}>
+              <Tooltip {...tooltipProps} />
+            </Sankey>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 }
