@@ -2,27 +2,27 @@
 
 *Read this in other languages: [English](README.md)*
 
-Open Family Finance is een zelf-gehoste webapp voor stellen en gezinnen die
-allebei een eigen rekening hebben, plus één gezamenlijke rekening voor
-gedeelde kosten. De app geeft inzicht in wat er binnenkomt en uitgaat, en
-berekent een eerlijke maandelijkse overboeking van elke persoonlijke rekening
-naar de gezamenlijke rekening.
+Open Family Finance is een zelf-gehoste webapp voor een willekeurig aantal
+personen — stellen, gezinnen, huisgenoten — die allemaal een eigen rekening
+hebben, plus één gezamenlijke rekening voor gedeelde kosten. De app geeft
+inzicht in wat er binnenkomt en uitgaat, en berekent een eerlijke maandelijkse
+overboeking van elke persoonlijke rekening naar de gezamenlijke rekening.
 
 ## Het idee
 
-- Elke partner vult zijn/haar eigen **netto inkomen** in.
+- Iedereen vult zijn/haar eigen **netto inkomen** in.
 - Je houdt **gezamenlijke uitgaven** bij (huur, boodschappen, verzekeringen,
   ...), **spaardoelen**, en eventuele **overheidsbijdragen** (bijv.
   kinderbijslag) die verlagen wat jullie zelf moeten inleggen.
 - De app berekent `uitgaven + sparen − overheidsbijdrage` = wat jullie samen
-  moeten financieren, en verdeelt dat bedrag tussen de partners op een van
-  drie manieren:
+  moeten financieren, en verdeelt dat bedrag op een van drie manieren:
   - **Naar inkomen** — wie meer verdient, legt naar verhouding meer in, zodat
-    na de overboeking beide partners hetzelfde *percentage* van hun eigen
-    salaris overhouden.
-  - **50 / 50** — verdeel het gezamenlijke bedrag gelijk, ongeacht inkomen.
-  - **Eigen verdeling** — stel zelf een vast percentage in (bijv. 60/40) als
-    geen van bovenstaande bij jullie situatie past.
+    na de overboeking iedereen hetzelfde *percentage* van zijn/haar eigen
+    salaris overhoudt.
+  - **Gelijk verdelen** — verdeel het gezamenlijke bedrag gelijk over
+    iedereen, ongeacht inkomen.
+  - **Eigen verdeling** — stel zelf een percentage per persoon in als geen
+    van bovenstaande bij jullie situatie past.
 - Er wordt een kleine, instelbare **buffer-marge** (%) bovenop elke
   overboeking gezet, zodat de gezamenlijke rekening een buffer overhoudt in
   plaats van precies op nul uit te komen.
@@ -32,9 +32,11 @@ cijfers zich over tijd ontwikkelen.
 
 ## Functies
 
-- **Eerlijke-verdeling-calculator** — naar inkomen, 50/50, of je eigen
-  percentage, met een instelbare veiligheidsmarge, en een uitklapbare uitleg
-  van precies hoe elk bedrag is berekend.
+- **Een willekeurig aantal personen** — niet alleen twee. Voeg er zoveel toe
+  als jullie huishouden nodig heeft, elk met een eigen naam, kleur en inkomen.
+- **Eerlijke-verdeling-calculator** — naar inkomen, gelijk verdelen, of je
+  eigen percentage per persoon, met een instelbare veiligheidsmarge, en een
+  uitklapbare uitleg van precies hoe elk bedrag is berekend.
 - **Maandelijkse bijhouding met doorwerking naar volgende maanden** — een
   wijziging aan een post geldt voor de huidige maand én elke volgende maand,
   totdat die post in een van die maanden zelf weer wordt aangepast (dan wordt
@@ -51,10 +53,11 @@ cijfers zich over tijd ontwikkelen.
   of kopieer de cijfers van een hele maand naar eerdere maanden.
 - **Logboek** — elke wijziging wordt vastgelegd met datum, tijd, oude en
   nieuwe waarde.
-- **Statistieken** — staafdiagram van de inleg per partner per maand, een
+- **Statistieken** — staafdiagram van de inleg per persoon per maand, een
   staafdiagram van inkomsten / overheidsbijdrage / uitgaven / sparen per
   maand, en een cirkeldiagram van uitgaven per categorie. Alle grafieken
-  kunnen worden beperkt tot een zelfgekozen periode (standaard alle maanden).
+  kunnen worden beperkt tot een zelfgekozen periode (standaard alle maanden),
+  en elke grafiek is apart in te klappen.
 - **Sorteren** — sorteer uitgaven, overheidsbijdragen en spaardoelen op naam
   (uitgaven ook op categorie), of versleep ze naar je eigen handmatige
   volgorde.
@@ -62,6 +65,23 @@ cijfers zich over tijd ontwikkelen.
   contract of abonnement te volgen, met een voortgangsbalk en een
   kleurgecodeerde waarschuwing zodra het binnenkort afloopt (standaard binnen
   30 dagen, per post aan te passen) of al verlopen is.
+- **Persoonlijke uitgavenpagina's** — een pagina per persoon voor eigen vaste
+  lasten, los van de gezamenlijke rekening, in de eigen kleur van die persoon.
+- **Spaardoelen met een bijgehouden saldo** — een grafiek van de verwachte
+  opbouw per doel, een werkelijk maandsaldo dat je op elk moment kunt
+  corrigeren (eerdere maanden blijven precies zoals vastgelegd), een optioneel
+  streefbedrag waarbij de projectie stopt zodra het bereikt is, en een
+  optionele verdeling over meerdere rekeningen bij verschillende banken, elk
+  met een eigen saldo en rentepercentage.
+- **Geldstromen-diagram** — een sankey-diagram dat het geld volgt van salaris
+  tot de laatst bekende bestemming, voor de maand die je bekijkt, met drie
+  detailniveaus: alleen totalen, met categorieën en spaardoelen erbij, of de
+  volledige uitsplitsing inclusief persoonlijke uitgaven.
+- **Vergrendelde geschiedenis** — eerdere maanden staan standaard grijs en
+  alleen-lezen, zodat je ze niet per ongeluk wijzigt; ontgrendel een specifieke
+  eerdere maand expliciet als je 'm echt moet corrigeren.
+- **Correspondenten vallen op** — waar je er een hebt ingesteld, staat die
+  gewoon in de regel zelf (niet weggestopt in een popover).
 - **Licht en donker thema.**
 - **Nederlandse en Engelse UI**, instelbaar via een environment-variabele.
 - **Optionele paperless-ngx-integratie** — kies een correspondent uit je
@@ -70,6 +90,45 @@ cijfers zich over tijd ontwikkelen.
   paperless daarvoor heeft. Zie [Paperless-ngx-integratie](#paperless-ngx-integratie).
 - **Zelf te hosten**: een kleine Express-API met Postgres als opslag, met een
   optioneel bearer-token om toegang af te schermen.
+
+## Screenshots
+
+Alle cijfers hieronder zijn verzonnen voorbeeldgegevens.
+
+**Maandoverzicht** — inkomsten, verdeling, uitgaven en sparen voor de maand
+die je bekijkt.
+
+![Maandoverzicht](docs/screenshots/month-overview.png)
+
+**Geldstromen** — een sankey-diagram van salaris tot de laatst bekende
+bestemming, op elk van de drie detailniveaus.
+
+![Geldstromen, alleen totalen](docs/screenshots/cashflow-totals.png)
+![Geldstromen, met categorieën](docs/screenshots/cashflow-categories.png)
+![Geldstromen, volledig detail](docs/screenshots/cashflow-full.png)
+
+**Spaardoelen** — een verwachte opbouw per doel, verdeeld over rekeningen bij
+verschillende banken.
+
+![Spaardoel](docs/screenshots/savings-goal.png)
+
+**Persoonlijke uitgaven** — een pagina per persoon voor kosten die los van de
+gezamenlijke rekening blijven.
+
+![Persoonlijke pagina](docs/screenshots/personal-page.png)
+
+**Correspondenten vallen op in de regel zelf.**
+
+![Correspondent valt op](docs/screenshots/correspondent.png)
+
+**Vergrendelde geschiedenis** — eerdere maanden staan grijs en alleen-lezen
+totdat je ze expliciet ontgrendelt.
+
+![Geschiedenis vergrendeld](docs/screenshots/history-lock.png)
+
+**Donker thema.**
+
+![Donker thema](docs/screenshots/dark-theme.png)
 
 ## Aan de slag
 
