@@ -411,7 +411,7 @@ export default function App() {
   const [saved, setSaved] = useState(true);
   const [view, setView] = useState("month");
   const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, statsIncome: true, statsTotals: false, log: false, personalA: true, personalB: true });
-  const [showDetails, setShowDetails] = useState(true);
+  const [showDetails, setShowDetails] = useState(false);
   // null = unbounded, so the range always defaults to (and grows with) all available months.
   const [statsFrom, setStatsFrom] = useState(null);
   const [statsTo, setStatsTo] = useState(null);
