@@ -22,10 +22,10 @@ import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
   ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
-  Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle,
+  Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Percent,
 } from "lucide-react";
 import {
-  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
+  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 import { storage, paperless, PAPERLESS_ENABLED } from "./api";
@@ -173,6 +173,10 @@ const keyToDate = (k) => { const [y, m] = k.split("-").map(Number); return new D
 const shiftMonth = (k, delta) => { const d = keyToDate(k); d.setMonth(d.getMonth() + delta); return monthKey(d); };
 const monthLong = (k, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(keyToDate(k));
 const monthShort = (k, locale = getRuntimeDateLocale()) => { const d = keyToDate(k); const m = new Intl.DateTimeFormat(locale, { month: "short" }).format(d); return d.getMonth() === 0 ? `${m} '${String(d.getFullYear()).slice(2)}` : m; };
+// Like monthShort, but always includes the year — a savings projection can
+// span several years, so every axis tick needs to disambiguate on its own
+// rather than relying on the January tick alone.
+const monthShortWithYear = (k, locale = getRuntimeDateLocale()) => { const d = keyToDate(k); const m = new Intl.DateTimeFormat(locale, { month: "short" }).format(d); return `${m} '${String(d.getFullYear()).slice(2)}`; };
 const dt = (ts, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(new Date(ts));
 const fmtDate = (iso, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(`${iso}T00:00:00`));
 
@@ -260,17 +264,135 @@ function listSortOf(raw) {
   }
   return out;
 }
-function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT } }; }
+// Savings goals (Spaaroverzicht): unlike the per-month figures, goals and
+// their sub-accounts aren't month-scoped — they persist across time like
+// partner names. A sub-account's monthly contribution is never stored here;
+// it's read live from the linked savings entry (see monthlyContributionAt),
+// so the balance projection always reflects whatever that entry's amount
+// currently is, in every month, without duplicating the figure.
+// A recorded actual balance for one month ("checkpoint"). Kept as a map of
+// month key -> balance rather than a single value, so correcting the balance
+// in a later month (e.g. extra money got deposited) doesn't erase an earlier
+// month's own recorded value — each month's correction stands on its own,
+// in the data and in the graph.
+function migrateCheckpoints(o) {
+  if (o.checkpoints && typeof o.checkpoints === "object") return { ...o.checkpoints };
+  if (o.checkpointMonth) return { [o.checkpointMonth]: o.checkpointBalance ?? "" };
+  return {};
+}
+function migrateSubAccount(s) {
+  return {
+    id: s.id || uid(), holder: s.holder || "", bank: s.bank || "", iban: s.iban || "",
+    planId: s.planId || "", referenceId: s.referenceId || "",
+    sharePercent: s.sharePercent ?? "100", interestRate: s.interestRate ?? "",
+  };
+}
+// A goal is derived 1:1 from a monthly savings entry (see
+// SavingsOverviewPage) rather than freely created. Older blobs let each
+// sub-account link its own entry and gave the goal a free-typed name —
+// fold that into a single entryId per goal (best-effort, from whichever
+// sub-account had one); goals that never had one don't correspond to
+// anything in the current model and are dropped in normalize() below.
+function migrateGoal(g) {
+  const entryId = g.entryId || (g.subAccounts || []).find((s) => s.entryId)?.entryId || null;
+  // The recorded balance briefly lived per sub-account instead of once per
+  // goal — recover it from whichever sub-account had one so a balance
+  // entered there isn't silently lost.
+  const ownCheckpoints = migrateCheckpoints(g);
+  const fallbackSub = (g.subAccounts || []).find((s) => s.checkpointMonth || (s.checkpoints && Object.keys(s.checkpoints).length));
+  const checkpoints = Object.keys(ownCheckpoints).length ? ownCheckpoints : (fallbackSub ? migrateCheckpoints(fallbackSub) : {});
+  return {
+    entryId, targetAmount: g.targetAmount ?? "",
+    forwarded: g.forwarded ?? Boolean((g.subAccounts || []).length),
+    // A single real observation, whether or not the money is split across
+    // several bank sub-accounts.
+    checkpoints,
+    subAccounts: (g.subAccounts || []).map(migrateSubAccount),
+  };
+}
+function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [] }; }
 function normalize(raw) {
   if (!raw) return freshData();
   if (raw.months && raw.selectedMonth) {
     const months = {}; for (const [k, v] of Object.entries(raw.months)) months[k] = migrateFig(v);
     // expenseSort: kept for compatibility with blobs saved by an earlier version of this feature.
     const sortSource = raw.listSort || (raw.expenseSort ? { expenses: raw.expenseSort } : null);
-    return { selectedMonth: raw.selectedMonth, months, log: raw.log || [], listSort: listSortOf(sortSource) };
+    return { selectedMonth: raw.selectedMonth, months, log: raw.log || [], listSort: listSortOf(sortSource), savingsGoals: (raw.savingsGoals || []).map(migrateGoal).filter((g) => g.entryId) };
   }
-  if (raw.partners) { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: migrateFig(raw) }, log: [], listSort: { ...DEFAULT_LIST_SORT } }; }
+  if (raw.partners) { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: migrateFig(raw) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [] }; }
   return freshData();
+}
+// The monthly contribution a sub-account's linked savings entry has in a
+// given month — read from that month's actual figures if it exists yet, or
+// from the nearest earlier month otherwise (an unvisited future month always
+// behaves as if it inherited the latest known figures, same as forward
+// propagation would eventually produce once the user navigates there).
+function monthlyContributionAt(months, entryId, key) {
+  if (!entryId) return 0;
+  const findIn = (fig) => fig?.savings?.find((x) => x.id === entryId);
+  if (months[key]) { const e = findIn(months[key]); return e ? monthlyOf(e, months[key]) : 0; }
+  const sorted = Object.keys(months).sort();
+  const earlier = sorted.filter((k) => k < key);
+  // A checkpoint often predates the earliest month the app actually has
+  // figures for (e.g. a start balance from months before you started using
+  // this app) — fall back to the earliest month available at all rather
+  // than silently treating those months as a €0 contribution.
+  const refKey = earlier.length ? earlier[earlier.length - 1] : sorted[0];
+  if (!refKey) return 0;
+  const e = findIn(months[refKey]);
+  return e ? monthlyOf(e, months[refKey]) : 0;
+}
+// Projects a sub-account's balance across `keys` (sorted, ascending month
+// keys), starting from its earliest recorded checkpoint. Never recomputes a
+// checkpointed month itself — that's the recorded, real balance — and a
+// later checkpoint (e.g. a correction after extra money was deposited)
+// overrides the running total from that month on without touching any
+// earlier month's own recorded value. Once a target amount is reached the
+// balance is capped there and stops growing further, mirroring a goal whose
+// contributions stop once it's fully funded.
+// Returns, per month key, { balance, interest } — interest is the portion of
+// that balance built up from the (optional) annual interest rate so far, so
+// the overview can show how much is interest versus the holder's own
+// contributions (balance - interest). Interest compounds monthly on the
+// running balance (nominal annual rate ÷ 12), which is the standard way
+// savings accounts quote and apply a rate.
+function projectSubAccountSeries(months, entryId, subAccount, keys, target) {
+  const out = {};
+  const checkpoints = subAccount.checkpoints || {};
+  const checkpointKeys = Object.keys(checkpoints).filter((k) => checkpoints[k] !== "" && checkpoints[k] != null).sort();
+  if (!checkpointKeys.length) return out;
+  // A goal's monthly contribution can be split across several sub-accounts
+  // (e.g. different banks) by percentage, rather than each needing its own
+  // dedicated savings entry — all sub-accounts under one goal share the same
+  // (goal-level) entryId.
+  const share = subAccount.sharePercent === "" || subAccount.sharePercent == null ? 1 : num(subAccount.sharePercent) / 100;
+  const monthlyRate = subAccount.interestRate ? num(subAccount.interestRate) / 100 / 12 : 0;
+  const firstCheckpoint = checkpointKeys[0];
+  let principal = num(checkpoints[firstCheckpoint]);
+  let interest = 0;
+  let k = firstCheckpoint;
+  // Once the target is reached, both stop growing — the total can overshoot
+  // the target by at most one month's contribution + interest, kept simple
+  // on purpose so balance always equals principal + interest exactly.
+  let capped = target != null && principal >= target;
+  out[k] = { balance: principal + interest, interest };
+  for (const key of keys) {
+    if (key <= firstCheckpoint) continue;
+    while (k < key) {
+      k = shiftMonth(k, 1);
+      if (checkpoints[k] !== undefined && checkpoints[k] !== "") {
+        principal = num(checkpoints[k]);
+        interest = 0;
+        capped = target != null && principal >= target;
+      } else if (!capped) {
+        interest += (principal + interest) * monthlyRate;
+        principal += monthlyContributionAt(months, entryId, k) * share;
+        if (target != null && principal + interest >= target) capped = true;
+      }
+    }
+    out[key] = { balance: principal + interest, interest };
+  }
+  return out;
 }
 
 /* ----------------------------------------------------------------
@@ -280,6 +402,7 @@ export default function App() {
   const [data, setData] = useState(freshData);
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(true);
+  const [view, setView] = useState("month");
   const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, verloop: true, log: false });
   const [showDetails, setShowDetails] = useState(true);
   // null = unbounded, so the range always defaults to (and grows with) all available months.
@@ -434,6 +557,15 @@ export default function App() {
     for (const m of Object.values(data.months)) for (const e of m.expenses) if (e.category) set.add(e.category);
     return [...set].sort();
   }, [data.months]);
+
+  // Bank suggestions for savings sub-accounts: every bank name already typed
+  // across any goal, so a second account at the same bank doesn't need
+  // retyping it — same idea as the category/correspondent datalists.
+  const banks = useMemo(() => {
+    const set = new Set();
+    for (const g of data.savingsGoals || []) for (const s of g.subAccounts) if (s.bank) set.add(s.bank);
+    return [...set].sort();
+  }, [data.savingsGoals]);
 
   // Correspondent suggestions: paperless-ngx's list (if the integration is on)
   // plus anything already typed across all months, so the field stays useful
@@ -646,6 +778,23 @@ export default function App() {
   const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
+
+  // Savings goals aren't month-scoped, so they're mutated directly rather
+  // than through editForward/forward-propagation.
+  // Goals are keyed by the monthly savings entry they belong to (see
+  // SavingsOverviewPage) rather than freely created, so there's no separate
+  // "add goal" step — a goal record is created on first use (setting the
+  // "forwarded" flag or adding a sub-account) and simply doesn't exist until
+  // then; SavingsOverviewPage falls back to sensible defaults meanwhile.
+  const mapGoals = (d, entryId, fn) => {
+    const goals = d.savingsGoals || [];
+    if (goals.some((g) => g.entryId === entryId)) return goals.map((g) => g.entryId === entryId ? fn(g) : g);
+    return [...goals, fn({ entryId, targetAmount: "", forwarded: false, checkpoints: {}, subAccounts: [] })];
+  };
+  const updateGoal = (entryId, patch) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, ...patch })) }));
+  const addSubAccount = (entryId) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "" }] })) }));
+  const removeSubAccount = (entryId, subId) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
+  const updateSubAccount = (entryId, subId, patch) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
   // Reset the selected month: take over the figures of the nearest earlier
   // month and clear this month's overrides, so it follows the baseline again.
   // Without an earlier month it falls back to the empty defaults.
@@ -678,6 +827,7 @@ export default function App() {
       <style>{CSS}</style>
       <datalist id="cats">{categories.map((c) => <option key={c} value={c} />)}</datalist>
       {PAPERLESS_ENABLED && <datalist id="correspondents">{correspondents.map((c) => <option key={c} value={c} />)}</datalist>}
+      <datalist id="banks">{banks.map((b) => <option key={b} value={b} />)}</datalist>
 
       <div style={St.shell} className="shell">
         {contractWarnings.length > 0 && (
@@ -701,9 +851,15 @@ export default function App() {
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? TXT.themeLight : TXT.themeDark}
             </button>
           </div>
+          <div style={{ ...St.toggle, marginTop: 10 }} role="group" aria-label={TXT.viewToggleAria}>
+            <button type="button" onClick={() => setView("month")} style={{ ...St.toggleBtn, ...(view === "month" ? St.toggleOn : {}) }}>{TXT.monthView}</button>
+            <button type="button" onClick={() => setView("savings")} style={{ ...St.toggleBtn, ...(view === "savings" ? St.toggleOn : {}) }}>{TXT.savingsOverviewView}</button>
+          </div>
         </header>
 
-        {/* Month */}
+        {/* Month — shared by both views: the savings overview edits each
+            linked entry's amount for whichever month is selected here, the
+            same way the monthly view does. */}
         <div style={St.monthNav} className="fade">
           <button type="button" onClick={() => goMonth(-1)} style={St.navBtn} aria-label={TXT.previousMonth}><ChevronLeft size={18} /></button>
           <div style={St.monthLabelWrap}>
@@ -720,6 +876,20 @@ export default function App() {
           )}
         </div>
 
+        {view === "savings" ? (
+          <SavingsOverviewPage
+            savingsGoals={data.savingsGoals || []}
+            months={data.months}
+            savingsEntries={cur.savings}
+            currentMonthData={cur}
+            sel={sel}
+            onUpdateGoal={updateGoal}
+            onAddSubAccount={addSubAccount}
+            onRemoveSubAccount={removeSubAccount}
+            onUpdateSubAccount={updateSubAccount}
+          />
+        ) : (
+        <>
         <ColTitle>{TXT.incomes}</ColTitle>
         {/* Income */}
         <Collapsible id="inkomen" title={TXT.salarySection} icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec} style={St.sectionIncome}>
@@ -1049,14 +1219,16 @@ export default function App() {
             </div>
           )}
         </Collapsible>
+        </>
+        )}
 
         <footer style={St.footer}>
           <span style={St.saveState}>
             {!loaded ? (<><Loader2 size={14} className="spin" /> {TXT.loading}</>) : saved ? (<><Check size={14} style={{ color: C.save }} /> {TXT.saved}</>) : (<><Loader2 size={14} className="spin" /> {TXT.saving}</>) }
           </span>
           <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
-            <MonthCopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={copyMonth} />
-            <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>
+            {view === "month" && <MonthCopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={copyMonth} />}
+            {view === "month" && <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>}
             <a href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer" style={St.githubLink} aria-label={TXT.sourceOnGitHub} title={TXT.sourceOnGitHub}>
               <Github size={16} />
             </a>
@@ -1359,6 +1531,329 @@ function DurationField({ entry, onChange }) {
         </span>
       )}
     </span>
+  );
+}
+
+// Spaaroverzicht: savings goals with one or more sub-accounts (bank/IBAN/plan
+// ID), each linked to an existing savings entry for its monthly contribution,
+// and projected forward from a recorded checkpoint balance.
+// Beyond a year, the "months ahead" options step by whole years rather than
+// by 12 every time — a 10-year-out projection listed month by month would
+// be a very long dropdown for no extra precision anyone needs.
+const HORIZON_OPTIONS = [3, 6, 12, 24, 36, 48, 60, 72, 84, 96, 108, 120];
+const horizonLabel = (n) => n < 12 ? t(LANG, "months", { count: n }) : t(LANG, "yearsShort", { count: n / 12 });
+
+function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMonthData, sel, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+  const [horizon, setHorizon] = useState(24);
+  return (
+    <div className="fade">
+      <div style={St.savingsPageHead}>
+        <ColTitle>{TXT.savingsOverviewView}</ColTitle>
+        <label style={St.savingsHorizon}>
+          {TXT.projectionMonths}
+          <select value={horizon} onChange={(e) => setHorizon(Number(e.target.value))} style={St.copySel}>
+            {HORIZON_OPTIONS.map((n) => <option key={n} value={n}>{horizonLabel(n)}</option>)}
+          </select>
+        </label>
+      </div>
+      {savingsEntries.length === 0 && <div style={St.copyEmpty}>{TXT.noSavingsGoals}</div>}
+      {savingsEntries.map((entry) => {
+        const goal = savingsGoals.find((g) => g.entryId === entry.id) || { entryId: entry.id, targetAmount: "", forwarded: false, checkpoints: {}, subAccounts: [] };
+        return (
+          <SavingsGoalCard key={entry.id} entry={entry} goal={goal} months={months} currentMonthData={currentMonthData} sel={sel} horizon={horizon}
+            onUpdate={(patch) => onUpdateGoal(entry.id, patch)}
+            onAddSubAccount={() => onAddSubAccount(entry.id)}
+            onRemoveSubAccount={(subId) => onRemoveSubAccount(entry.id, subId)}
+            onUpdateSubAccount={(subId, patch) => onUpdateSubAccount(entry.id, subId, patch)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+  const forwarded = Boolean(goal.forwarded);
+  const subAccounts = goal.subAccounts;
+  // The target applies to the goal as a whole, regardless of whether it's
+  // forwarded to real sub-accounts.
+  const target = goal.targetAmount ? num(goal.targetAmount) : null;
+  const entryMonthlyAmount = monthlyOf(entry, currentMonthData);
+  // Shown read-only exactly as it's entered in the monthly view (its own
+  // amount + period, e.g. "600 /jr") rather than converted to a monthly
+  // figure — the same value the monthly view itself shows.
+  const formulaActive = Boolean(entry.formula);
+  const entryDisplayAmount = formulaActive ? round2(entryAmount(entry, currentMonthData)) : num(entry.amount);
+  const entryPeriodSuffix = entry.period === "year" ? TXT.periodYearAbbr : TXT.periodMonthAbbr;
+  // Without a separate bank to track, there's still a projection worth
+  // showing by default: a single virtual "account" starting at €0 this
+  // month, growing by the entry's own amount — same machinery, no bank
+  // details needed. Once forwarded, the real (editable) sub-accounts take
+  // over instead. Either way, the recorded balance itself is a single
+  // real observation at the goal level (entered once above, not per bank)
+  // — each account's own checkpoint is that total split by its own share
+  // of the contribution, the same way its share of the monthly
+  // contribution is derived.
+  const effectiveSubAccounts = useMemo(() => {
+    const checkpoints = Object.keys(goal.checkpoints || {}).length ? goal.checkpoints : { [sel]: "0" };
+    const source = forwarded ? subAccounts : [{ id: `self-${entry.id}`, holder: entry.label || TXT.unnamed, sharePercent: "100", interestRate: "" }];
+    return source.map((s) => {
+      const share = s.sharePercent === "" || s.sharePercent == null ? 1 : num(s.sharePercent) / 100;
+      return { ...s, checkpoints: Object.fromEntries(Object.entries(checkpoints).map(([k, v]) => [k, String(num(v) * share)])) };
+    });
+  }, [forwarded, subAccounts, entry.id, entry.label, goal.checkpoints, sel]);
+  // The table starts at the earliest checkpoint among this goal's
+  // accounts — accounts opened later simply show "—" for months before
+  // their own checkpoint.
+  const earliest = useMemo(() => {
+    const allKeys = effectiveSubAccounts.flatMap((s) => Object.keys(s.checkpoints || {})).filter(Boolean).sort();
+    return allKeys[0] || null;
+  }, [effectiveSubAccounts]);
+  const keys = useMemo(() => {
+    if (!earliest) return [];
+    const out = [earliest];
+    let k = earliest;
+    for (let i = 0; i < horizon; i++) { k = shiftMonth(k, 1); out.push(k); }
+    return out;
+  }, [earliest, horizon]);
+  const seriesBySub = useMemo(() => {
+    const map = {};
+    for (const s of effectiveSubAccounts) map[s.id] = projectSubAccountSeries(months, entry.id, s, keys, target);
+    return map;
+  }, [effectiveSubAccounts, months, entry.id, keys, target]);
+  const totalAtEnd = keys.length ? effectiveSubAccounts.reduce((sum, s) => sum + (seriesBySub[s.id][keys[keys.length - 1]]?.balance ?? 0), 0) : 0;
+  const reached = target != null && keys.length > 0 && totalAtEnd >= target;
+  const hasInterest = effectiveSubAccounts.some((s) => num(s.interestRate) > 0);
+  const chartData = useMemo(() => keys.map((k) => {
+    const point = { label: monthShortWithYear(k) };
+    for (const s of effectiveSubAccounts) point[s.id] = seriesBySub[s.id][k]?.balance ?? null;
+    return point;
+  }), [keys, seriesBySub, effectiveSubAccounts]);
+  // Skip ticks so labels never crowd — aim for roughly 8 visible regardless
+  // of how many months the horizon spans.
+  const chartTickInterval = Math.max(0, Math.ceil(chartData.length / 8) - 1);
+
+  // The table is collapsed by default and, once opened, reveals 12 months
+  // at a time rather than the whole (possibly multi-year) range at once.
+  const [tableOpen, setTableOpen] = useState(false);
+  const [visibleMonths, setVisibleMonths] = useState(12);
+  const visibleKeys = keys.slice(0, visibleMonths);
+
+  return (
+    <section style={St.section} className="fade">
+      <div style={St.collapseHead}>
+        <span style={St.savingsGoalName}>{entry.label || TXT.unnamed}</span>
+        <span style={{ flex: 1 }} />
+        {/* Read-only here on purpose — this is the same monthly entry shown
+            in the monthly view, and it should only be editable there. */}
+        <span style={St.savingsGoalAmount} title={TXT.savingsGoalAmountInfo}>{eur(entryDisplayAmount)} {entryPeriodSuffix}</span>
+        <label style={St.goalForwardedToggle} title={TXT.goalForwardedInfo}>
+          <input type="checkbox" checked={forwarded} onChange={(e) => onUpdate({ forwarded: e.target.checked })} />
+          {TXT.goalForwardedLabel}
+        </label>
+      </div>
+
+      {/* The recorded balance and the target apply to the goal as a whole,
+          whether or not it's forwarded to real sub-accounts — a single real
+          observation, not one per bank. */}
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 10 }}>
+        <label style={St.copyRow}>
+          <span style={St.copyLbl}>{TXT.checkpointBalance}</span>
+          <input inputMode="decimal" value={goal.checkpoints?.[sel] ?? ""} placeholder="0,00"
+            onChange={(e) => {
+              const v = e.target.value.replace(/[^0-9.,]/g, "");
+              const next = { ...(goal.checkpoints || {}) };
+              if (v) next[sel] = v; else delete next[sel];
+              onUpdate({ checkpoints: next });
+            }} style={{ ...St.copySel, width: 90 }} />
+        </label>
+        <label style={St.copyRow}>
+          <span style={St.copyLbl}>{TXT.targetAmount}</span>
+          <input inputMode="decimal" value={goal.targetAmount} placeholder={TXT.targetAmountPlaceholder}
+            onChange={(e) => onUpdate({ targetAmount: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 100 }} />
+        </label>
+      </div>
+
+      {forwarded && (
+        <>
+          {subAccounts.map((sub) => (
+            <SubAccountRow key={sub.id} sub={sub} entryMonthlyAmount={entryMonthlyAmount}
+              onChange={(patch) => onUpdateSubAccount(sub.id, patch)}
+              onRemove={() => onRemoveSubAccount(sub.id)} />
+          ))}
+          {subAccounts.length === 0 && <div style={St.copyEmpty}>{TXT.noSubAccounts}</div>}
+          <button type="button" onClick={onAddSubAccount} style={St.addBtn}><Plus size={16} /> {TXT.addSubAccount}</button>
+        </>
+      )}
+
+      {keys.length >= 2 && (
+        <>
+          <ChartTitle>{TXT.savingsChartTitle}</ChartTitle>
+          <div style={St.chartBox}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 6, right: 20, left: -14, bottom: 0 }}>
+                <CartesianGrid stroke={C.line} vertical={false} />
+                <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} interval={chartTickInterval} />
+                <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
+                <Tooltip {...tooltipProps} />
+                {forwarded && <Legend {...legendProps} />}
+                {effectiveSubAccounts.map((s) => (
+                  <Area key={s.id} type="monotone" dataKey={s.id} name={s.holder || TXT.unnamed} stackId="1"
+                    stroke={categoryColor(s.holder || s.id)} fill={categoryColor(s.holder || s.id)} fillOpacity={0.35} />
+                ))}
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
+
+      {keys.length > 0 && (
+        <>
+          <button type="button" onClick={() => setTableOpen((o) => !o)} style={St.detailsBtn} aria-expanded={tableOpen}>
+            {tableOpen ? TXT.hideTable : TXT.showTable}
+            <ChevronDown size={15} style={{ transform: tableOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+          </button>
+          {tableOpen && (
+            <div style={St.savingsTableWrap}>
+              <table style={St.savingsTable}>
+                <thead>
+                  <tr>
+                    <th style={{ ...St.savingsTh, textAlign: "left" }}>{TXT.monthColumn}</th>
+                    <th style={St.savingsTh}>{TXT.combinedTotal}</th>
+                    {forwarded && effectiveSubAccounts.map((s) => <th key={s.id} style={St.savingsTh}>{s.holder || TXT.unnamed}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleKeys.map((k) => {
+                    const values = effectiveSubAccounts.map((s) => seriesBySub[s.id][k]);
+                    const total = values.reduce((sum, v) => sum + (v?.balance ?? 0), 0);
+                    const totalInterest = values.reduce((sum, v) => sum + (v?.interest ?? 0), 0);
+                    return (
+                      <tr key={k}>
+                        <td style={{ ...St.savingsTd, textAlign: "left" }}>{monthLong(k)}</td>
+                        <td style={{ ...St.savingsTd, fontWeight: 700 }}>
+                          {eur(total)}
+                          {hasInterest && <div style={St.savingsTdSub}>{TXT.interestPortion} {eur(totalInterest)}</div>}
+                        </td>
+                        {forwarded && values.map((v, i) => (
+                          <td key={effectiveSubAccounts[i].id} style={St.savingsTd}>
+                            {v != null ? (
+                              <>
+                                {eur(v.balance)}
+                                {hasInterest && num(effectiveSubAccounts[i].interestRate) > 0 && <div style={St.savingsTdSub}>{TXT.interestPortion} {eur(v.interest)}</div>}
+                              </>
+                            ) : "—"}
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {visibleMonths < keys.length && (
+                <button type="button" onClick={() => setVisibleMonths((v) => v + 12)} style={St.addBtn}>{TXT.showMoreMonths}</button>
+              )}
+            </div>
+          )}
+        </>
+      )}
+      {reached && <div style={St.savingsTargetReached}>{TXT.targetReached}</div>}
+    </section>
+  );
+}
+
+// Shared by the sub-account icon fields below: the same hover/click popover
+// mechanics as Note/Link/Correspondent/Duration elsewhere, including the
+// "only close on outside click, never on blur" fix from DurationField (a
+// native date input inside one of these can blur the input while its own
+// calendar overlay is open, which used to auto-close the whole popover).
+function IconPopoverField({ icon: Icon, ariaLabel, active, popStyle, children }) {
+  const [open, setOpen] = useState(false);
+  const editingRef = useRef(false);
+  const timer = useRef(null);
+  const rootRef = useRef(null);
+  const closeNow = () => { clearTimeout(timer.current); editingRef.current = false; setOpen(false); };
+  useClickOutside(rootRef, open, closeNow);
+  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
+  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
+  const markEditing = () => { editingRef.current = true; };
+  return (
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
+      <button type="button" aria-label={ariaLabel}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => { if (o) editingRef.current = false; return !o; }); }}
+        style={{ ...St.iconBtn, color: active ? C.b : C.muted }}>
+        <Icon size={16} />
+      </button>
+      {open && (
+        <span style={mobilePopupStyle({ ...St.notePop, ...popStyle })} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
+          {typeof children === "function" ? children(markEditing) : children}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function SubAccountRow({ sub, entryMonthlyAmount, onChange, onRemove }) {
+  const share = sub.sharePercent === "" || sub.sharePercent == null ? 1 : num(sub.sharePercent) / 100;
+  const preview = entryMonthlyAmount * share;
+
+  return (
+    <div style={St.itemWrap} className="entryWrap">
+      <div className="entry">
+        <span className="e-lead">
+          <span style={{ ...St.catDot, background: categoryColor(sub.holder || sub.id) }} />
+          <input list="banks" aria-label={TXT.subAccountBank} value={sub.bank} placeholder={TXT.subAccountBankPlaceholder}
+            onChange={(e) => onChange({ bank: e.target.value })} style={St.catInput} />
+        </span>
+        <input className="e-desc" aria-label={TXT.subAccountHolder} value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder}
+          onChange={(e) => onChange({ holder: e.target.value })} style={St.nameInput} />
+        <span className="entryActions" style={St.rowActions}>
+          <IconPopoverField icon={Percent} ariaLabel={TXT.subAccountShare} active={num(sub.sharePercent ?? 100) !== 100 || num(sub.interestRate) > 0}>
+            {(markEditing) => (
+              <>
+                <div style={St.copyTitle}>{TXT.subAccountShare}</div>
+                <div style={St.correspondentDocMuted}>{TXT.subAccountShareInfo}</div>
+                <label style={{ ...St.copyRow, marginTop: 8 }}>
+                  <span style={St.copyLbl}>{TXT.subAccountShare}</span>
+                  <input inputMode="numeric" value={sub.sharePercent ?? "100"} placeholder="100" onFocus={markEditing}
+                    onChange={(e) => onChange({ sharePercent: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 60 }} />
+                </label>
+                <div style={St.correspondentDocMuted}>{TXT.subAccountPreview} {eur(preview)} {TXT.perMonth}</div>
+                <label style={{ ...St.copyRow, marginTop: 8 }}>
+                  <span style={St.copyLbl}>{TXT.subAccountInterestRate}</span>
+                  <input inputMode="decimal" value={sub.interestRate} placeholder="0" onFocus={markEditing}
+                    onChange={(e) => onChange({ interestRate: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 70 }} />
+                </label>
+                <div style={St.correspondentDocMuted}>{TXT.subAccountInterestRateInfo}</div>
+              </>
+            )}
+          </IconPopoverField>
+          <IconPopoverField icon={Building2} ariaLabel={TXT.subAccountBankDetails} active={Boolean(sub.iban || sub.planId || sub.referenceId)}>
+            {(markEditing) => (
+              <>
+                <div style={St.copyTitle}>{TXT.subAccountBankDetails}</div>
+                <label style={St.copyRow}>
+                  <span style={St.copyLbl}>{TXT.subAccountIban}</span>
+                  <input value={sub.iban} placeholder={TXT.subAccountIbanPlaceholder} onFocus={markEditing}
+                    onChange={(e) => onChange({ iban: e.target.value })} style={St.copySel} />
+                </label>
+                <label style={St.copyRow}>
+                  <span style={St.copyLbl}>{TXT.subAccountPlanId}</span>
+                  <input value={sub.planId} placeholder={TXT.subAccountPlanIdPlaceholder} onFocus={markEditing}
+                    onChange={(e) => onChange({ planId: e.target.value })} style={St.copySel} />
+                </label>
+                <label style={St.copyRow}>
+                  <span style={St.copyLbl}>{TXT.subAccountReference}</span>
+                  <input value={sub.referenceId} placeholder={TXT.subAccountReferencePlaceholder} onFocus={markEditing}
+                    onChange={(e) => onChange({ referenceId: e.target.value })} style={St.copySel} />
+                </label>
+              </>
+            )}
+          </IconPopoverField>
+          <button type="button" aria-label={TXT.delete} onClick={onRemove} style={St.iconBtn}><Trash2 size={16} /></button>
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -1926,6 +2421,18 @@ const St = {
   copySel: { maxWidth: 134, fontSize: 13, padding: "5px 6px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.card, color: C.ink, fontFamily: "inherit" },
   copyApply: { width: "100%", border: "none", background: C.b, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "8px 10px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", marginTop: 2 },
   copyEmpty: { fontSize: 12.5, color: C.muted, lineHeight: 1.45 },
+
+  savingsPageHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 4 },
+  savingsHorizon: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.muted, fontWeight: 600 },
+  savingsGoalName: { fontWeight: 700, fontSize: 15, padding: "8px 2px" },
+  savingsGoalAmount: { fontSize: 15, fontWeight: 600, color: C.ink, fontVariantNumeric: "tabular-nums", padding: "8px 4px", cursor: "default" },
+  goalForwardedToggle: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.muted, fontWeight: 600, cursor: "pointer", marginLeft: 14, whiteSpace: "nowrap" },
+  savingsTableWrap: { overflowX: "auto", marginTop: 14 },
+  savingsTable: { width: "100%", borderCollapse: "collapse", fontSize: 13, whiteSpace: "nowrap" },
+  savingsTh: { textAlign: "right", padding: "6px 10px", color: C.muted, fontWeight: 600, borderBottom: `1px solid ${C.line}`, position: "sticky", top: 0, background: C.card },
+  savingsTd: { textAlign: "right", padding: "5px 10px", color: C.ink, fontVariantNumeric: "tabular-nums", borderBottom: `1px solid ${C.line}` },
+  savingsTdSub: { fontSize: 10.5, fontWeight: 500, color: C.muted },
+  savingsTargetReached: { marginTop: 10, fontSize: 12.5, fontWeight: 600, color: C.save },
 };
 
 // Global CSS: fonts, input focus states, popovers and the mobile (≤560px) card layout.
