@@ -270,12 +270,22 @@ function listSortOf(raw) {
 // it's read live from the linked savings entry (see monthlyContributionAt),
 // so the balance projection always reflects whatever that entry's amount
 // currently is, in every month, without duplicating the figure.
+// A recorded actual balance for one month ("checkpoint"). Kept as a map of
+// month key -> balance rather than a single value, so correcting the balance
+// in a later month (e.g. extra money got deposited) doesn't erase an earlier
+// month's own recorded value — each month's correction stands on its own,
+// in the data and in the graph.
+function migrateCheckpoints(o) {
+  if (o.checkpoints && typeof o.checkpoints === "object") return { ...o.checkpoints };
+  if (o.checkpointMonth) return { [o.checkpointMonth]: o.checkpointBalance ?? "" };
+  return {};
+}
 function migrateSubAccount(s) {
   return {
     id: s.id || uid(), holder: s.holder || "", bank: s.bank || "", iban: s.iban || "",
     planId: s.planId || "", referenceId: s.referenceId || "",
     sharePercent: s.sharePercent ?? "100", interestRate: s.interestRate ?? "",
-    checkpointMonth: s.checkpointMonth || "", checkpointBalance: s.checkpointBalance ?? "",
+    checkpoints: migrateCheckpoints(s),
   };
 }
 // A goal is derived 1:1 from a monthly savings entry (see
@@ -289,9 +299,9 @@ function migrateGoal(g) {
   return {
     entryId, targetAmount: g.targetAmount ?? "",
     forwarded: g.forwarded ?? Boolean((g.subAccounts || []).length),
-    // Used for the simple (not-forwarded) projection only — a starting
-    // balance + month so the graph doesn't have to assume €0 today.
-    checkpointMonth: g.checkpointMonth || "", checkpointBalance: g.checkpointBalance ?? "",
+    // Used for the simple (not-forwarded) projection only — recorded actual
+    // balances per month, so the graph doesn't have to assume €0 today.
+    checkpoints: migrateCheckpoints(g),
     subAccounts: (g.subAccounts || []).map(migrateSubAccount),
   };
 }
@@ -328,10 +338,13 @@ function monthlyContributionAt(months, entryId, key) {
   return e ? monthlyOf(e, months[refKey]) : 0;
 }
 // Projects a sub-account's balance across `keys` (sorted, ascending month
-// keys), starting from its own checkpoint. Never recomputes months before or
-// at the checkpoint — those are the recorded, real balance. Once a target
-// amount is reached the balance is capped there and stops growing further,
-// mirroring a goal whose contributions stop once it's fully funded.
+// keys), starting from its earliest recorded checkpoint. Never recomputes a
+// checkpointed month itself — that's the recorded, real balance — and a
+// later checkpoint (e.g. a correction after extra money was deposited)
+// overrides the running total from that month on without touching any
+// earlier month's own recorded value. Once a target amount is reached the
+// balance is capped there and stops growing further, mirroring a goal whose
+// contributions stop once it's fully funded.
 // Returns, per month key, { balance, interest } — interest is the portion of
 // that balance built up from the (optional) annual interest rate so far, so
 // the overview can show how much is interest versus the holder's own
@@ -340,26 +353,33 @@ function monthlyContributionAt(months, entryId, key) {
 // savings accounts quote and apply a rate.
 function projectSubAccountSeries(months, entryId, subAccount, keys, target) {
   const out = {};
-  if (!subAccount.checkpointMonth) return out;
+  const checkpoints = subAccount.checkpoints || {};
+  const checkpointKeys = Object.keys(checkpoints).filter((k) => checkpoints[k] !== "" && checkpoints[k] != null).sort();
+  if (!checkpointKeys.length) return out;
   // A goal's monthly contribution can be split across several sub-accounts
   // (e.g. different banks) by percentage, rather than each needing its own
   // dedicated savings entry — all sub-accounts under one goal share the same
   // (goal-level) entryId.
   const share = subAccount.sharePercent === "" || subAccount.sharePercent == null ? 1 : num(subAccount.sharePercent) / 100;
   const monthlyRate = subAccount.interestRate ? num(subAccount.interestRate) / 100 / 12 : 0;
-  let principal = num(subAccount.checkpointBalance);
+  const firstCheckpoint = checkpointKeys[0];
+  let principal = num(checkpoints[firstCheckpoint]);
   let interest = 0;
-  let k = subAccount.checkpointMonth;
+  let k = firstCheckpoint;
   // Once the target is reached, both stop growing — the total can overshoot
   // the target by at most one month's contribution + interest, kept simple
   // on purpose so balance always equals principal + interest exactly.
   let capped = target != null && principal >= target;
   out[k] = { balance: principal + interest, interest };
   for (const key of keys) {
-    if (key <= subAccount.checkpointMonth) continue;
+    if (key <= firstCheckpoint) continue;
     while (k < key) {
       k = shiftMonth(k, 1);
-      if (!capped) {
+      if (checkpoints[k] !== undefined && checkpoints[k] !== "") {
+        principal = num(checkpoints[k]);
+        interest = 0;
+        capped = target != null && principal >= target;
+      } else if (!capped) {
         interest += (principal + interest) * monthlyRate;
         principal += monthlyContributionAt(months, entryId, k) * share;
         if (target != null && principal + interest >= target) capped = true;
@@ -764,10 +784,10 @@ export default function App() {
   const mapGoals = (d, entryId, fn) => {
     const goals = d.savingsGoals || [];
     if (goals.some((g) => g.entryId === entryId)) return goals.map((g) => g.entryId === entryId ? fn(g) : g);
-    return [...goals, fn({ entryId, targetAmount: "", forwarded: false, checkpointMonth: "", checkpointBalance: "", subAccounts: [] })];
+    return [...goals, fn({ entryId, targetAmount: "", forwarded: false, checkpoints: {}, subAccounts: [] })];
   };
   const updateGoal = (entryId, patch) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, ...patch })) }));
-  const addSubAccount = (entryId) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", checkpointMonth: "", checkpointBalance: "" }] })) }));
+  const addSubAccount = (entryId) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", checkpoints: {} }] })) }));
   const removeSubAccount = (entryId, subId) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
   const updateSubAccount = (entryId, subId, patch) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
   // Reset the selected month: take over the figures of the nearest earlier
@@ -1533,7 +1553,7 @@ function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMont
       </div>
       {savingsEntries.length === 0 && <div style={St.copyEmpty}>{TXT.noSavingsGoals}</div>}
       {savingsEntries.map((entry) => {
-        const goal = savingsGoals.find((g) => g.entryId === entry.id) || { entryId: entry.id, targetAmount: "", forwarded: false, checkpointMonth: "", checkpointBalance: "", subAccounts: [] };
+        const goal = savingsGoals.find((g) => g.entryId === entry.id) || { entryId: entry.id, targetAmount: "", forwarded: false, checkpoints: {}, subAccounts: [] };
         return (
           <SavingsGoalCard key={entry.id} entry={entry} goal={goal} months={months} currentMonthData={currentMonthData} sel={sel} horizon={horizon}
             onUpdate={(patch) => onUpdateGoal(entry.id, patch)}
@@ -1569,15 +1589,15 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
   const effectiveSubAccounts = useMemo(() => (
     forwarded ? subAccounts : [{
       id: `self-${entry.id}`, holder: entry.label || TXT.unnamed, sharePercent: "100", interestRate: "",
-      checkpointMonth: goal.checkpointMonth || sel, checkpointBalance: goal.checkpointBalance || "0",
+      checkpoints: Object.keys(goal.checkpoints || {}).length ? goal.checkpoints : { [sel]: "0" },
     }]
-  ), [forwarded, subAccounts, entry.id, entry.label, goal.checkpointMonth, goal.checkpointBalance, sel]);
+  ), [forwarded, subAccounts, entry.id, entry.label, goal.checkpoints, sel]);
   // The table starts at the earliest checkpoint among this goal's
   // accounts — accounts opened later simply show "—" for months before
   // their own checkpoint.
   const earliest = useMemo(() => {
-    const checkpoints = effectiveSubAccounts.map((s) => s.checkpointMonth).filter(Boolean).sort();
-    return checkpoints[0] || null;
+    const allKeys = effectiveSubAccounts.flatMap((s) => Object.keys(s.checkpoints || {})).filter(Boolean).sort();
+    return allKeys[0] || null;
   }, [effectiveSubAccounts]);
   const keys = useMemo(() => {
     if (!earliest) return [];
@@ -1627,8 +1647,13 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 10 }}>
           <label style={St.copyRow}>
             <span style={St.copyLbl}>{TXT.checkpointBalance}</span>
-            <input inputMode="decimal" value={goal.checkpointBalance} placeholder="0,00"
-              onChange={(e) => onUpdate({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, ""), checkpointMonth: sel })} style={{ ...St.copySel, width: 90 }} />
+            <input inputMode="decimal" value={goal.checkpoints?.[sel] ?? ""} placeholder="0,00"
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^0-9.,]/g, "");
+                const next = { ...(goal.checkpoints || {}) };
+                if (v) next[sel] = v; else delete next[sel];
+                onUpdate({ checkpoints: next });
+              }} style={{ ...St.copySel, width: 90 }} />
           </label>
         </div>
       )}
@@ -1761,6 +1786,8 @@ function IconPopoverField({ icon: Icon, ariaLabel, active, popStyle, children })
 function SubAccountRow({ sub, entryMonthlyAmount, sel, onChange, onRemove }) {
   const share = sub.sharePercent === "" || sub.sharePercent == null ? 1 : num(sub.sharePercent) / 100;
   const preview = entryMonthlyAmount * share;
+  const checkpointValue = sub.checkpoints?.[sel] ?? "";
+  const hasCheckpoints = Boolean(sub.checkpoints && Object.keys(sub.checkpoints).length);
 
   return (
     <div style={St.itemWrap} className="entryWrap">
@@ -1793,15 +1820,20 @@ function SubAccountRow({ sub, entryMonthlyAmount, sel, onChange, onRemove }) {
               </>
             )}
           </IconPopoverField>
-          <IconPopoverField icon={CalendarClock} ariaLabel={TXT.checkpointBalance} active={Boolean(sub.checkpointBalance)}>
+          <IconPopoverField icon={CalendarClock} ariaLabel={TXT.checkpointBalance} active={hasCheckpoints}>
             {(markEditing) => (
               <>
                 <div style={St.copyTitle}>{TXT.checkpointBalance}</div>
                 <div style={St.correspondentDocMuted}>{TXT.checkpointInfo}</div>
                 <label style={{ ...St.copyRow, marginTop: 8 }}>
                   <span style={St.copyLbl}>{TXT.checkpointBalance}</span>
-                  <input inputMode="decimal" value={sub.checkpointBalance} placeholder="0,00" onFocus={markEditing}
-                    onChange={(e) => onChange({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, ""), checkpointMonth: sel })} style={{ ...St.copySel, width: 90 }} />
+                  <input inputMode="decimal" value={checkpointValue} placeholder="0,00" onFocus={markEditing}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^0-9.,]/g, "");
+                      const next = { ...(sub.checkpoints || {}) };
+                      if (v) next[sel] = v; else delete next[sel];
+                      onChange({ checkpoints: next });
+                    }} style={{ ...St.copySel, width: 90 }} />
                 </label>
               </>
             )}
