@@ -307,7 +307,17 @@ function groupByCategory(list, monthData) {
 // so leftover/unallocated amounts are clamped to ≥0 and zero-value links are
 // skipped outright — a negative leftover is already surfaced elsewhere (the
 // red LeftoverCard).
-function buildCashflow(cur, calc) {
+//
+// `detail` controls how far the graph is exploded, each level a strict
+// superset of the previous one's nodes/links (so switching levels never
+// reshuffles the diagram, it only adds or removes leaves):
+//   1 — totals only: salary/contribution/leftover per person, gov, pot,
+//       and expenses/savings/buffer as single totals.
+//   2 — level 1, plus expenses and savings broken into their own
+//       categories/entries.
+//   3 — level 2, plus each person's leftover broken into their personal
+//       expense categories + whatever's unallocated.
+function buildCashflow(cur, calc, detail) {
   const nodes = [];
   const links = [];
   const indexOf = new Map();
@@ -347,39 +357,43 @@ function buildCashflow(cur, calc) {
     const leftover = Math.max(0, calc.leftovers[p.id] || 0);
     addLink(salaryKey, leftoverKey, leftover);
 
-    // Personal expenses, grouped by category, funded from this person's own
-    // leftover; whatever isn't tracked stays "unallocated" — the last known
-    // place this model can follow that money to.
-    let personalSum = 0;
-    for (const [cat, amount] of groupByCategory(cur.personalExpenses[p.id] || [], cur)) {
-      if (!(amount > 0)) continue;
-      personalSum += amount;
-      const catKey = `personal-${p.id}-${cat}`;
-      addNode(catKey, cat, categoryColor(cat));
-      addLink(leftoverKey, catKey, amount);
-    }
-    const unallocated = Math.max(0, leftover - personalSum);
-    if (unallocated > 0) {
-      const unallocatedKey = `unallocated-${p.id}`;
-      addNode(unallocatedKey, t(LANG, "cashflowUnallocated", { name }), color);
-      addLink(leftoverKey, unallocatedKey, unallocated);
+    if (detail >= 3) {
+      // Personal expenses, grouped by category, funded from this person's own
+      // leftover; whatever isn't tracked stays "unallocated" — the last known
+      // place this model can follow that money to.
+      let personalSum = 0;
+      for (const [cat, amount] of groupByCategory(cur.personalExpenses[p.id] || [], cur)) {
+        if (!(amount > 0)) continue;
+        personalSum += amount;
+        const catKey = `personal-${p.id}-${cat}`;
+        addNode(catKey, cat, categoryColor(cat));
+        addLink(leftoverKey, catKey, amount);
+      }
+      const unallocated = Math.max(0, leftover - personalSum);
+      if (unallocated > 0) {
+        const unallocatedKey = `unallocated-${p.id}`;
+        addNode(unallocatedKey, t(LANG, "cashflowUnallocated", { name }), color);
+        addLink(leftoverKey, unallocatedKey, unallocated);
+      }
     }
   });
 
-  for (const [cat, amount] of groupByCategory(cur.expenses, cur)) {
-    if (!(amount > 0)) continue;
-    const catKey = `exp-${cat}`;
-    addNode(catKey, cat, categoryColor(cat));
-    addLink(expKey, catKey, amount);
-  }
+  if (detail >= 2) {
+    for (const [cat, amount] of groupByCategory(cur.expenses, cur)) {
+      if (!(amount > 0)) continue;
+      const catKey = `exp-${cat}`;
+      addNode(catKey, cat, categoryColor(cat));
+      addLink(expKey, catKey, amount);
+    }
 
-  for (const s of cur.savings) {
-    const amount = monthlyOf(s, cur);
-    if (!(amount > 0)) continue;
-    const label = s.label || TXT.unnamed;
-    const saveEntryKey = `save-${s.id}`;
-    addNode(saveEntryKey, label, categoryColor(label));
-    addLink(saveKey, saveEntryKey, amount);
+    for (const s of cur.savings) {
+      const amount = monthlyOf(s, cur);
+      if (!(amount > 0)) continue;
+      const label = s.label || TXT.unnamed;
+      const saveEntryKey = `save-${s.id}`;
+      addNode(saveEntryKey, label, categoryColor(label));
+      addLink(saveKey, saveEntryKey, amount);
+    }
   }
 
   addLink(potKey, expKey, calc.expensesTotal);
@@ -1995,16 +2009,28 @@ function SankeyNode({ x, y, width, height, payload, containerWidth }) {
   );
 }
 
+const CASHFLOW_DETAIL_LABELS = { 1: "cashflowDetailTotals", 2: "cashflowDetailCategories", 3: "cashflowDetailFull" };
 // First-draft cashflow view: traces salary → household pot/personal leftover
 // → expenses/savings/buffer or personal spending → the last known category
 // or entry, for whichever month is selected. Purely derived from `cur`/
-// `calc` — no new data, no mutations.
+// `calc` — no new data, no mutations. Starts at the least detailed level;
+// the diagram gets busy fast once categories/entries are exploded, so more
+// detail is opt-in rather than the default.
 function CashflowPage({ cur, calc }) {
-  const { nodes, links } = useMemo(() => buildCashflow(cur, calc), [cur, calc]);
+  const [detail, setDetail] = useState(1);
+  const { nodes, links } = useMemo(() => buildCashflow(cur, calc, detail), [cur, calc, detail]);
   return (
     <div className="fade">
       <ColTitle>{TXT.cashflowView}</ColTitle>
       <div style={St.correspondentDocMuted}>{TXT.cashflowHint}</div>
+      <div style={{ ...St.sortRow, marginTop: 10 }}>
+        <span style={St.sortLabel}>{TXT.cashflowDetailLabel}</span>
+        <div style={St.toggle} role="group" aria-label={TXT.cashflowDetailLabel}>
+          {[1, 2, 3].map((lvl) => (
+            <button key={lvl} type="button" onClick={() => setDetail(lvl)} style={{ ...St.toggleBtn, ...(detail === lvl ? St.toggleOn : {}) }}>{TXT[CASHFLOW_DETAIL_LABELS[lvl]]}</button>
+          ))}
+        </div>
+      </div>
       {links.length === 0 ? (
         <div style={St.emptyHist}>
           <TrendingUp size={18} style={{ color: C.muted }} />
