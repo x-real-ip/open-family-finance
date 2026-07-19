@@ -520,6 +520,15 @@ export default function App() {
     return [...set].sort();
   }, [data.months]);
 
+  // Bank suggestions for savings sub-accounts: every bank name already typed
+  // across any goal, so a second account at the same bank doesn't need
+  // retyping it — same idea as the category/correspondent datalists.
+  const banks = useMemo(() => {
+    const set = new Set();
+    for (const g of data.savingsGoals || []) for (const s of g.subAccounts) if (s.bank) set.add(s.bank);
+    return [...set].sort();
+  }, [data.savingsGoals]);
+
   // Correspondent suggestions: paperless-ngx's list (if the integration is on)
   // plus anything already typed across all months, so the field stays useful
   // even offline or with values paperless doesn't know about.
@@ -772,6 +781,7 @@ export default function App() {
       <style>{CSS}</style>
       <datalist id="cats">{categories.map((c) => <option key={c} value={c} />)}</datalist>
       {PAPERLESS_ENABLED && <datalist id="correspondents">{correspondents.map((c) => <option key={c} value={c} />)}</datalist>}
+      <datalist id="banks">{banks.map((b) => <option key={b} value={b} />)}</datalist>
 
       <div style={St.shell} className="shell">
         {contractWarnings.length > 0 && (
@@ -1684,7 +1694,7 @@ function SubAccountRow({ sub, savingsEntries, currentMonthData, sel, onChange, o
       <div className="entry">
         <span className="e-lead">
           <span style={{ ...St.catDot, background: categoryColor(sub.holder || sub.id) }} />
-          <input aria-label={TXT.subAccountBank} value={sub.bank} placeholder={TXT.subAccountBankPlaceholder}
+          <input list="banks" aria-label={TXT.subAccountBank} value={sub.bank} placeholder={TXT.subAccountBankPlaceholder}
             onChange={(e) => onChange({ bank: e.target.value })} style={St.catInput} />
         </span>
         <input className="e-desc" aria-label={TXT.subAccountHolder} value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder}
