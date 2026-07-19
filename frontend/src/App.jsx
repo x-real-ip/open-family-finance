@@ -1879,8 +1879,20 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
     for (const s of effectiveSubAccounts) map[s.id] = projectSubAccountSeries(months, entry.id, s, keys, target);
     return map;
   }, [effectiveSubAccounts, months, entry.id, keys, target]);
-  const totalAtEnd = keys.length ? effectiveSubAccounts.reduce((sum, s) => sum + (seriesBySub[s.id][keys[keys.length - 1]]?.balance ?? 0), 0) : 0;
-  const reached = target != null && keys.length > 0 && totalAtEnd >= target;
+  // The first month (if any) whose projected total actually crosses the
+  // target — not just "reached somewhere within the horizon". "Reached" is
+  // only true once the month you're currently viewing (sel) is at or after
+  // that month, so the badge doesn't show up while browsing months that are
+  // still short of it, just because a later projected month gets there.
+  const reachedMonth = useMemo(() => {
+    if (target == null) return null;
+    for (const k of keys) {
+      const total = effectiveSubAccounts.reduce((sum, s) => sum + (seriesBySub[s.id][k]?.balance ?? 0), 0);
+      if (total >= target) return k;
+    }
+    return null;
+  }, [keys, seriesBySub, effectiveSubAccounts, target]);
+  const reached = reachedMonth != null && sel >= reachedMonth;
   const hasInterest = effectiveSubAccounts.some((s) => num(s.interestRate) > 0);
   const chartData = useMemo(() => keys.map((k) => {
     const point = { label: monthShortWithYear(k) };
@@ -1992,9 +2004,13 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
                     const values = effectiveSubAccounts.map((s) => seriesBySub[s.id][k]);
                     const total = values.reduce((sum, v) => sum + (v?.balance ?? 0), 0);
                     const totalInterest = values.reduce((sum, v) => sum + (v?.interest ?? 0), 0);
+                    const isReachedMonth = k === reachedMonth;
                     return (
-                      <tr key={k}>
-                        <td style={{ ...St.savingsTd, textAlign: "left" }}>{monthLong(k)}</td>
+                      <tr key={k} style={isReachedMonth ? St.savingsTrReached : undefined}>
+                        <td style={{ ...St.savingsTd, textAlign: "left" }}>
+                          {monthLong(k)}
+                          {isReachedMonth && <Check size={14} style={{ color: C.save, verticalAlign: "-2px", marginLeft: 6 }} title={TXT.targetReached} />}
+                        </td>
                         <td style={{ ...St.savingsTd, fontWeight: 700 }}>
                           {eur(total)}
                           {hasInterest && <div style={St.savingsTdSub}>{TXT.interestPortion} {eur(totalInterest)}</div>}
@@ -2728,6 +2744,7 @@ const St = {
   savingsTh: { textAlign: "right", padding: "6px 10px", color: C.muted, fontWeight: 600, borderBottom: `1px solid ${C.line}`, position: "sticky", top: 0, background: C.card },
   savingsTd: { textAlign: "right", padding: "5px 10px", color: C.ink, fontVariantNumeric: "tabular-nums", borderBottom: `1px solid ${C.line}` },
   savingsTdSub: { fontSize: 10.5, fontWeight: 500, color: C.muted },
+  savingsTrReached: { background: `color-mix(in srgb, ${C.save} 10%, transparent)` },
   savingsTargetReached: { marginTop: 10, fontSize: 12.5, fontWeight: 600, color: C.save },
 };
 
