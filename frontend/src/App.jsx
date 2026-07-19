@@ -272,14 +272,23 @@ function listSortOf(raw) {
 // currently is, in every month, without duplicating the figure.
 function migrateSubAccount(s) {
   return {
-    id: s.id || uid(), holder: s.holder || "", bank: s.bank || "", iban: s.iban || "", planId: s.planId || "",
-    entryId: s.entryId || null, sharePercent: s.sharePercent ?? "100", interestRate: s.interestRate ?? "",
+    id: s.id || uid(), holder: s.holder || "", bank: s.bank || "", iban: s.iban || "",
+    planId: s.planId || "", referenceId: s.referenceId || "",
+    sharePercent: s.sharePercent ?? "100", interestRate: s.interestRate ?? "",
     checkpointMonth: s.checkpointMonth || "", checkpointBalance: s.checkpointBalance ?? "",
   };
 }
+// A goal is derived 1:1 from a monthly savings entry (see
+// SavingsOverviewPage) rather than freely created. Older blobs let each
+// sub-account link its own entry and gave the goal a free-typed name —
+// fold that into a single entryId per goal (best-effort, from whichever
+// sub-account had one); goals that never had one don't correspond to
+// anything in the current model and are dropped in normalize() below.
 function migrateGoal(g) {
+  const entryId = g.entryId || (g.subAccounts || []).find((s) => s.entryId)?.entryId || null;
   return {
-    id: g.id || uid(), name: g.name || "", targetAmount: g.targetAmount ?? "",
+    entryId, targetAmount: g.targetAmount ?? "",
+    forwarded: g.forwarded ?? Boolean((g.subAccounts || []).length),
     subAccounts: (g.subAccounts || []).map(migrateSubAccount),
   };
 }
@@ -290,7 +299,7 @@ function normalize(raw) {
     const months = {}; for (const [k, v] of Object.entries(raw.months)) months[k] = migrateFig(v);
     // expenseSort: kept for compatibility with blobs saved by an earlier version of this feature.
     const sortSource = raw.listSort || (raw.expenseSort ? { expenses: raw.expenseSort } : null);
-    return { selectedMonth: raw.selectedMonth, months, log: raw.log || [], listSort: listSortOf(sortSource), savingsGoals: (raw.savingsGoals || []).map(migrateGoal) };
+    return { selectedMonth: raw.selectedMonth, months, log: raw.log || [], listSort: listSortOf(sortSource), savingsGoals: (raw.savingsGoals || []).map(migrateGoal).filter((g) => g.entryId) };
   }
   if (raw.partners) { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: migrateFig(raw) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [] }; }
   return freshData();
@@ -326,12 +335,13 @@ function monthlyContributionAt(months, entryId, key) {
 // contributions (balance - interest). Interest compounds monthly on the
 // running balance (nominal annual rate ÷ 12), which is the standard way
 // savings accounts quote and apply a rate.
-function projectSubAccountSeries(months, subAccount, keys, target) {
+function projectSubAccountSeries(months, entryId, subAccount, keys, target) {
   const out = {};
   if (!subAccount.checkpointMonth) return out;
   // A goal's monthly contribution can be split across several sub-accounts
   // (e.g. different banks) by percentage, rather than each needing its own
-  // dedicated savings entry.
+  // dedicated savings entry — all sub-accounts under one goal share the same
+  // (goal-level) entryId.
   const share = subAccount.sharePercent === "" || subAccount.sharePercent == null ? 1 : num(subAccount.sharePercent) / 100;
   const monthlyRate = subAccount.interestRate ? num(subAccount.interestRate) / 100 / 12 : 0;
   let principal = num(subAccount.checkpointBalance);
@@ -348,7 +358,7 @@ function projectSubAccountSeries(months, subAccount, keys, target) {
       k = shiftMonth(k, 1);
       if (!capped) {
         interest += (principal + interest) * monthlyRate;
-        principal += monthlyContributionAt(months, subAccount.entryId, k) * share;
+        principal += monthlyContributionAt(months, entryId, k) * share;
         if (target != null && principal + interest >= target) capped = true;
       }
     }
@@ -743,12 +753,20 @@ export default function App() {
 
   // Savings goals aren't month-scoped, so they're mutated directly rather
   // than through editForward/forward-propagation.
-  const addSavingsGoal = () => setData((d) => ({ ...d, savingsGoals: [...(d.savingsGoals || []), { id: uid(), name: "", targetAmount: "", subAccounts: [] }] }));
-  const removeSavingsGoal = (goalId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.filter((g) => g.id !== goalId) }));
-  const updateSavingsGoal = (goalId, patch) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, ...patch } : g) }));
-  const addSubAccount = (goalId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", entryId: null, sharePercent: "100", interestRate: "", checkpointMonth: "", checkpointBalance: "" }] } : g) }));
-  const removeSubAccount = (goalId, subId) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
-  const updateSubAccount = (goalId, subId, patch) => setData((d) => ({ ...d, savingsGoals: d.savingsGoals.map((g) => g.id === goalId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
+  // Goals are keyed by the monthly savings entry they belong to (see
+  // SavingsOverviewPage) rather than freely created, so there's no separate
+  // "add goal" step — a goal record is created on first use (setting the
+  // "forwarded" flag or adding a sub-account) and simply doesn't exist until
+  // then; SavingsOverviewPage falls back to sensible defaults meanwhile.
+  const mapGoals = (d, entryId, fn) => {
+    const goals = d.savingsGoals || [];
+    if (goals.some((g) => g.entryId === entryId)) return goals.map((g) => g.entryId === entryId ? fn(g) : g);
+    return [...goals, fn({ entryId, targetAmount: "", forwarded: false, subAccounts: [] })];
+  };
+  const updateGoal = (entryId, patch) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, ...patch })) }));
+  const addSubAccount = (entryId) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", checkpointMonth: "", checkpointBalance: "" }] })) }));
+  const removeSubAccount = (entryId, subId) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
+  const updateSubAccount = (entryId, subId, patch) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
   // Reset the selected month: take over the figures of the nearest earlier
   // month and clear this month's overrides, so it follows the baseline again.
   // Without an earlier month it falls back to the empty defaults.
@@ -832,14 +850,12 @@ export default function App() {
 
         {view === "savings" ? (
           <SavingsOverviewPage
-            goals={data.savingsGoals || []}
+            savingsGoals={data.savingsGoals || []}
             months={data.months}
             savingsEntries={cur.savings}
             currentMonthData={cur}
             sel={sel}
-            onAddGoal={addSavingsGoal}
-            onRemoveGoal={removeSavingsGoal}
-            onUpdateGoal={updateSavingsGoal}
+            onUpdateGoal={updateGoal}
             onAddSubAccount={addSubAccount}
             onRemoveSubAccount={removeSubAccount}
             onUpdateSubAccount={updateSubAccount}
@@ -1496,7 +1512,7 @@ function DurationField({ entry, onChange }) {
 // Spaaroverzicht: savings goals with one or more sub-accounts (bank/IBAN/plan
 // ID), each linked to an existing savings entry for its monthly contribution,
 // and projected forward from a recorded checkpoint balance.
-function SavingsOverviewPage({ goals, months, savingsEntries, currentMonthData, sel, onAddGoal, onRemoveGoal, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount, onEntryAmountChange, onEntryPeriodToggle, onLogChange }) {
+function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMonthData, sel, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount, onEntryAmountChange, onEntryPeriodToggle, onLogChange }) {
   const [horizon, setHorizon] = useState(24);
   return (
     <div className="fade">
@@ -1509,33 +1525,38 @@ function SavingsOverviewPage({ goals, months, savingsEntries, currentMonthData, 
           </select>
         </label>
       </div>
-      {goals.length === 0 && <div style={St.copyEmpty}>{TXT.noSavingsGoals}</div>}
-      {goals.map((goal) => (
-        <SavingsGoalCard key={goal.id} goal={goal} months={months} savingsEntries={savingsEntries} currentMonthData={currentMonthData} sel={sel} horizon={horizon}
-          onRemove={() => onRemoveGoal(goal.id)}
-          onUpdate={(patch) => onUpdateGoal(goal.id, patch)}
-          onAddSubAccount={() => onAddSubAccount(goal.id)}
-          onRemoveSubAccount={(subId) => onRemoveSubAccount(goal.id, subId)}
-          onUpdateSubAccount={(subId, patch) => onUpdateSubAccount(goal.id, subId, patch)}
-          onEntryAmountChange={onEntryAmountChange}
-          onEntryPeriodToggle={onEntryPeriodToggle}
-          onLogChange={onLogChange}
-        />
-      ))}
-      <button type="button" onClick={onAddGoal} style={St.addBtn}><Plus size={16} /> {TXT.addSavingsGoal}</button>
+      {savingsEntries.length === 0 && <div style={St.copyEmpty}>{TXT.noSavingsGoals}</div>}
+      {savingsEntries.map((entry) => {
+        const goal = savingsGoals.find((g) => g.entryId === entry.id) || { entryId: entry.id, targetAmount: "", forwarded: false, subAccounts: [] };
+        return (
+          <SavingsGoalCard key={entry.id} entry={entry} goal={goal} months={months} currentMonthData={currentMonthData} sel={sel} horizon={horizon}
+            onUpdate={(patch) => onUpdateGoal(entry.id, patch)}
+            onAddSubAccount={() => onAddSubAccount(entry.id)}
+            onRemoveSubAccount={(subId) => onRemoveSubAccount(entry.id, subId)}
+            onUpdateSubAccount={(subId, patch) => onUpdateSubAccount(entry.id, subId, patch)}
+            onEntryAmountChange={onEntryAmountChange}
+            onEntryPeriodToggle={onEntryPeriodToggle}
+            onLogChange={onLogChange}
+          />
+        );
+      })}
     </div>
   );
 }
 
-function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, sel, horizon, onRemove, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount, onEntryAmountChange, onEntryPeriodToggle, onLogChange }) {
+function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount, onEntryAmountChange, onEntryPeriodToggle, onLogChange }) {
+  const formulaActive = Boolean(entry.formula);
+  const forwarded = Boolean(goal.forwarded);
+  const subAccounts = goal.subAccounts;
   const target = goal.targetAmount ? num(goal.targetAmount) : null;
+  const entryMonthlyAmount = monthlyOf(entry, currentMonthData);
   // The table starts at the earliest checkpoint among this goal's
   // sub-accounts — accounts opened later simply show "—" for months before
   // their own checkpoint.
   const earliest = useMemo(() => {
-    const checkpoints = goal.subAccounts.map((s) => s.checkpointMonth).filter(Boolean).sort();
+    const checkpoints = subAccounts.map((s) => s.checkpointMonth).filter(Boolean).sort();
     return checkpoints[0] || null;
-  }, [goal.subAccounts]);
+  }, [subAccounts]);
   const keys = useMemo(() => {
     if (!earliest) return [];
     const out = [earliest];
@@ -1545,105 +1566,134 @@ function SavingsGoalCard({ goal, months, savingsEntries, currentMonthData, sel, 
   }, [earliest, horizon]);
   const seriesBySub = useMemo(() => {
     const map = {};
-    for (const s of goal.subAccounts) map[s.id] = projectSubAccountSeries(months, s, keys, target);
+    for (const s of subAccounts) map[s.id] = projectSubAccountSeries(months, entry.id, s, keys, target);
     return map;
-  }, [goal.subAccounts, months, keys, target]);
-  const totalAtEnd = keys.length ? goal.subAccounts.reduce((sum, s) => sum + (seriesBySub[s.id][keys[keys.length - 1]]?.balance ?? 0), 0) : 0;
+  }, [subAccounts, months, entry.id, keys, target]);
+  const totalAtEnd = keys.length ? subAccounts.reduce((sum, s) => sum + (seriesBySub[s.id][keys[keys.length - 1]]?.balance ?? 0), 0) : 0;
   const reached = target != null && keys.length > 0 && totalAtEnd >= target;
-  const hasInterest = goal.subAccounts.some((s) => num(s.interestRate) > 0);
+  const hasInterest = subAccounts.some((s) => num(s.interestRate) > 0);
   const chartData = useMemo(() => keys.map((k) => {
     const point = { label: monthShortWithYear(k) };
-    for (const s of goal.subAccounts) point[s.id] = seriesBySub[s.id][k]?.balance ?? null;
+    for (const s of subAccounts) point[s.id] = seriesBySub[s.id][k]?.balance ?? null;
     return point;
-  }), [keys, seriesBySub, goal.subAccounts]);
+  }), [keys, seriesBySub, subAccounts]);
   // Skip ticks so labels never crowd — aim for roughly 8 visible regardless
   // of how many months the horizon spans.
   const chartTickInterval = Math.max(0, Math.ceil(chartData.length / 8) - 1);
 
+  // The table is collapsed by default and, once opened, reveals 12 months
+  // at a time rather than the whole (possibly multi-year) range at once.
+  const [tableOpen, setTableOpen] = useState(false);
+  const [visibleMonths, setVisibleMonths] = useState(12);
+  const visibleKeys = keys.slice(0, visibleMonths);
+
   return (
     <section style={St.section} className="fade">
       <div style={St.collapseHead}>
-        <input value={goal.name} placeholder={TXT.savingsGoalNamePlaceholder} onChange={(e) => onUpdate({ name: e.target.value })} style={{ ...St.nameInput, fontWeight: 700, fontSize: 15 }} />
+        <span style={St.savingsGoalName}>{entry.label || TXT.unnamed}</span>
         <span style={{ flex: 1 }} />
-        <label style={St.copyRow}>
-          <span style={St.copyLbl}>{TXT.targetAmount}</span>
-          <input inputMode="decimal" value={goal.targetAmount} placeholder={TXT.targetAmountPlaceholder}
-            onChange={(e) => onUpdate({ targetAmount: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 100 }} />
+        <AmountField
+          value={formulaActive ? String(round2(entryAmount(entry, currentMonthData))) : entry.amount}
+          period={entry.period}
+          onValue={(v) => onEntryAmountChange(entry.id, v)}
+          onPeriod={() => onEntryPeriodToggle(entry.id)}
+          onCommit={(o, n) => onLogChange(`${TXT.savingsSection} · ${entry.label || TXT.unnamed}`, o, n)}
+          disabled={formulaActive} />
+        <label style={St.goalForwardedToggle} title={TXT.goalForwardedInfo}>
+          <input type="checkbox" checked={forwarded} onChange={(e) => onUpdate({ forwarded: e.target.checked })} />
+          {TXT.goalForwardedLabel}
         </label>
-        <button type="button" aria-label={TXT.delete} onClick={onRemove} style={St.iconBtn}><Trash2 size={16} /></button>
       </div>
 
-      {goal.subAccounts.map((sub) => (
-        <SubAccountRow key={sub.id} sub={sub} savingsEntries={savingsEntries} currentMonthData={currentMonthData} sel={sel}
-          onChange={(patch) => onUpdateSubAccount(sub.id, patch)}
-          onRemove={() => onRemoveSubAccount(sub.id)}
-          onEntryAmountChange={onEntryAmountChange}
-          onEntryPeriodToggle={onEntryPeriodToggle}
-          onLogChange={onLogChange} />
-      ))}
-      {goal.subAccounts.length === 0 && <div style={St.copyEmpty}>{TXT.noSubAccounts}</div>}
-      <button type="button" onClick={onAddSubAccount} style={St.addBtn}><Plus size={16} /> {TXT.addSubAccount}</button>
-
-      {keys.length >= 2 && goal.subAccounts.length > 0 && (
+      {forwarded && (
         <>
-          <ChartTitle>{TXT.savingsChartTitle}</ChartTitle>
-          <div style={St.chartBox}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 6, right: 20, left: -14, bottom: 0 }}>
-                <CartesianGrid stroke={C.line} vertical={false} />
-                <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} interval={chartTickInterval} />
-                <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
-                <Tooltip {...tooltipProps} /><Legend {...legendProps} />
-                {goal.subAccounts.map((s) => (
-                  <Area key={s.id} type="monotone" dataKey={s.id} name={s.holder || TXT.unnamed} stackId="1"
-                    stroke={categoryColor(s.holder || s.id)} fill={categoryColor(s.holder || s.id)} fillOpacity={0.35} />
-                ))}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          <label style={{ ...St.copyRow, marginTop: 10 }}>
+            <span style={St.copyLbl}>{TXT.targetAmount}</span>
+            <input inputMode="decimal" value={goal.targetAmount} placeholder={TXT.targetAmountPlaceholder}
+              onChange={(e) => onUpdate({ targetAmount: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 100 }} />
+          </label>
+
+          {subAccounts.map((sub) => (
+            <SubAccountRow key={sub.id} sub={sub} entryMonthlyAmount={entryMonthlyAmount}
+              onChange={(patch) => onUpdateSubAccount(sub.id, patch)}
+              onRemove={() => onRemoveSubAccount(sub.id)} />
+          ))}
+          {subAccounts.length === 0 && <div style={St.copyEmpty}>{TXT.noSubAccounts}</div>}
+          <button type="button" onClick={onAddSubAccount} style={St.addBtn}><Plus size={16} /> {TXT.addSubAccount}</button>
+
+          {keys.length >= 2 && subAccounts.length > 0 && (
+            <>
+              <ChartTitle>{TXT.savingsChartTitle}</ChartTitle>
+              <div style={St.chartBox}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 6, right: 20, left: -14, bottom: 0 }}>
+                    <CartesianGrid stroke={C.line} vertical={false} />
+                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} interval={chartTickInterval} />
+                    <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
+                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
+                    {subAccounts.map((s) => (
+                      <Area key={s.id} type="monotone" dataKey={s.id} name={s.holder || TXT.unnamed} stackId="1"
+                        stroke={categoryColor(s.holder || s.id)} fill={categoryColor(s.holder || s.id)} fillOpacity={0.35} />
+                    ))}
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </>
+          )}
+
+          {keys.length > 0 && subAccounts.length > 0 && (
+            <>
+              <button type="button" onClick={() => setTableOpen((o) => !o)} style={St.detailsBtn} aria-expanded={tableOpen}>
+                {tableOpen ? TXT.hideTable : TXT.showTable}
+                <ChevronDown size={15} style={{ transform: tableOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+              </button>
+              {tableOpen && (
+                <div style={St.savingsTableWrap}>
+                  <table style={St.savingsTable}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...St.savingsTh, textAlign: "left" }}>{TXT.monthColumn}</th>
+                        <th style={St.savingsTh}>{TXT.combinedTotal}</th>
+                        {subAccounts.map((s) => <th key={s.id} style={St.savingsTh}>{s.holder || TXT.unnamed}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleKeys.map((k) => {
+                        const values = subAccounts.map((s) => seriesBySub[s.id][k]);
+                        const total = values.reduce((sum, v) => sum + (v?.balance ?? 0), 0);
+                        const totalInterest = values.reduce((sum, v) => sum + (v?.interest ?? 0), 0);
+                        return (
+                          <tr key={k}>
+                            <td style={{ ...St.savingsTd, textAlign: "left" }}>{monthLong(k)}</td>
+                            <td style={{ ...St.savingsTd, fontWeight: 700 }}>
+                              {eur(total)}
+                              {hasInterest && <div style={St.savingsTdSub}>{TXT.interestPortion} {eur(totalInterest)}</div>}
+                            </td>
+                            {values.map((v, i) => (
+                              <td key={subAccounts[i].id} style={St.savingsTd}>
+                                {v != null ? (
+                                  <>
+                                    {eur(v.balance)}
+                                    {hasInterest && num(subAccounts[i].interestRate) > 0 && <div style={St.savingsTdSub}>{TXT.interestPortion} {eur(v.interest)}</div>}
+                                  </>
+                                ) : "—"}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {visibleMonths < keys.length && (
+                    <button type="button" onClick={() => setVisibleMonths((v) => v + 12)} style={St.addBtn}>{TXT.showMoreMonths}</button>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+          {reached && <div style={St.savingsTargetReached}>{TXT.targetReached}</div>}
         </>
       )}
-
-      {keys.length > 0 && goal.subAccounts.length > 0 && (
-        <div style={St.savingsTableWrap}>
-          <table style={St.savingsTable}>
-            <thead>
-              <tr>
-                <th style={{ ...St.savingsTh, textAlign: "left" }}>{TXT.monthColumn}</th>
-                <th style={St.savingsTh}>{TXT.combinedTotal}</th>
-                {goal.subAccounts.map((s) => <th key={s.id} style={St.savingsTh}>{s.holder || TXT.unnamed}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {keys.map((k) => {
-                const values = goal.subAccounts.map((s) => seriesBySub[s.id][k]);
-                const total = values.reduce((sum, v) => sum + (v?.balance ?? 0), 0);
-                const totalInterest = values.reduce((sum, v) => sum + (v?.interest ?? 0), 0);
-                return (
-                  <tr key={k}>
-                    <td style={{ ...St.savingsTd, textAlign: "left" }}>{monthLong(k)}</td>
-                    <td style={{ ...St.savingsTd, fontWeight: 700 }}>
-                      {eur(total)}
-                      {hasInterest && <div style={St.savingsTdSub}>{TXT.interestPortion} {eur(totalInterest)}</div>}
-                    </td>
-                    {values.map((v, i) => (
-                      <td key={goal.subAccounts[i].id} style={St.savingsTd}>
-                        {v != null ? (
-                          <>
-                            {eur(v.balance)}
-                            {hasInterest && num(goal.subAccounts[i].interestRate) > 0 && <div style={St.savingsTdSub}>{TXT.interestPortion} {eur(v.interest)}</div>}
-                          </>
-                        ) : "—"}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {reached && <div style={St.savingsTargetReached}>{TXT.targetReached}</div>}
     </section>
   );
 }
@@ -1679,11 +1729,9 @@ function IconPopoverField({ icon: Icon, ariaLabel, active, popStyle, children })
   );
 }
 
-function SubAccountRow({ sub, savingsEntries, currentMonthData, sel, onChange, onRemove, onEntryAmountChange, onEntryPeriodToggle, onLogChange }) {
-  const linkedEntry = sub.entryId ? savingsEntries.find((s) => s.id === sub.entryId) : null;
-  const linkedFormulaActive = Boolean(linkedEntry?.formula);
+function SubAccountRow({ sub, entryMonthlyAmount, onChange, onRemove }) {
   const share = sub.sharePercent === "" || sub.sharePercent == null ? 1 : num(sub.sharePercent) / 100;
-  const preview = linkedEntry ? monthlyOf(linkedEntry, currentMonthData) * share : null;
+  const preview = entryMonthlyAmount * share;
   // Stored internally as a "YYYY-MM" month key (same as everywhere else in
   // the app), but edited with the same date picker as the contract fields —
   // the day is discarded on change, only year and month are kept.
@@ -1699,49 +1747,24 @@ function SubAccountRow({ sub, savingsEntries, currentMonthData, sel, onChange, o
         </span>
         <input className="e-desc" aria-label={TXT.subAccountHolder} value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder}
           onChange={(e) => onChange({ holder: e.target.value })} style={St.nameInput} />
-        {linkedEntry && (
-          <span className="e-amount" title={monthLong(sel)}>
-            <AmountField
-              value={linkedFormulaActive ? String(round2(entryAmount(linkedEntry, currentMonthData))) : linkedEntry.amount}
-              period={linkedEntry.period}
-              onValue={(v) => onEntryAmountChange(linkedEntry.id, v)}
-              onPeriod={() => onEntryPeriodToggle(linkedEntry.id)}
-              onCommit={(o, n) => onLogChange(`${TXT.savingsSection} · ${linkedEntry.label || TXT.unnamed}`, o, n)}
-              disabled={linkedFormulaActive} />
-          </span>
-        )}
         <span className="entryActions" style={St.rowActions}>
-          <IconPopoverField icon={Calculator} ariaLabel={TXT.subAccountLinkedEntry} active={Boolean(sub.entryId)}>
+          <IconPopoverField icon={Percent} ariaLabel={TXT.subAccountShare} active={num(sub.sharePercent ?? 100) !== 100 || num(sub.interestRate) > 0}>
             {(markEditing) => (
               <>
-                <div style={St.copyTitle}>{TXT.subAccountLinkedEntry}</div>
-                <div style={St.correspondentDocMuted}>{TXT.subAccountLinkedEntryInfo}</div>
+                <div style={St.copyTitle}>{TXT.subAccountShare}</div>
+                <div style={St.correspondentDocMuted}>{TXT.subAccountShareInfo}</div>
                 <label style={{ ...St.copyRow, marginTop: 8 }}>
-                  <span style={St.copyLbl}>{TXT.subAccountLinkedEntry}</span>
-                  <select value={sub.entryId || ""} onChange={(e) => onChange({ entryId: e.target.value || null })} onFocus={markEditing} style={St.copySel}>
-                    <option value="">{TXT.subAccountNoEntry}</option>
-                    {savingsEntries.map((s) => <option key={s.id} value={s.id}>{s.label || TXT.unnamed}</option>)}
-                  </select>
-                </label>
-                <label style={St.copyRow}>
                   <span style={St.copyLbl}>{TXT.subAccountShare}</span>
                   <input inputMode="numeric" value={sub.sharePercent ?? "100"} placeholder="100" onFocus={markEditing}
                     onChange={(e) => onChange({ sharePercent: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 60 }} />
                 </label>
-                {preview != null && <div style={St.correspondentDocMuted}>{TXT.subAccountPreview} {eur(preview)} {TXT.perMonth}</div>}
-              </>
-            )}
-          </IconPopoverField>
-          <IconPopoverField icon={Percent} ariaLabel={TXT.subAccountInterestRate} active={num(sub.interestRate) > 0}>
-            {(markEditing) => (
-              <>
-                <div style={St.copyTitle}>{TXT.subAccountInterestRate}</div>
-                <div style={St.correspondentDocMuted}>{TXT.subAccountInterestRateInfo}</div>
+                <div style={St.correspondentDocMuted}>{TXT.subAccountPreview} {eur(preview)} {TXT.perMonth}</div>
                 <label style={{ ...St.copyRow, marginTop: 8 }}>
                   <span style={St.copyLbl}>{TXT.subAccountInterestRate}</span>
                   <input inputMode="decimal" value={sub.interestRate} placeholder="0" onFocus={markEditing}
                     onChange={(e) => onChange({ interestRate: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 70 }} />
                 </label>
+                <div style={St.correspondentDocMuted}>{TXT.subAccountInterestRateInfo}</div>
               </>
             )}
           </IconPopoverField>
@@ -1763,7 +1786,7 @@ function SubAccountRow({ sub, savingsEntries, currentMonthData, sel, onChange, o
               </>
             )}
           </IconPopoverField>
-          <IconPopoverField icon={Building2} ariaLabel={TXT.subAccountBankDetails} active={Boolean(sub.iban || sub.planId)}>
+          <IconPopoverField icon={Building2} ariaLabel={TXT.subAccountBankDetails} active={Boolean(sub.iban || sub.planId || sub.referenceId)}>
             {(markEditing) => (
               <>
                 <div style={St.copyTitle}>{TXT.subAccountBankDetails}</div>
@@ -1776,6 +1799,11 @@ function SubAccountRow({ sub, savingsEntries, currentMonthData, sel, onChange, o
                   <span style={St.copyLbl}>{TXT.subAccountPlanId}</span>
                   <input value={sub.planId} placeholder={TXT.subAccountPlanIdPlaceholder} onFocus={markEditing}
                     onChange={(e) => onChange({ planId: e.target.value })} style={St.copySel} />
+                </label>
+                <label style={St.copyRow}>
+                  <span style={St.copyLbl}>{TXT.subAccountReference}</span>
+                  <input value={sub.referenceId} placeholder={TXT.subAccountReferencePlaceholder} onFocus={markEditing}
+                    onChange={(e) => onChange({ referenceId: e.target.value })} style={St.copySel} />
                 </label>
               </>
             )}
@@ -2354,6 +2382,8 @@ const St = {
 
   savingsPageHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 4 },
   savingsHorizon: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.muted, fontWeight: 600 },
+  savingsGoalName: { fontWeight: 700, fontSize: 15, padding: "8px 2px" },
+  goalForwardedToggle: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.muted, fontWeight: 600, cursor: "pointer", marginLeft: 14, whiteSpace: "nowrap" },
   savingsTableWrap: { overflowX: "auto", marginTop: 14 },
   savingsTable: { width: "100%", borderCollapse: "collapse", fontSize: 13, whiteSpace: "nowrap" },
   savingsTh: { textAlign: "right", padding: "6px 10px", color: C.muted, fontWeight: 600, borderBottom: `1px solid ${C.line}`, position: "sticky", top: 0, background: C.card },
