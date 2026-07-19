@@ -57,7 +57,7 @@ export default {
     targetAmount: "Target amount",
     targetAmountPlaceholder: "Optional",
     goalForwardedLabel: "Forwarded",
-    goalForwardedInfo: "Check this if this money gets transferred onward from the shared account to a separate savings account (e.g. at another bank). You can then track a bank balance per destination. Leave it off if the money just stays in the shared account — you'll still get a simple projection based on the monthly contribution.",
+    goalForwardedInfo: "Check this if this money gets transferred onward from the shared account to a separate savings account (e.g. at another bank). You can then split the contribution across multiple accounts and set an interest rate per account. Leave it off if the money just stays in the shared account — you'll still get a simple projection based on the monthly contribution.",
     savingsGoalAmountInfo: "This is the monthly contribution as entered under Savings goals in the monthly view. Change the amount there — here it's for reference only.",
     subAccountHolder: "Name",
     subAccountHolderPlaceholder: "e.g. Partner",

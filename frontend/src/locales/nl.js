@@ -57,7 +57,7 @@ export default {
     targetAmount: "Streefbedrag",
     targetAmountPlaceholder: "Optioneel",
     goalForwardedLabel: "Wordt doorgeboekt",
-    goalForwardedInfo: "Vink dit aan als dit geld na de gezamenlijke rekening nog verder wordt overgeboekt naar een aparte spaarrekening (bijvoorbeeld bij een andere bank). Je kunt dan per bestemming een banksaldo bijhouden. Laat dit uit als het geld gewoon op de gezamenlijke rekening blijft staan — je krijgt dan nog steeds een eenvoudige projectie op basis van de maandelijkse inleg.",
+    goalForwardedInfo: "Vink dit aan als dit geld na de gezamenlijke rekening nog verder wordt overgeboekt naar een aparte spaarrekening (bijvoorbeeld bij een andere bank). Je kunt de inleg dan verdelen over meerdere rekeningen en per rekening een eigen rentepercentage instellen. Laat dit uit als het geld gewoon op de gezamenlijke rekening blijft staan — je krijgt dan nog steeds een eenvoudige projectie op basis van de maandelijkse inleg.",
     savingsGoalAmountInfo: "Dit is de maandelijkse inleg zoals ingevuld bij Spaardoelen in het maandoverzicht. Wijzig het bedrag daar — hier is het alleen ter info.",
     subAccountHolder: "Naam",
     subAccountHolderPlaceholder: "bv. Partner",
