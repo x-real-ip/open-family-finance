@@ -1547,7 +1547,7 @@ function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMont
   );
 }
 
-function SavingsGoalCard({ entry, goal, months, currentMonthData, horizon, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
   const forwarded = Boolean(goal.forwarded);
   const subAccounts = goal.subAccounts;
   // A goal only has a target once it's actually being tracked (forwarded);
@@ -1569,9 +1569,9 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, horizon, onUpd
   const effectiveSubAccounts = useMemo(() => (
     forwarded ? subAccounts : [{
       id: `self-${entry.id}`, holder: entry.label || TXT.unnamed, sharePercent: "100", interestRate: "",
-      checkpointMonth: goal.checkpointMonth || monthKey(new Date()), checkpointBalance: goal.checkpointBalance || "0",
+      checkpointMonth: goal.checkpointMonth || sel, checkpointBalance: goal.checkpointBalance || "0",
     }]
-  ), [forwarded, subAccounts, entry.id, entry.label, goal.checkpointMonth, goal.checkpointBalance]);
+  ), [forwarded, subAccounts, entry.id, entry.label, goal.checkpointMonth, goal.checkpointBalance, sel]);
   // The table starts at the earliest checkpoint among this goal's
   // accounts — accounts opened later simply show "—" for months before
   // their own checkpoint.
@@ -1626,14 +1626,9 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, horizon, onUpd
       {!forwarded && (
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 10 }}>
           <label style={St.copyRow}>
-            <span style={St.copyLbl}>{TXT.checkpointMonth}</span>
-            <input type="date" lang={LANG} value={`${goal.checkpointMonth || monthKey(new Date())}-01`}
-              onChange={(e) => onUpdate({ checkpointMonth: e.target.value ? e.target.value.slice(0, 7) : "" })} style={St.copySel} />
-          </label>
-          <label style={St.copyRow}>
             <span style={St.copyLbl}>{TXT.checkpointBalance}</span>
             <input inputMode="decimal" value={goal.checkpointBalance} placeholder="0,00"
-              onChange={(e) => onUpdate({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 90 }} />
+              onChange={(e) => onUpdate({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, ""), checkpointMonth: sel })} style={{ ...St.copySel, width: 90 }} />
           </label>
         </div>
       )}
@@ -1647,7 +1642,7 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, horizon, onUpd
           </label>
 
           {subAccounts.map((sub) => (
-            <SubAccountRow key={sub.id} sub={sub} entryMonthlyAmount={entryMonthlyAmount}
+            <SubAccountRow key={sub.id} sub={sub} entryMonthlyAmount={entryMonthlyAmount} sel={sel}
               onChange={(patch) => onUpdateSubAccount(sub.id, patch)}
               onRemove={() => onRemoveSubAccount(sub.id)} />
           ))}
@@ -1763,13 +1758,9 @@ function IconPopoverField({ icon: Icon, ariaLabel, active, popStyle, children })
   );
 }
 
-function SubAccountRow({ sub, entryMonthlyAmount, onChange, onRemove }) {
+function SubAccountRow({ sub, entryMonthlyAmount, sel, onChange, onRemove }) {
   const share = sub.sharePercent === "" || sub.sharePercent == null ? 1 : num(sub.sharePercent) / 100;
   const preview = entryMonthlyAmount * share;
-  // Stored internally as a "YYYY-MM" month key (same as everywhere else in
-  // the app), but edited with the same date picker as the contract fields —
-  // the day is discarded on change, only year and month are kept.
-  const checkpointDate = sub.checkpointMonth ? `${sub.checkpointMonth}-01` : "";
 
   return (
     <div style={St.itemWrap} className="entryWrap">
@@ -1802,20 +1793,15 @@ function SubAccountRow({ sub, entryMonthlyAmount, onChange, onRemove }) {
               </>
             )}
           </IconPopoverField>
-          <IconPopoverField icon={CalendarClock} ariaLabel={TXT.checkpointMonth} active={Boolean(sub.checkpointMonth)}>
+          <IconPopoverField icon={CalendarClock} ariaLabel={TXT.checkpointBalance} active={Boolean(sub.checkpointBalance)}>
             {(markEditing) => (
               <>
-                <div style={St.copyTitle}>{TXT.checkpointMonth}</div>
+                <div style={St.copyTitle}>{TXT.checkpointBalance}</div>
                 <div style={St.correspondentDocMuted}>{TXT.checkpointInfo}</div>
                 <label style={{ ...St.copyRow, marginTop: 8 }}>
-                  <span style={St.copyLbl}>{TXT.checkpointMonth}</span>
-                  <input type="date" lang={LANG} value={checkpointDate} onFocus={markEditing}
-                    onChange={(e) => onChange({ checkpointMonth: e.target.value ? e.target.value.slice(0, 7) : "" })} style={St.copySel} />
-                </label>
-                <label style={St.copyRow}>
                   <span style={St.copyLbl}>{TXT.checkpointBalance}</span>
                   <input inputMode="decimal" value={sub.checkpointBalance} placeholder="0,00" onFocus={markEditing}
-                    onChange={(e) => onChange({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 90 }} />
+                    onChange={(e) => onChange({ checkpointBalance: e.target.value.replace(/[^0-9.,]/g, ""), checkpointMonth: sel })} style={{ ...St.copySel, width: 90 }} />
                 </label>
               </>
             )}
