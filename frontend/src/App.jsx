@@ -720,6 +720,67 @@ export default function App() {
           )}
         </div>
 
+        <ColTitle>{TXT.incomes}</ColTitle>
+        {/* Income */}
+        <Collapsible id="inkomen" title={TXT.salarySection} icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec} style={St.sectionIncome}>
+          {[pA, pB].map((p, i) => (
+            <div style={St.itemWrap} className="entryWrap" key={p.id}>
+              <div className="entry">
+                <span className="e-lead"><span style={{ ...St.dot, background: i === 0 ? C.a : C.b }} /></span>
+                <input className="e-desc" aria-label={t(LANG, "partnerName", { n: i + 1 })} value={p.name} placeholder={t(LANG, "partnerPlaceholder", { n: i + 1 })} onChange={(e) => setPartnerName(i, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
+                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setPartner(i, { income: v })} onPeriod={() => togglePartnerPeriod(i)} onCommit={(o, n) => logChange(`${TXT.salarySection} · ${p.name || t(LANG, "partnerName", { n: i + 1 })}`, o, n)} /></span>
+                <span className="entryActions" style={St.rowActions}>
+                  <NoteField value={p.note || ""} onChange={(v) => setPartner(i, { note: v })} />
+                  <LinkField value={p.url || ""} onChange={(v) => setPartner(i, { url: v })} />
+                  <CorrespondentField entry={p} onChange={(patch) => setPartner(i, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
+                  <DurationField entry={p} onChange={(patch) => setPartner(i, patch)} />
+                  <TrendIcon income trend={entryTrend("partners", p.id, monthlyInc(p))} />
+                  <SparkIcon history={entryHistory("partners", p.id)} />
+                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("partners", p.id, pk, fk)} />
+                </span>
+              </div>
+              <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} correspondent={p.correspondent} dot />
+            </div>
+          ))}
+          <SubTotal monthly={calc.total} />
+        </Collapsible>
+
+        {/* Government */}
+        <Collapsible id="overheid" title={TXT.government} icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid} onToggle={toggleSec} style={St.sectionIncome}>
+          {cur.govIncome.length > 1 && <SortToggle kind="govIncome" mode={listSort.govIncome} onChange={(m) => setListSort("govIncome", m)} />}
+          {sortedGovIncome.map((g) => {
+            const formulaActive = Boolean(g.formula);
+            const displayAmount = formulaActive ? String(round2(entryAmount(g, cur))) : g.amount;
+            const manual = listSort.govIncome === "manual";
+            return (
+              <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === "govIncome" && dragItem.id === g.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={g.id} {...(manual ? dragRowProps("govIncome", g.id) : {})}>
+                <div className="entry">
+                  <span className="e-lead">
+                    <DragHandle active={manual} {...dragHandleProps("govIncome", g.id)} />
+                    <span style={{ ...St.dot, background: C.gov }} />
+                  </span>
+                  <input className="e-desc" aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
+                  <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
+                  <span className="entryActions" style={St.rowActions}>
+                    <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
+                    <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
+                    <CorrespondentField entry={g} onChange={(patch) => setListItem("govIncome", g.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
+                    <DurationField entry={g} onChange={(patch) => setListItem("govIncome", g.id, patch)} />
+                    <FormulaField entry={g} monthData={cur} onChange={(patch) => setListItem("govIncome", g.id, patch)} />
+                    <TrendIcon income trend={entryTrend("govIncome", g.id, monthlyOf(g, cur))} />
+                    <SparkIcon history={entryHistory("govIncome", g.id)} />
+                    <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("govIncome", g.id, pk, fk)} />
+                    <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                  </span>
+                </div>
+                <DerivedLine monthly={monthlyOf(g, cur)} period={g.period} percent={pctOf(monthlyOf(g, cur), calc.govTotal)} correspondent={g.correspondent} dot />
+              </div>
+            );
+          })}
+          <button type="button" onClick={addGov} style={St.addBtn}><Plus size={16} /> {TXT.addGovernment}</button>
+          <SubTotal monthly={calc.govTotal} />
+        </Collapsible>
+
         {/* Distribution (result) — full width */}
         <section style={St.hero} className="fade">
           <div style={St.methodRow}>
@@ -803,129 +864,6 @@ export default function App() {
             </div>
           )}
         </section>
-
-        {/* Statistics */}
-        <Collapsible id="verloop" title={TXT.statistics} total={t(LANG, "months", { count: sortedMonths.length })} open={open.verloop} onToggle={toggleSec}>
-          {sortedMonths.length >= 2 && (
-            <div style={St.statsPeriodRow}>
-              <span style={St.sortLabel}>{TXT.statsPeriod}</span>
-              <select
-                value={statsFrom || sortedMonths[0]}
-                onChange={(e) => { const v = e.target.value; setStatsFrom(v === sortedMonths[0] ? null : v); if (v > (statsTo || sortedMonths[sortedMonths.length - 1])) setStatsTo(null); }}
-                style={St.copySel} aria-label={TXT.statsPeriodFrom}>
-                {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
-              </select>
-              <span style={St.sortLabel}>–</span>
-              <select
-                value={statsTo || sortedMonths[sortedMonths.length - 1]}
-                onChange={(e) => { const v = e.target.value; setStatsTo(v === sortedMonths[sortedMonths.length - 1] ? null : v); if (v < (statsFrom || sortedMonths[0])) setStatsFrom(null); }}
-                style={St.copySel} aria-label={TXT.statsPeriodTo}>
-                {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
-              </select>
-              {statsFiltered && (
-                <button type="button" onClick={() => { setStatsFrom(null); setStatsTo(null); }} style={St.resetBtn}><RotateCcw size={13} /> {TXT.statsPeriodReset}</button>
-              )}
-            </div>
-          )}
-          {statsSeries.length < 2 ? (
-            <div style={St.emptyHist}>
-              <TrendingUp size={18} style={{ color: C.muted }} />
-              <span>{TXT.noSeries}</span>
-            </div>
-          ) : (
-            <>
-              <ChartTitle>{TXT.incomePerMonth}</ChartTitle>
-              <div style={St.chartBox}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={statsSeries} margin={{ top: 6, right: 4, left: -14, bottom: 0 }}>
-                    <CartesianGrid stroke={C.line} vertical={false} />
-                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
-                    <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
-                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
-                    <Bar dataKey="inlegA" name={nameA} fill={C.a} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="inlegB" name={nameB} fill={C.b} radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <ChartTitle>{TXT.monthTotals}</ChartTitle>
-              <div style={St.chartBox}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={statsSeries} margin={{ top: 6, right: 8, left: -14, bottom: 0 }}>
-                    <CartesianGrid stroke={C.line} vertical={false} />
-                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
-                    <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
-                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
-                    <Bar dataKey="income" name={TXT.incomes} fill={C.inc} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="gov" name={TXT.government} fill={C.gov} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="expenses" name={TXT.expenses} fill={C.exp} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="savings" name={TXT.savings} fill={C.save} radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </>
-          )}
-        </Collapsible>
-
-        <ColTitle>{TXT.incomes}</ColTitle>
-        {/* Income */}
-        <Collapsible id="inkomen" title={TXT.salarySection} icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec} style={St.sectionIncome}>
-          {[pA, pB].map((p, i) => (
-            <div style={St.itemWrap} className="entryWrap" key={p.id}>
-              <div className="entry">
-                <span className="e-lead"><span style={{ ...St.dot, background: i === 0 ? C.a : C.b }} /></span>
-                <input className="e-desc" aria-label={t(LANG, "partnerName", { n: i + 1 })} value={p.name} placeholder={t(LANG, "partnerPlaceholder", { n: i + 1 })} onChange={(e) => setPartnerName(i, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
-                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setPartner(i, { income: v })} onPeriod={() => togglePartnerPeriod(i)} onCommit={(o, n) => logChange(`${TXT.salarySection} · ${p.name || t(LANG, "partnerName", { n: i + 1 })}`, o, n)} /></span>
-                <span className="entryActions" style={St.rowActions}>
-                  <NoteField value={p.note || ""} onChange={(v) => setPartner(i, { note: v })} />
-                  <LinkField value={p.url || ""} onChange={(v) => setPartner(i, { url: v })} />
-                  <CorrespondentField entry={p} onChange={(patch) => setPartner(i, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
-                  <DurationField entry={p} onChange={(patch) => setPartner(i, patch)} />
-                  <TrendIcon income trend={entryTrend("partners", p.id, monthlyInc(p))} />
-                  <SparkIcon history={entryHistory("partners", p.id)} />
-                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("partners", p.id, pk, fk)} />
-                </span>
-              </div>
-              <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} correspondent={p.correspondent} dot />
-            </div>
-          ))}
-          <SubTotal monthly={calc.total} />
-        </Collapsible>
-
-        {/* Government */}
-        <Collapsible id="overheid" title={TXT.government} icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid} onToggle={toggleSec} style={St.sectionIncome}>
-          {cur.govIncome.length > 1 && <SortToggle kind="govIncome" mode={listSort.govIncome} onChange={(m) => setListSort("govIncome", m)} />}
-          {sortedGovIncome.map((g) => {
-            const formulaActive = Boolean(g.formula);
-            const displayAmount = formulaActive ? String(round2(entryAmount(g, cur))) : g.amount;
-            const manual = listSort.govIncome === "manual";
-            return (
-              <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === "govIncome" && dragItem.id === g.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={g.id} {...(manual ? dragRowProps("govIncome", g.id) : {})}>
-                <div className="entry">
-                  <span className="e-lead">
-                    <DragHandle active={manual} {...dragHandleProps("govIncome", g.id)} />
-                    <span style={{ ...St.dot, background: C.gov }} />
-                  </span>
-                  <input className="e-desc" aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
-                  <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
-                  <span className="entryActions" style={St.rowActions}>
-                    <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
-                    <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
-                    <CorrespondentField entry={g} onChange={(patch) => setListItem("govIncome", g.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
-                    <DurationField entry={g} onChange={(patch) => setListItem("govIncome", g.id, patch)} />
-                    <FormulaField entry={g} monthData={cur} onChange={(patch) => setListItem("govIncome", g.id, patch)} />
-                    <TrendIcon income trend={entryTrend("govIncome", g.id, monthlyOf(g, cur))} />
-                    <SparkIcon history={entryHistory("govIncome", g.id)} />
-                    <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("govIncome", g.id, pk, fk)} />
-                    <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
-                  </span>
-                </div>
-                <DerivedLine monthly={monthlyOf(g, cur)} period={g.period} percent={pctOf(monthlyOf(g, cur), calc.govTotal)} correspondent={g.correspondent} dot />
-              </div>
-            );
-          })}
-          <button type="button" onClick={addGov} style={St.addBtn}><Plus size={16} /> {TXT.addGovernment}</button>
-          <SubTotal monthly={calc.govTotal} />
-        </Collapsible>
 
         <ColTitle>{TXT.expensesSection}</ColTitle>
         {/* Expenses */}
@@ -1024,6 +962,68 @@ export default function App() {
           })}
           <button type="button" onClick={addSaving} style={St.addBtn}><Plus size={16} /> {TXT.addSaving}</button>
           <SubTotal monthly={calc.savingsTotal} />
+        </Collapsible>
+
+        {/* Statistics */}
+        <Collapsible id="verloop" title={TXT.statistics} total={t(LANG, "months", { count: sortedMonths.length })} open={open.verloop} onToggle={toggleSec}>
+          {sortedMonths.length >= 2 && (
+            <div style={St.statsPeriodRow}>
+              <span style={St.sortLabel}>{TXT.statsPeriod}</span>
+              <select
+                value={statsFrom || sortedMonths[0]}
+                onChange={(e) => { const v = e.target.value; setStatsFrom(v === sortedMonths[0] ? null : v); if (v > (statsTo || sortedMonths[sortedMonths.length - 1])) setStatsTo(null); }}
+                style={St.copySel} aria-label={TXT.statsPeriodFrom}>
+                {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
+              </select>
+              <span style={St.sortLabel}>–</span>
+              <select
+                value={statsTo || sortedMonths[sortedMonths.length - 1]}
+                onChange={(e) => { const v = e.target.value; setStatsTo(v === sortedMonths[sortedMonths.length - 1] ? null : v); if (v < (statsFrom || sortedMonths[0])) setStatsFrom(null); }}
+                style={St.copySel} aria-label={TXT.statsPeriodTo}>
+                {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
+              </select>
+              {statsFiltered && (
+                <button type="button" onClick={() => { setStatsFrom(null); setStatsTo(null); }} style={St.resetBtn}><RotateCcw size={13} /> {TXT.statsPeriodReset}</button>
+              )}
+            </div>
+          )}
+          {statsSeries.length < 2 ? (
+            <div style={St.emptyHist}>
+              <TrendingUp size={18} style={{ color: C.muted }} />
+              <span>{TXT.noSeries}</span>
+            </div>
+          ) : (
+            <>
+              <ChartTitle>{TXT.incomePerMonth}</ChartTitle>
+              <div style={St.chartBox}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={statsSeries} margin={{ top: 6, right: 4, left: -14, bottom: 0 }}>
+                    <CartesianGrid stroke={C.line} vertical={false} />
+                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
+                    <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
+                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
+                    <Bar dataKey="inlegA" name={nameA} fill={C.a} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="inlegB" name={nameB} fill={C.b} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <ChartTitle>{TXT.monthTotals}</ChartTitle>
+              <div style={St.chartBox}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={statsSeries} margin={{ top: 6, right: 8, left: -14, bottom: 0 }}>
+                    <CartesianGrid stroke={C.line} vertical={false} />
+                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
+                    <YAxis tick={tick} axisLine={false} tickLine={false} width={48} tickFormatter={eur0} />
+                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
+                    <Bar dataKey="income" name={TXT.incomes} fill={C.inc} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="gov" name={TXT.government} fill={C.gov} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="expenses" name={TXT.expenses} fill={C.exp} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="savings" name={TXT.savings} fill={C.save} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </>
+          )}
         </Collapsible>
 
         {/* Change log */}
