@@ -2076,7 +2076,7 @@ const CASHFLOW_DETAIL_LABELS = { 1: "cashflowDetailTotals", 2: "cashflowDetailCa
 function CashflowPage({ cur, calc }) {
   const [detail, setDetail] = useState(1);
   const { nodes, links } = useMemo(() => buildCashflow(cur, calc, detail), [cur, calc, detail]);
-  const chartHeight = useMemo(() => Math.min(1300, Math.max(440, maxColumnSize(nodes, links) * 60 + 40)), [nodes, links]);
+  const chartHeight = useMemo(() => Math.min(1500, Math.max(440, maxColumnSize(nodes, links) * 72 + 60)), [nodes, links]);
   return (
     <div className="fade">
       <ColTitle>{TXT.cashflowView}</ColTitle>
@@ -2098,7 +2098,7 @@ function CashflowPage({ cur, calc }) {
         <div style={{ ...St.chartBox, height: chartHeight, marginTop: 12 }}>
           <ResponsiveContainer width="100%" height="100%">
             <Sankey data={{ nodes, links }} node={<SankeyNode />} link={<SankeyLink />}
-              nodePadding={16} nodeWidth={10} margin={{ top: 20, right: 130, bottom: 20, left: 130 }}>
+              nodePadding={30} nodeWidth={10} margin={{ top: 20, right: 130, bottom: 20, left: 130 }}>
               <Tooltip {...tooltipProps} />
             </Sankey>
           </ResponsiveContainer>
