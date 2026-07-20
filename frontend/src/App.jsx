@@ -2035,12 +2035,16 @@ function SankeyNode({ x, y, width, height, payload }) {
   );
 }
 
-// The tallest column (nodes sharing the same longest-path depth from a
-// source) determines how much vertical room the Sankey actually needs —
-// a fixed chart height made sense for the small "totals" graph but left the
-// busier levels (many expense/savings/personal-expense leaves stacked in one
-// column) squeezed into slivers. Depth is computed by relaxation rather than
-// a single topological pass since that's simplest for a small, acyclic graph.
+// The tallest column determines how much vertical room the Sankey actually
+// needs — a fixed chart height made sense for the small "totals" graph but
+// left the busier levels squeezed into slivers. recharts' Sankey (like
+// d3-sankey) uses "justify" alignment: every sink node (no outgoing link),
+// regardless of how deep it naturally sits, gets pushed into one shared
+// rightmost column — expense categories, savings entries and personal
+// leftovers all land in the same column even though their longest-path
+// depth differs. So sinks are counted together as a single column; only
+// non-sink nodes are bucketed by their natural (longest-path) depth, found
+// by relaxation since that's simplest for a small, acyclic graph.
 function maxColumnSize(nodes, links) {
   const depth = new Array(nodes.length).fill(0);
   let changed = true;
@@ -2054,8 +2058,12 @@ function maxColumnSize(nodes, links) {
     }
   }
   const counts = {};
-  for (const d of depth) counts[d] = (counts[d] || 0) + 1;
-  return Math.max(1, ...Object.values(counts));
+  let sinkCount = 0;
+  nodes.forEach((n, i) => {
+    if (n.isSink) { sinkCount += 1; return; }
+    counts[depth[i]] = (counts[depth[i]] || 0) + 1;
+  });
+  return Math.max(1, sinkCount, ...Object.values(counts));
 }
 
 const CASHFLOW_DETAIL_LABELS = { 1: "cashflowDetailTotals", 2: "cashflowDetailCategories", 3: "cashflowDetailFull" };
