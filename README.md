@@ -2,26 +2,27 @@
 
 *Read this in other languages: [Nederlands](README.nl.md)*
 
-Open Family Finance is a self-hosted web app for couples and families who keep a
-personal account each, plus one shared account for joint costs. It gives you
-insight into what comes in and goes out, and calculates a fair monthly
-transfer from each personal account to the shared account.
+Open Family Finance is a self-hosted web app for any number of people —
+couples, families, housemates — who each keep a personal account, plus one
+shared account for joint costs. It gives you insight into what comes in and
+goes out, and calculates a fair monthly transfer from each personal account
+to the shared account.
 
 ## The idea
 
-- Each partner enters their own **net income**.
+- Everyone enters their own **net income**.
 - You track **shared expenses** (rent, groceries, insurance, ...), **savings
   goals**, and any **government support** you receive (e.g. child benefit)
   that reduces what you need to contribute yourselves.
 - The app works out `expenses + savings − government support` = what you need
-  to finance together, and splits that amount between partners using one of
-  three methods:
+  to finance together, and splits that amount using one of three methods:
   - **By income** — whoever earns more contributes proportionally more, so
-    that after the transfer both partners keep the same *percentage* of their
-    own salary.
-  - **50 / 50** — split the shared amount evenly, regardless of income.
-  - **Custom split** — set your own fixed percentage (e.g. 60/40) if neither
-    of the above fits your situation.
+    that after the transfer everyone keeps the same *percentage* of their own
+    salary.
+  - **50 / 50** (or an even split across however many people there are) —
+    split the shared amount evenly, regardless of income.
+  - **Custom split** — set your own percentage per person if neither of the
+    above fits your situation.
 - A small configurable **buffer margin** (%) is added on top of each transfer,
   so the shared account keeps a cushion instead of running exactly to zero.
 
@@ -30,9 +31,11 @@ numbers evolve over time.
 
 ## Features
 
-- **Fair-split calculator** — by income share, 50/50, or your own custom
-  percentage, with a configurable safety buffer, and a breakdown of exactly
-  how each number was calculated.
+- **Any number of people** — not just two. Add as many as your household
+  needs, each with their own name, color and income.
+- **Fair-split calculator** — by income share, an even split, or your own
+  custom percentage per person, with a configurable safety buffer, and a
+  breakdown of exactly how each number was calculated.
 - **Monthly tracking with forward propagation** — an edit to an entry applies
   to the current month and every future month, until that entry is edited
   again in one of those months (which "pins" it there). Past months are never
@@ -48,16 +51,33 @@ numbers evolve over time.
 - **Copy tools** — copy a single entry's amount to other months, or copy an
   entire month's figures to earlier months.
 - **Change log** — every edit is recorded with date, time, old and new value.
-- **Statistics** — bar chart of each partner's monthly contribution, a bar
+- **Statistics** — bar chart of each person's monthly contribution, a bar
   chart of income / government support / expenses / savings per month, and a
   pie chart of expenses by category. All charts can be limited to a custom
-  date range (defaults to all months).
+  date range (defaults to all months), and each chart can be collapsed on its
+  own.
 - **Sorting** — sort expenses, government support and savings by name (and
   expenses additionally by category), or drag-and-drop your own manual order.
 - **Contract duration** — give any entry a start and end date to track a
   contract or subscription term, with a progress bar and a color-coded
   warning once it's ending soon (within 30 days by default, adjustable per
   entry) or has already expired.
+- **Personal expense pages** — a page per person for their own fixed costs,
+  kept separate from the shared account, in that person's own color.
+- **Savings goals with a running balance** — a projected-growth chart per
+  goal, an actual monthly balance you can correct at any point (earlier
+  months stay exactly as recorded), an optional target amount that caps the
+  projection once reached, and an optional split across several sub-accounts
+  at different banks, each with its own balance and interest rate.
+- **Cashflow diagram** — a Sankey diagram tracing money from salary to its
+  last known destination, for whichever month you're viewing, with three
+  levels of detail: totals only, plus categories and savings goals, or the
+  full breakdown including personal spending.
+- **Locked history** — past months are greyed out and read-only by default,
+  so you can't edit them by accident; unlock a specific past month explicitly
+  if you really need to correct it.
+- **Correspondents stand out inline** — wherever you've set one, it's shown
+  right in the entry line (not just tucked away in a popover).
 - **Light and dark theme.**
 - **Dutch and English UI**, selectable via an environment variable.
 - **Optional paperless-ngx integration** — pick a correspondent from your
@@ -66,6 +86,45 @@ numbers evolve over time.
   has for it. See [Paperless-ngx integration](#paperless-ngx-integration).
 - **Self-hosted**: a small Express API backed by Postgres, with an optional
   bearer-token to lock down access.
+
+## Screenshots
+
+All figures shown below are made-up placeholder data.
+
+**Monthly overview** — income, distribution, expenses and savings for the
+month you're viewing.
+
+![Monthly overview](docs/screenshots/month-overview.png)
+
+**Cashflow** — a Sankey diagram from salary to its last known destination,
+at each of the three detail levels.
+
+![Cashflow, totals only](docs/screenshots/cashflow-totals.png)
+![Cashflow, with categories](docs/screenshots/cashflow-categories.png)
+![Cashflow, full detail](docs/screenshots/cashflow-full.png)
+
+**Savings goals** — a projected balance per goal, split across sub-accounts
+at different banks.
+
+![Savings goal](docs/screenshots/savings-goal.png)
+
+**Personal expenses** — a page per person for costs that stay off the shared
+account.
+
+![Personal page](docs/screenshots/personal-page.png)
+
+**Correspondents stand out inline.**
+
+![Correspondent standing out inline](docs/screenshots/correspondent.png)
+
+**Locked history** — past months are greyed out and read-only until
+explicitly unlocked.
+
+![History locked](docs/screenshots/history-lock.png)
+
+**Dark theme.**
+
+![Dark theme](docs/screenshots/dark-theme.png)
 
 ## Getting started
 
