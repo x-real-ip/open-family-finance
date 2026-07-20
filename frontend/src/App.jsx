@@ -765,9 +765,7 @@ export default function App() {
     return keys.map((key) => { const fig = figuresFor(data.months, key); return { key, fig, calc: computeTotals(fig) }; });
   }, [printJob, data.months]);
   useEffect(() => {
-    window.__DEBUG_PRINTMONTHS_LEN = printMonths.length;
     if (!printMonths.length) return;
-    window.__DEBUG_EFFECT_RAN = (window.__DEBUG_EFFECT_RAN || 0) + 1;
     const id = requestAnimationFrame(() => window.print());
     const onAfter = () => setPrintJob(null);
     window.addEventListener("afterprint", onAfter);
@@ -1676,7 +1674,7 @@ export default function App() {
           <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
             {view === "month" && <MonthCopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={copyMonth} />}
             {view === "month" && <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>}
-            {view === "month" && <button type="button" disabled={Boolean(printJob)} onClick={() => { window.__DEBUG_MONTH_CLICK = (window.__DEBUG_MONTH_CLICK || 0) + 1; window.__DEBUG_SEL = sel; setPrintJob({ type: "month", key: sel }); }} style={St.resetBtn}><Printer size={14} /> {TXT.printMonthBtn}</button>}
+            {view === "month" && <button type="button" disabled={Boolean(printJob)} onClick={() => setPrintJob({ type: "month", key: sel })} style={St.resetBtn}><Printer size={14} /> {TXT.printMonthBtn}</button>}
             {view === "month" && <button type="button" disabled={Boolean(printJob)} onClick={() => setPrintJob({ type: "year", year: sel.slice(0, 4) })} style={St.resetBtn}><Printer size={14} /> {TXT.printYearBtn}</button>}
             <a href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer" style={St.githubLink} aria-label={TXT.sourceOnGitHub} title={TXT.sourceOnGitHub}>
               <Github size={16} />
