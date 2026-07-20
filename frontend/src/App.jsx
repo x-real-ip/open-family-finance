@@ -22,7 +22,7 @@ import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
   ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
-  Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Percent,
+  Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Percent, Printer,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
@@ -208,6 +208,14 @@ const monthShort = (k, locale = getRuntimeDateLocale()) => { const d = keyToDate
 // rather than relying on the January tick alone.
 const monthShortWithYear = (k, locale = getRuntimeDateLocale()) => { const d = keyToDate(k); const m = new Intl.DateTimeFormat(locale, { month: "short" }).format(d); return `${m} '${String(d.getFullYear()).slice(2)}`; };
 const dt = (ts, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(new Date(ts));
+// Read-only figures for any month key, including ones never actually visited
+// (e.g. the rest of a year being printed) — same forward-fill rule goMonth
+// uses to seed a new month, just without writing it back to `data.months`.
+const figuresFor = (months, key) => {
+  if (months[key]) return months[key];
+  const earlier = Object.keys(months).filter((k) => k < key).sort();
+  return earlier.length ? months[earlier[earlier.length - 1]] : DEFAULT_FIGURES;
+};
 const fmtDate = (iso, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(`${iso}T00:00:00`));
 
 // — contract duration: start/end date, "ending soon" warning and progress —
@@ -671,6 +679,8 @@ export default function App() {
   // null = unbounded, so the range always defaults to (and grows with) all available months.
   const [statsFrom, setStatsFrom] = useState(null);
   const [statsTo, setStatsTo] = useState(null);
+  // null = nothing being printed; otherwise { type: "month", key } or { type: "year", year }.
+  const [printJob, setPrintJob] = useState(null);
   const [theme, setTheme] = useState(() => {
     if (typeof window === "undefined") return "light";
     const stored = window.localStorage.getItem("open-family-finance:theme");
@@ -740,6 +750,27 @@ export default function App() {
   const isHistoryMonth = sel < monthKey(new Date());
   const [unlockedMonth, setUnlockedMonth] = useState(null);
   const historyLocked = isHistoryMonth && unlockedMonth !== sel;
+
+  // ── Print / PDF export: a plain, read-only rendering of one month or a
+  // whole year, triggered by window.print() rather than a PDF library — the
+  // browser's own "save as PDF" in the print dialog is exactly what this
+  // needs, with no new dependency. Months never visited yet (rest of a
+  // printed year) are derived the same way goMonth would seed them, without
+  // writing anything back to `data.months`.
+  const printMonths = useMemo(() => {
+    if (!printJob) return [];
+    const keys = printJob.type === "year"
+      ? Array.from({ length: 12 }, (_, i) => `${printJob.year}-${String(i + 1).padStart(2, "0")}`)
+      : [printJob.key];
+    return keys.map((key) => { const fig = figuresFor(data.months, key); return { key, fig, calc: computeTotals(fig) }; });
+  }, [printJob, data.months]);
+  useEffect(() => {
+    if (!printMonths.length) return;
+    const id = requestAnimationFrame(() => window.print());
+    const onAfter = () => setPrintJob(null);
+    window.addEventListener("afterprint", onAfter);
+    return () => { cancelAnimationFrame(id); window.removeEventListener("afterprint", onAfter); };
+  }, [printMonths]);
 
   // Chart only the people currently in `cur` — a person absent from an older
   // month simply reads 0 there (display-only, no data loss).
@@ -1643,15 +1674,126 @@ export default function App() {
           <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
             {view === "month" && <MonthCopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={copyMonth} />}
             {view === "month" && <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>}
+            {view === "month" && <button type="button" disabled={Boolean(printJob)} onClick={() => setPrintJob({ type: "month", key: sel })} style={St.resetBtn}><Printer size={14} /> {TXT.printMonthBtn}</button>}
+            {view === "month" && <button type="button" disabled={Boolean(printJob)} onClick={() => setPrintJob({ type: "year", year: sel.slice(0, 4) })} style={St.resetBtn}><Printer size={14} /> {TXT.printYearBtn}</button>}
             <a href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer" style={St.githubLink} aria-label={TXT.sourceOnGitHub} title={TXT.sourceOnGitHub}>
               <Github size={16} />
             </a>
           </div>
         </footer>
       </div>
+      {printJob && <PrintDocument job={printJob} months={printMonths} appTitle={APP_TITLE} />}
     </div>
   );
 }
+
+// A plain, black-on-white "bank statement" rendering of one or twelve
+// months — deliberately none of the app's own colors/charts/icons, since
+// this exists purely as an offline, on-paper backup, not a nicer view of
+// the data. Printed via window.print() (see the printJob effect in App),
+// so this only needs to look right in print CSS; it's never shown on
+// screen. A month never actually visited yet (the rest of a printed year)
+// still gets its forward-filled figures via `months` (built with
+// figuresFor), same numbers the app itself would show if you navigated
+// there.
+function PrintDocument({ job, months, appTitle }) {
+  const title = job.type === "year" ? t(LANG, "printTitleYear", { year: job.year }) : TXT.printTitleMonth;
+  return (
+    <div className="print-root">
+      <div style={pr.header}>
+        <div style={pr.appTitle}>{appTitle}</div>
+        <div style={pr.docTitle}>{title}</div>
+        <div style={pr.meta}>{t(LANG, "printedOn", { date: dt(Date.now()) })}</div>
+      </div>
+      {months.map(({ key, fig, calc }, i) => (
+        <PrintMonthSection key={key} monthKey={key} fig={fig} calc={calc} isLast={i === months.length - 1} />
+      ))}
+    </div>
+  );
+}
+
+function PrintMonthSection({ monthKey: key, fig, calc, isLast }) {
+  const people = fig.partners.map((p, i) => ({ ...p, income: calc.people[i]?.income ?? 0 }));
+  const govRows = fig.govIncome.map((g) => ({ label: g.label || TXT.unnamed, amount: monthlyOf(g, fig) })).filter((r) => r.amount > 0);
+  const expenseRows = fig.expenses.map((e) => ({ category: e.category || TXT.otherCategory, label: e.label || TXT.unnamed, amount: monthlyOf(e, fig) }));
+  const savingsRows = fig.savings.map((s) => ({ label: s.label || TXT.unnamed, amount: monthlyOf(s, fig) }));
+  const methodLabel = fig.method === "equal" ? TXT.equalMethod : fig.method === "custom" ? TXT.customMethod : TXT.incomeMethod;
+
+  return (
+    <section style={{ ...pr.section, ...(isLast ? {} : pr.pageBreak) }}>
+      <h2 style={pr.monthTitle}>{monthLong(key)}</h2>
+
+      <h3 style={pr.sectionTitle}>{TXT.incomes}</h3>
+      <table style={pr.table}>
+        <tbody>
+          {people.map((p, i) => (
+            <tr key={p.id}><td style={pr.td}>{p.name || t(LANG, "personName", { n: i + 1 })}</td><td style={pr.tdRight}>{eur(p.income)}</td></tr>
+          ))}
+          {govRows.map((r, i) => (
+            <tr key={`gov-${i}`}><td style={pr.td}>{TXT.government}: {r.label}</td><td style={pr.tdRight}>{eur(r.amount)}</td></tr>
+          ))}
+          <tr><td style={pr.tdTotal}>{TXT.total}</td><td style={{ ...pr.tdRight, ...pr.tdTotal }}>{eur(calc.total + calc.govTotal)}</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style={pr.sectionTitle}>{TXT.allocationSection} — {methodLabel}</h3>
+      <table style={pr.table}>
+        <tbody>
+          {people.map((p, i) => (
+            <tr key={p.id}>
+              <td style={pr.td}>{p.name || t(LANG, "personName", { n: i + 1 })}</td>
+              <td style={pr.tdRight}>{eur(calc.transfers[p.id] || 0)}</td>
+              <td style={pr.tdRightMuted}>{TXT.printLeftover} {eur(calc.leftovers[p.id] || 0)}</td>
+            </tr>
+          ))}
+          <tr><td style={pr.tdTotal}>{TXT.coupleFunds}</td><td style={{ ...pr.tdRight, ...pr.tdTotal }}>{eur(calc.coupleFunds)}</td><td /></tr>
+          <tr><td style={pr.td}>{t(LANG, "buffer", { pct: fig.margePct || "0" })}</td><td style={pr.tdRight}>{eur(calc.buffer)}</td><td /></tr>
+        </tbody>
+      </table>
+
+      <h3 style={pr.sectionTitle}>{TXT.expensesSection}</h3>
+      {expenseRows.length === 0 ? <div style={pr.empty}>{TXT.printNoEntries}</div> : (
+        <table style={pr.table}>
+          <tbody>
+            {expenseRows.map((r, i) => (
+              <tr key={i}><td style={pr.td}>{r.category}</td><td style={pr.td}>{r.label}</td><td style={pr.tdRight}>{eur(r.amount)}</td></tr>
+            ))}
+            <tr><td style={pr.tdTotal} colSpan={2}>{TXT.total}</td><td style={{ ...pr.tdRight, ...pr.tdTotal }}>{eur(calc.expensesTotal)}</td></tr>
+          </tbody>
+        </table>
+      )}
+
+      <h3 style={pr.sectionTitle}>{TXT.savingsSection}</h3>
+      {savingsRows.length === 0 ? <div style={pr.empty}>{TXT.printNoEntries}</div> : (
+        <table style={pr.table}>
+          <tbody>
+            {savingsRows.map((r, i) => (
+              <tr key={i}><td style={pr.td}>{r.label}</td><td style={pr.tdRight}>{eur(r.amount)}</td></tr>
+            ))}
+            <tr><td style={pr.tdTotal}>{TXT.total}</td><td style={{ ...pr.tdRight, ...pr.tdTotal }}>{eur(calc.savingsTotal)}</td></tr>
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
+const pr = {
+  header: { textAlign: "center", marginBottom: 24, paddingBottom: 12, borderBottom: "1px solid #000" },
+  appTitle: { fontSize: 13, fontWeight: 700 },
+  docTitle: { fontSize: 20, fontWeight: 700, marginTop: 4 },
+  meta: { fontSize: 11, color: "#333", marginTop: 4 },
+  section: { marginBottom: 28 },
+  pageBreak: { pageBreakAfter: "always" },
+  monthTitle: { fontSize: 15, fontWeight: 700, textTransform: "capitalize", margin: "0 0 8px", borderBottom: "1px solid #000", paddingBottom: 4 },
+  sectionTitle: { fontSize: 12, fontWeight: 700, margin: "14px 0 4px", textTransform: "uppercase", letterSpacing: 0.4 },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
+  td: { padding: "3px 6px", borderBottom: "1px solid #ccc", textAlign: "left" },
+  tdRight: { padding: "3px 6px", borderBottom: "1px solid #ccc", textAlign: "right", whiteSpace: "nowrap" },
+  tdRightMuted: { padding: "3px 6px", borderBottom: "1px solid #ccc", textAlign: "right", whiteSpace: "nowrap", color: "#555", fontSize: 11 },
+  tdTotal: { padding: "4px 6px", fontWeight: 700, borderTop: "1px solid #000" },
+  empty: { fontSize: 12, color: "#555", fontStyle: "italic", margin: "4px 0" },
+};
 
 /* ----------------------------------------------------------------
    Subcomponents
@@ -3087,4 +3229,10 @@ input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outli
   .entryActions button { padding: 5px !important; }
 }
 @media (prefers-reduced-motion: reduce) { .fade, .spin { animation: none !important; } }
+.print-root { display: none; }
+@media print {
+  body { background: #fff; }
+  .shell { display: none !important; }
+  .print-root { display: block; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif; }
+}
 `;
