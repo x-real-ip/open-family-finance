@@ -2027,6 +2027,29 @@ function SankeyNode({ x, y, width, height, payload, containerWidth }) {
   );
 }
 
+// The tallest column (nodes sharing the same longest-path depth from a
+// source) determines how much vertical room the Sankey actually needs —
+// a fixed chart height made sense for the small "totals" graph but left the
+// busier levels (many expense/savings/personal-expense leaves stacked in one
+// column) squeezed into slivers. Depth is computed by relaxation rather than
+// a single topological pass since that's simplest for a small, acyclic graph.
+function maxColumnSize(nodes, links) {
+  const depth = new Array(nodes.length).fill(0);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const l of links) {
+      if (depth[l.target] < depth[l.source] + 1) {
+        depth[l.target] = depth[l.source] + 1;
+        changed = true;
+      }
+    }
+  }
+  const counts = {};
+  for (const d of depth) counts[d] = (counts[d] || 0) + 1;
+  return Math.max(1, ...Object.values(counts));
+}
+
 const CASHFLOW_DETAIL_LABELS = { 1: "cashflowDetailTotals", 2: "cashflowDetailCategories", 3: "cashflowDetailFull" };
 // First-draft cashflow view: traces salary → household pot/personal leftover
 // → expenses/savings/buffer or personal spending → the last known category
@@ -2037,6 +2060,7 @@ const CASHFLOW_DETAIL_LABELS = { 1: "cashflowDetailTotals", 2: "cashflowDetailCa
 function CashflowPage({ cur, calc }) {
   const [detail, setDetail] = useState(1);
   const { nodes, links } = useMemo(() => buildCashflow(cur, calc, detail), [cur, calc, detail]);
+  const chartHeight = useMemo(() => Math.min(1100, Math.max(420, maxColumnSize(nodes, links) * 56)), [nodes, links]);
   return (
     <div className="fade">
       <ColTitle>{TXT.cashflowView}</ColTitle>
@@ -2055,10 +2079,10 @@ function CashflowPage({ cur, calc }) {
           <span>{TXT.noSeries}</span>
         </div>
       ) : (
-        <div style={{ ...St.chartBox, height: 480, marginTop: 12 }}>
+        <div style={{ ...St.chartBox, height: chartHeight, marginTop: 12 }}>
           <ResponsiveContainer width="100%" height="100%">
             <Sankey data={{ nodes, links }} node={<SankeyNode />} link={<SankeyLink />}
-              nodePadding={24} nodeWidth={10} margin={{ top: 8, right: 120, bottom: 8, left: 120 }}>
+              nodePadding={16} nodeWidth={10} margin={{ top: 8, right: 120, bottom: 8, left: 120 }}>
               <Tooltip {...tooltipProps} />
             </Sankey>
           </ResponsiveContainer>
