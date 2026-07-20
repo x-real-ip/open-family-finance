@@ -403,6 +403,12 @@ function buildCashflow(cur, calc, detail) {
   addLink(potKey, saveKey, calc.savingsTotal);
   addLink(potKey, bufferKey, calc.buffer);
 
+  // A node with no outgoing link is a terminal/rightmost one — used by
+  // SankeyNode to flip its label to the other side so it never spills past
+  // the chart's right edge, regardless of how many columns this level has.
+  const hasOutgoing = new Set(links.map((l) => l.source));
+  nodes.forEach((n, i) => { n.isSink = !hasOutgoing.has(i); });
+
   return { nodes, links };
 }
 
@@ -2007,24 +2013,57 @@ function SankeyLink({ sourceX, targetX, sourceY, targetY, sourceControlX, target
 // A colored rectangle + name + amount label per Sankey node — recharts'
 // default Sankey node is a single flat fill, so this is needed for the
 // same per-person/per-category coloring used throughout the rest of the
-// app. Labels flow outward (right of left-half nodes, left of right-half
-// ones) so they never spill outside the chart.
-function SankeyNode({ x, y, width, height, payload, containerWidth }) {
-  const isRightHalf = x + width / 2 > containerWidth / 2;
-  const labelX = isRightHalf ? x - 6 : x + width + 6;
+// app. Labels flow outward (right of every node, except terminal/sink nodes
+// — those have nothing further to their right, so their label flips to the
+// left instead, ending right where the node starts) so they never spill
+// past the chart's right edge.
+function SankeyNode({ x, y, width, height, payload }) {
+  const isSink = payload.isSink;
+  const labelX = isSink ? x - 6 : x + width + 6;
   return (
     <Layer>
       <Rectangle x={x} y={y} width={width} height={height} fill={payload.color} fillOpacity={0.9} />
-      <text x={labelX} y={y + height / 2 - 2} textAnchor={isRightHalf ? "end" : "start"} dominantBaseline="middle"
+      <text x={labelX} y={y + height / 2 - 2} textAnchor={isSink ? "end" : "start"} dominantBaseline="middle"
         style={{ fontSize: 12, fill: C.ink, fontFamily: "Inter, sans-serif" }}>
         {payload.name}
       </text>
-      <text x={labelX} y={y + height / 2 + 12} textAnchor={isRightHalf ? "end" : "start"} dominantBaseline="middle"
+      <text x={labelX} y={y + height / 2 + 12} textAnchor={isSink ? "end" : "start"} dominantBaseline="middle"
         style={{ fontSize: 11, fill: C.muted, fontFamily: "Inter, sans-serif" }}>
         {eur0(payload.value)}
       </text>
     </Layer>
   );
+}
+
+// The tallest column determines how much vertical room the Sankey actually
+// needs — a fixed chart height made sense for the small "totals" graph but
+// left the busier levels squeezed into slivers. recharts' Sankey (like
+// d3-sankey) uses "justify" alignment: every sink node (no outgoing link),
+// regardless of how deep it naturally sits, gets pushed into one shared
+// rightmost column — expense categories, savings entries and personal
+// leftovers all land in the same column even though their longest-path
+// depth differs. So sinks are counted together as a single column; only
+// non-sink nodes are bucketed by their natural (longest-path) depth, found
+// by relaxation since that's simplest for a small, acyclic graph.
+function maxColumnSize(nodes, links) {
+  const depth = new Array(nodes.length).fill(0);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const l of links) {
+      if (depth[l.target] < depth[l.source] + 1) {
+        depth[l.target] = depth[l.source] + 1;
+        changed = true;
+      }
+    }
+  }
+  const counts = {};
+  let sinkCount = 0;
+  nodes.forEach((n, i) => {
+    if (n.isSink) { sinkCount += 1; return; }
+    counts[depth[i]] = (counts[depth[i]] || 0) + 1;
+  });
+  return Math.max(1, sinkCount, ...Object.values(counts));
 }
 
 const CASHFLOW_DETAIL_LABELS = { 1: "cashflowDetailTotals", 2: "cashflowDetailCategories", 3: "cashflowDetailFull" };
@@ -2037,6 +2076,7 @@ const CASHFLOW_DETAIL_LABELS = { 1: "cashflowDetailTotals", 2: "cashflowDetailCa
 function CashflowPage({ cur, calc }) {
   const [detail, setDetail] = useState(1);
   const { nodes, links } = useMemo(() => buildCashflow(cur, calc, detail), [cur, calc, detail]);
+  const chartHeight = useMemo(() => Math.min(1500, Math.max(440, maxColumnSize(nodes, links) * 72 + 60)), [nodes, links]);
   return (
     <div className="fade">
       <ColTitle>{TXT.cashflowView}</ColTitle>
@@ -2055,10 +2095,10 @@ function CashflowPage({ cur, calc }) {
           <span>{TXT.noSeries}</span>
         </div>
       ) : (
-        <div style={{ ...St.chartBox, height: 480, marginTop: 12 }}>
+        <div style={{ ...St.chartBox, height: chartHeight, marginTop: 12 }}>
           <ResponsiveContainer width="100%" height="100%">
             <Sankey data={{ nodes, links }} node={<SankeyNode />} link={<SankeyLink />}
-              nodePadding={24} nodeWidth={10} margin={{ top: 8, right: 120, bottom: 8, left: 120 }}>
+              nodePadding={30} nodeWidth={10} margin={{ top: 20, right: 130, bottom: 20, left: 130 }}>
               <Tooltip {...tooltipProps} />
             </Sankey>
           </ResponsiveContainer>
