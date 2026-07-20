@@ -206,5 +206,12 @@ export default {
     restoreMonthFromPrevious: "Cijfers van {month} terugzetten naar die van {source}? Handmatige aanpassingen in deze maand vervallen.",
     restoreMonthFromEmpty: "Cijfers van {month} terugzetten naar het lege voorbeeld? (er is geen eerdere maand om van over te nemen)",
     priceTrend: "Prijsverloop",
+    printMonthBtn: "Maand printen",
+    printYearBtn: "Jaar printen",
+    printedOn: "Afgedrukt op {date}",
+    printTitleMonth: "Maandoverzicht",
+    printTitleYear: "Jaaroverzicht {year}",
+    printNoEntries: "Geen posten.",
+    printLeftover: "Overschot",
   },
 };

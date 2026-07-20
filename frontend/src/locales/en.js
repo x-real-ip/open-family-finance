@@ -206,5 +206,12 @@ export default {
     restoreMonthFromPrevious: "Restore {month} to the figures of {source}? Manual changes in this month will be lost.",
     restoreMonthFromEmpty: "Restore {month} to the empty example? (there is no earlier month to copy from)",
     priceTrend: "Price trend",
+    printMonthBtn: "Print month",
+    printYearBtn: "Print year",
+    printedOn: "Printed on {date}",
+    printTitleMonth: "Monthly overview",
+    printTitleYear: "Year overview {year}",
+    printNoEntries: "No entries.",
+    printLeftover: "Leftover",
   },
 };
