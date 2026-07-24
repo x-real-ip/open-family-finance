@@ -52,6 +52,8 @@ export default {
     savingsSection: "Spaardoelen",
     addSaving: "Spaardoel toevoegen",
     viewToggleAria: "Wissel tussen de verschillende weergaven",
+    jointView: "Gezamenlijk",
+    jointSubViewToggleAria: "Wissel tussen maandoverzicht, spaaroverzicht en geldstromen",
     monthView: "Maandoverzicht",
     savingsOverviewView: "Spaaroverzicht",
     cashflowView: "Geldstromen",

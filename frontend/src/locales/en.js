@@ -52,6 +52,8 @@ export default {
     savingsSection: "Savings goals",
     addSaving: "Add savings goal",
     viewToggleAria: "Switch between the different views",
+    jointView: "Joint",
+    jointSubViewToggleAria: "Switch between monthly view, savings overview and cashflow",
     monthView: "Monthly view",
     savingsOverviewView: "Savings overview",
     cashflowView: "Cashflow",

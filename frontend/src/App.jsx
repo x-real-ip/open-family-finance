@@ -674,6 +674,10 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(true);
   const [view, setView] = useState("month");
+  // Sub-view within the joint ("month") tab — Spaaroverzicht and Geldstromen
+  // used to be separate top-level tabs; they now live here as sections of
+  // the joint tab instead.
+  const [jointSubView, setJointSubView] = useState("overview");
   const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, statsIncome: true, statsTotals: false, log: false });
   const [showDetails, setShowDetails] = useState(false);
   // null = unbounded, so the range always defaults to (and grows with) all available months.
@@ -1308,9 +1312,7 @@ export default function App() {
             </button>
           </div>
           <div style={{ ...St.toggle, marginTop: 10 }} role="group" aria-label={TXT.viewToggleAria}>
-            <button type="button" onClick={() => setView("month")} style={{ ...St.toggleBtn, ...(view === "month" ? St.toggleOn : {}) }}>{TXT.monthView}</button>
-            <button type="button" onClick={() => setView("savings")} style={{ ...St.toggleBtn, ...(view === "savings" ? St.toggleOn : {}) }}>{TXT.savingsOverviewView}</button>
-            <button type="button" onClick={() => setView("cashflow")} style={{ ...St.toggleBtn, ...(view === "cashflow" ? St.toggleOn : {}) }}>{TXT.cashflowView}</button>
+            <button type="button" onClick={() => setView("month")} style={{ ...St.toggleBtn, ...(view === "month" ? St.toggleOn : {}) }}>{TXT.jointView}</button>
             {cur.partners.map((p, i) => (
               <button key={p.id} type="button" onClick={() => setView(`person:${p.id}`)}
                 style={{ ...St.toggleBtn, ...(personView === p.id ? { ...St.toggleOn, color: personColor(p, i).main } : {}) }}>
@@ -1320,9 +1322,9 @@ export default function App() {
           </div>
         </header>
 
-        {/* Month — shared by both views: the savings overview edits each
-            linked entry's amount for whichever month is selected here, the
-            same way the monthly view does. */}
+        {/* Month — shared across all joint sub-views: the savings overview
+            edits each linked entry's amount for whichever month is selected
+            here, the same way the monthly view does. */}
         <div style={St.monthNav} className="fade">
           <button type="button" onClick={() => goMonth(-1)} style={St.navBtn} aria-label={TXT.previousMonth}><ChevronLeft size={18} /></button>
           <div style={St.monthLabelWrap}>
@@ -1348,8 +1350,16 @@ export default function App() {
           </div>
         )}
 
+        {view === "month" && (
+          <div style={{ ...St.toggle, marginTop: 10 }} role="group" aria-label={TXT.jointSubViewToggleAria}>
+            <button type="button" onClick={() => setJointSubView("overview")} style={{ ...St.toggleBtn, ...(jointSubView === "overview" ? St.toggleOn : {}) }}>{TXT.monthView}</button>
+            <button type="button" onClick={() => setJointSubView("savings")} style={{ ...St.toggleBtn, ...(jointSubView === "savings" ? St.toggleOn : {}) }}>{TXT.savingsOverviewView}</button>
+            <button type="button" onClick={() => setJointSubView("cashflow")} style={{ ...St.toggleBtn, ...(jointSubView === "cashflow" ? St.toggleOn : {}) }}>{TXT.cashflowView}</button>
+          </div>
+        )}
+
         <div style={historyLocked ? St.historyLockedContent : undefined}>
-        {view === "savings" ? (
+        {view === "month" && jointSubView === "savings" ? (
           <SavingsOverviewPage
             savingsGoals={data.savingsGoals || []}
             months={data.months}
@@ -1361,7 +1371,7 @@ export default function App() {
             onRemoveSubAccount={removeSubAccount}
             onUpdateSubAccount={updateSubAccount}
           />
-        ) : view === "cashflow" ? (
+        ) : view === "month" && jointSubView === "cashflow" ? (
           <CashflowPage cur={cur} calc={calc} />
         ) : activePerson ? (
           <div className="fade">
@@ -1672,10 +1682,10 @@ export default function App() {
             {!loaded ? (<><Loader2 size={14} className="spin" /> {TXT.loading}</>) : saved ? (<><Check size={14} style={{ color: C.save }} /> {TXT.saved}</>) : (<><Loader2 size={14} className="spin" /> {TXT.saving}</>) }
           </span>
           <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
-            {view === "month" && <MonthCopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={copyMonth} />}
-            {view === "month" && <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>}
-            {view === "month" && <button type="button" disabled={Boolean(printJob)} onClick={() => setPrintJob({ type: "month", key: sel })} style={St.resetBtn}><Printer size={14} /> {TXT.printMonthBtn}</button>}
-            {view === "month" && <button type="button" disabled={Boolean(printJob)} onClick={() => setPrintJob({ type: "year", year: sel.slice(0, 4) })} style={St.resetBtn}><Printer size={14} /> {TXT.printYearBtn}</button>}
+            {view === "month" && jointSubView === "overview" && <MonthCopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={copyMonth} />}
+            {view === "month" && jointSubView === "overview" && <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>}
+            {view === "month" && jointSubView === "overview" && <button type="button" disabled={Boolean(printJob)} onClick={() => setPrintJob({ type: "month", key: sel })} style={St.resetBtn}><Printer size={14} /> {TXT.printMonthBtn}</button>}
+            {view === "month" && jointSubView === "overview" && <button type="button" disabled={Boolean(printJob)} onClick={() => setPrintJob({ type: "year", year: sel.slice(0, 4) })} style={St.resetBtn}><Printer size={14} /> {TXT.printYearBtn}</button>}
             <a href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer" style={St.githubLink} aria-label={TXT.sourceOnGitHub} title={TXT.sourceOnGitHub}>
               <Github size={16} />
             </a>
