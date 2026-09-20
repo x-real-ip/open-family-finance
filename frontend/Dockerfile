@@ -1,5 +1,5 @@
 # --- Build ---
-FROM node:20-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
@@ -7,7 +7,7 @@ COPY . .
 RUN npm run build
 
 # --- Serve ---
-FROM nginx:1.27-alpine
+FROM nginx:1.31-alpine
 # The official nginx image substitutes ${BACKEND_URL} via envsubst at startup.
 COPY default.conf.template /etc/nginx/templates/default.conf.template
 # Optional bearer token: rendered into env.js from the API_TOKEN env var at
