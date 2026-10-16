@@ -213,5 +213,12 @@ export default {
     printTitleYear: "Year overview {year}",
     printNoEntries: "No entries.",
     printLeftover: "Leftover",
+    navMonth: "Month",
+    navSavings: "Savings",
+    navCashflow: "Flows",
+    moreActions: "More actions",
+    confirmDeleteMonth: "Delete {month}? All figures for this month will be lost.",
+    loadFailed: "Could not load your data. Nothing will be saved until it loads, so your existing data isn't overwritten.",
+    retry: "Try again",
   },
 };

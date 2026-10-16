@@ -213,5 +213,12 @@ export default {
     printTitleYear: "Jaaroverzicht {year}",
     printNoEntries: "Geen posten.",
     printLeftover: "Overschot",
+    navMonth: "Maand",
+    navSavings: "Sparen",
+    navCashflow: "Stromen",
+    moreActions: "Meer acties",
+    confirmDeleteMonth: "{month} verwijderen? Alle bedragen van deze maand gaan verloren.",
+    loadFailed: "Kon de gegevens niet laden. Er wordt niets opgeslagen tot dit gelukt is, zodat je bestaande gegevens niet overschreven worden.",
+    retry: "Opnieuw proberen",
   },
 };

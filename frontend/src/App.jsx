@@ -23,6 +23,7 @@ import {
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
   ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
   Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Percent, Printer,
+  MoreHorizontal, CalendarDays, Waypoints,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
@@ -716,14 +717,27 @@ export default function App() {
   };
 
   // ── Load once on mount, then autosave (debounced) ──
+  // A failed load (network error, 401, 5xx) must never flip `loaded`: the
+  // autosave below would then PUT the empty freshData() over the real blob.
+  // Only "not found" (storage.get → null) counts as a genuinely new install.
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
     let active = true;
     (async () => {
-      try { const res = await storage.get(KEY); if (active && res && res.value) setData(normalize(JSON.parse(res.value))); }
-      catch (e) {} finally { if (active) setLoaded(true); }
+      try {
+        const res = await storage.get(KEY);
+        if (!active) return;
+        if (res && res.value) setData(normalize(JSON.parse(res.value)));
+        setLoadError(false);
+        setLoaded(true);
+      } catch (e) {
+        console.error("Could not load state", e);
+        if (active) setLoadError(true);
+      }
     })();
     return () => { active = false; };
-  }, []);
+  }, [loadAttempt]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -965,13 +979,16 @@ export default function App() {
     }
     return { ...d, selectedMonth: current, months };
   });
-  const deleteMonth = (m) => setData((d) => {
-    if (Object.keys(d.months).length <= 1) return d;
-    const months = { ...d.months }; delete months[m];
-    const remaining = Object.keys(months).sort();
-    const selectedMonth = d.selectedMonth === m ? remaining[remaining.length - 1] : d.selectedMonth;
-    return { ...d, selectedMonth, months };
-  });
+  const deleteMonth = (m) => {
+    if (!window.confirm(t(LANG, "confirmDeleteMonth", { month: monthLong(m) }))) return;
+    setData((d) => {
+      if (Object.keys(d.months).length <= 1) return d;
+      const months = { ...d.months }; delete months[m];
+      const remaining = Object.keys(months).sort();
+      const selectedMonth = d.selectedMonth === m ? remaining[remaining.length - 1] : d.selectedMonth;
+      return { ...d, selectedMonth, months };
+    });
+  };
 
   // ── Mutations ──
   // Forward-propagation model: an edit changes the selected month AND
@@ -1124,7 +1141,11 @@ export default function App() {
   const setPersonalExpenseItem = (personId, id, patch) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: (f.personalExpenses[personId] || []).map((x) => x.id === id ? { ...x, ...patch } : x) } }), id);
   const togglePersonalExpenseItemPeriod = (personId, id) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: (f.personalExpenses[personId] || []).map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x) } }), id);
   const removePersonalExpenseItem = (personId, id) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: (f.personalExpenses[personId] || []).filter((x) => x.id !== id) } }), id);
-  const addPersonalExpense = (personId) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: [...(f.personalExpenses[personId] || []), clone({ id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" })] } }), uid());
+  // One id for both the entry and its override key (they used to be two separate uid() calls).
+  const addPersonalExpense = (personId) => {
+    const id = uid();
+    editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: [...(f.personalExpenses[personId] || []), { id, category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" }] } }), id);
+  };
   const copyPersonalExpenseEntryRange = (personId, id, pastKeys, futureKeys) => setData((d) => {
     const s = d.selectedMonth;
     const item = (d.months[s].personalExpenses[personId] || []).find((x) => x.id === id);
@@ -1230,7 +1251,7 @@ export default function App() {
                 </span>
                 <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => set(e.id, { label: ev.target.value })} style={St.nameInput} />
                 <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => set(e.id, { amount: v })} onPeriod={() => togglePeriod(e.id)} onCommit={(o, n) => logChange(`${logPrefix} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
-                <span className="entryActions" style={St.rowActions}>
+                <EntryActions>
                   <NoteField value={e.note || ""} onChange={(v) => set(e.id, { note: v })} />
                   <LinkField value={e.url || ""} onChange={(v) => set(e.id, { url: v })} />
                   <CorrespondentField entry={e} onChange={(patch) => set(e.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
@@ -1240,7 +1261,7 @@ export default function App() {
                   <SparkIcon history={entryHistory(kind, e.id, personId)} />
                   <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyRange(e.id, pk, fk)} />
                   <button type="button" aria-label={TXT.delete} onClick={() => remove(e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
-                </span>
+                </EntryActions>
               </div>
               <DerivedLine monthly={monthlyOf(e, cur)} period={e.period} percent={pctOf(monthlyOf(e, cur), total)} correspondent={e.correspondent} />
             </div>
@@ -1279,7 +1300,7 @@ export default function App() {
 
   // ── Render ──
   return (
-    <div style={St.page}>
+    <div style={St.page} className="page">
       <style>{CSS}</style>
       <datalist id="cats">{categories.map((c) => <option key={c} value={c} />)}</datalist>
       {PAPERLESS_ENABLED && <datalist id="correspondents">{correspondents.map((c) => <option key={c} value={c} />)}</datalist>}
@@ -1300,14 +1321,22 @@ export default function App() {
           </div>
         )}
 
-        <header style={St.header}>
+        {loadError && (
+          <div style={St.errorBanner} role="alert">
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span style={{ flex: 1 }}>{TXT.loadFailed}</span>
+            <button type="button" onClick={() => setLoadAttempt((n) => n + 1)} style={St.historyBannerBtn}>{TXT.retry}</button>
+          </div>
+        )}
+
+        <header style={St.header} className="appHeader">
           <div style={St.headerTop}>
-            <h1 style={St.h1}>{APP_TITLE}</h1>
+            <h1 style={St.h1} className="appTitle">{APP_TITLE}</h1>
             <button type="button" onClick={toggleTheme} style={St.themeBtn} aria-label={t(LANG, "themeToggle", { theme: theme === "dark" ? TXT.themeLight : TXT.themeDark })}>
-              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} {theme === "dark" ? TXT.themeLight : TXT.themeDark}
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} <span className="themeLabel">{theme === "dark" ? TXT.themeLight : TXT.themeDark}</span>
             </button>
           </div>
-          <div style={{ ...St.toggle, marginTop: 10 }} role="group" aria-label={TXT.viewToggleAria}>
+          <div style={{ ...St.toggle, marginTop: 10 }} className="viewTabs" role="group" aria-label={TXT.viewToggleAria}>
             <button type="button" onClick={() => setView("month")} style={{ ...St.toggleBtn, ...(view === "month" ? St.toggleOn : {}) }}>{TXT.monthView}</button>
             <button type="button" onClick={() => setView("savings")} style={{ ...St.toggleBtn, ...(view === "savings" ? St.toggleOn : {}) }}>{TXT.savingsOverviewView}</button>
             <button type="button" onClick={() => setView("cashflow")} style={{ ...St.toggleBtn, ...(view === "cashflow" ? St.toggleOn : {}) }}>{TXT.cashflowView}</button>
@@ -1323,19 +1352,23 @@ export default function App() {
         {/* Month — shared by both views: the savings overview edits each
             linked entry's amount for whichever month is selected here, the
             same way the monthly view does. */}
-        <div style={St.monthNav} className="fade">
-          <button type="button" onClick={() => goMonth(-1)} style={St.navBtn} aria-label={TXT.previousMonth}><ChevronLeft size={18} /></button>
-          <div style={St.monthLabelWrap}>
+        {/* On phones (≤640px CSS) this collapses into one sticky row:
+            ‹ month › — the native <select> is laid invisibly over the month
+            label, so tapping the label opens the OS month picker. */}
+        <div style={St.monthNav} className={`fade monthNav${isCurrentRealMonth ? " isCurrent" : ""}`}>
+          <button type="button" onClick={() => goMonth(-1)} style={St.navBtn} className="navPrev" aria-label={TXT.previousMonth}><ChevronLeft size={18} /></button>
+          <div style={St.monthLabelWrap} className="monthLabelWrap">
             <span style={St.monthLabel}>{monthLong(sel)}</span>
             {isCurrentRealMonth && <span style={St.nowTag}>{TXT.nowTag}</span>}
+            <ChevronDown size={16} className="monthPickHint" style={{ color: C.muted }} />
           </div>
-          <select value={sel} onChange={(e) => setData((d) => ({ ...d, selectedMonth: e.target.value }))} style={St.monthSelect} aria-label={TXT.chooseMonth}>
+          <select value={sel} onChange={(e) => setData((d) => ({ ...d, selectedMonth: e.target.value }))} style={St.monthSelect} className="monthSelect" aria-label={TXT.chooseMonth}>
             {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
           </select>
-          <button type="button" onClick={goCurrent} style={St.currentBtn} aria-label={TXT.currentMonth}>{TXT.currentMonth}</button>
-          <button type="button" onClick={() => goMonth(1)} style={St.navBtn} aria-label={TXT.nextMonth}><ChevronRight size={18} /></button>
+          <button type="button" onClick={goCurrent} style={St.currentBtn} className="currentBtn" aria-label={TXT.currentMonth}>{TXT.currentMonth}</button>
+          <button type="button" onClick={() => goMonth(1)} style={St.navBtn} className="navNext" aria-label={TXT.nextMonth}><ChevronRight size={18} /></button>
           {sortedMonths.length > 1 && (
-            <button type="button" onClick={() => deleteMonth(sel)} style={St.navBtn} aria-label={`${TXT.deleteMonth} · ${monthLong(sel)}`}><Trash2 size={16} /></button>
+            <button type="button" onClick={() => deleteMonth(sel)} style={St.navBtn} className="navDelete" aria-label={`${TXT.deleteMonth} · ${monthLong(sel)}`}><Trash2 size={16} /></button>
           )}
         </div>
 
@@ -1348,7 +1381,8 @@ export default function App() {
           </div>
         )}
 
-        <div style={historyLocked ? St.historyLockedContent : undefined}>
+        {/* `inert` also blocks keyboard focus/editing, which pointer-events alone doesn't. */}
+        <div style={historyLocked ? St.historyLockedContent : undefined} inert={historyLocked ? "" : undefined}>
         {view === "savings" ? (
           <SavingsOverviewPage
             savingsGoals={data.savingsGoals || []}
@@ -1385,7 +1419,7 @@ export default function App() {
                 <span className="e-lead"><span style={{ ...St.dot, background: personColor(p, i).main }} /></span>
                 <input className="e-desc" aria-label={t(LANG, "personName", { n: i + 1 })} value={p.name} placeholder={t(LANG, "personPlaceholder", { n: i + 1 })} onChange={(e) => setPartnerName(p.id, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
                 <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setPartner(p.id, { income: v })} onPeriod={() => togglePartnerPeriod(p.id)} onCommit={(o, n) => logChange(`${TXT.salarySection} · ${personName(p, i)}`, o, n)} /></span>
-                <span className="entryActions" style={St.rowActions}>
+                <EntryActions>
                   <NoteField value={p.note || ""} onChange={(v) => setPartner(p.id, { note: v })} />
                   <LinkField value={p.url || ""} onChange={(v) => setPartner(p.id, { url: v })} />
                   <CorrespondentField entry={p} onChange={(patch) => setPartner(p.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
@@ -1396,7 +1430,7 @@ export default function App() {
                   {cur.partners.length > 1 && (
                     <button type="button" aria-label={TXT.delete} onClick={() => removePerson(p.id)} style={St.iconBtn}><Trash2 size={16} /></button>
                   )}
-                </span>
+                </EntryActions>
               </div>
               <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} correspondent={p.correspondent} dot />
             </div>
@@ -1421,7 +1455,7 @@ export default function App() {
                   </span>
                   <input className="e-desc" aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
-                  <span className="entryActions" style={St.rowActions}>
+                  <EntryActions>
                     <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
                     <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
                     <CorrespondentField entry={g} onChange={(patch) => setListItem("govIncome", g.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
@@ -1431,7 +1465,7 @@ export default function App() {
                     <SparkIcon history={entryHistory("govIncome", g.id)} />
                     <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("govIncome", g.id, pk, fk)} />
                     <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
-                  </span>
+                  </EntryActions>
                 </div>
                 <DerivedLine monthly={monthlyOf(g, cur)} period={g.period} percent={pctOf(monthlyOf(g, cur), calc.govTotal)} correspondent={g.correspondent} dot />
               </div>
@@ -1554,7 +1588,7 @@ export default function App() {
                   </span>
                   <input className="e-desc" aria-label={TXT.category} value={s.label} placeholder={TXT.categoryPlaceholder} onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
                   <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`${TXT.savingsSection} · ${s.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
-                  <span className="entryActions" style={St.rowActions}>
+                  <EntryActions>
                     <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
                     <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
                     <CorrespondentField entry={s} onChange={(patch) => setListItem("savings", s.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
@@ -1564,7 +1598,7 @@ export default function App() {
                     <SparkIcon history={entryHistory("savings", s.id)} />
                     <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("savings", s.id, pk, fk)} />
                     <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("savings", s.id)} style={St.iconBtn}><Trash2 size={16} /></button>
-                  </span>
+                  </EntryActions>
                 </div>
                 <DerivedLine monthly={monthlyOf(s, cur)} period={s.period} percent={pctOf(monthlyOf(s, cur), calc.savingsTotal)} correspondent={s.correspondent} dot />
               </div>
@@ -1667,11 +1701,12 @@ export default function App() {
         )}
         </div>
 
-        <footer style={St.footer}>
+        <footer style={St.footer} className="appFooter">
           <span style={St.saveState}>
-            {!loaded ? (<><Loader2 size={14} className="spin" /> {TXT.loading}</>) : saved ? (<><Check size={14} style={{ color: C.save }} /> {TXT.saved}</>) : (<><Loader2 size={14} className="spin" /> {TXT.saving}</>) }
+            {loadError ? (<><AlertTriangle size={14} style={{ color: C.exp }} /> {TXT.loadFailed.split(".")[0]}</>) : !loaded ? (<><Loader2 size={14} className="spin" /> {TXT.loading}</>) : saved ? (<><Check size={14} style={{ color: C.save }} /> {TXT.saved}</>) : (<><Loader2 size={14} className="spin" /> {TXT.saving}</>) }
           </span>
-          <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+          <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }} className="footerActions">
+            {view === "month" && sortedMonths.length > 1 && <button type="button" onClick={() => deleteMonth(sel)} style={St.resetBtn} className="mobileOnly"><Trash2 size={14} /> {TXT.deleteMonth}</button>}
             {view === "month" && <MonthCopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={copyMonth} />}
             {view === "month" && <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>}
             {view === "month" && <button type="button" disabled={Boolean(printJob)} onClick={() => setPrintJob({ type: "month", key: sel })} style={St.resetBtn}><Printer size={14} /> {TXT.printMonthBtn}</button>}
@@ -1682,6 +1717,20 @@ export default function App() {
           </div>
         </footer>
       </div>
+
+      {/* Phone-only bottom tab bar (hidden ≥641px, where the header tabs show). */}
+      <nav className="bottomNav" aria-label={TXT.viewToggleAria}>
+        {[["month", CalendarDays, TXT.navMonth], ["savings", PiggyBank, TXT.navSavings], ["cashflow", Waypoints, TXT.navCashflow]].map(([v, Icon, label]) => (
+          <button key={v} type="button" onClick={() => { setView(v); window.scrollTo({ top: 0 }); }} className={view === v ? "on" : undefined} aria-current={view === v ? "page" : undefined}>
+            <Icon size={20} /><span>{label}</span>
+          </button>
+        ))}
+        {cur.partners.map((p, i) => (
+          <button key={p.id} type="button" onClick={() => { setView(`person:${p.id}`); window.scrollTo({ top: 0 }); }} className={personView === p.id ? "on" : undefined} aria-current={personView === p.id ? "page" : undefined}>
+            <span className="navAvatar" style={{ background: personColor(p, i).main }}>{(personName(p, i)[0] || "?").toUpperCase()}</span><span>{personName(p, i)}</span>
+          </button>
+        ))}
+      </nav>
       {printJob && <PrintDocument job={printJob} months={printMonths} appTitle={APP_TITLE} />}
     </div>
   );
@@ -2237,13 +2286,15 @@ function CashflowPage({ cur, calc }) {
           <span>{TXT.noSeries}</span>
         </div>
       ) : (
-        <div style={{ ...St.chartBox, height: chartHeight, marginTop: 12 }}>
+        <div className="hScroll">
+        <div style={{ ...St.chartBox, height: chartHeight, marginTop: 12 }} className="sankeyBox">
           <ResponsiveContainer width="100%" height="100%">
             <Sankey data={{ nodes, links }} node={<SankeyNode />} link={<SankeyLink />}
               nodePadding={30} nodeWidth={10} margin={{ top: 20, right: 130, bottom: 20, left: 130 }}>
               <Tooltip {...tooltipProps} />
             </Sankey>
           </ResponsiveContainer>
+        </div>
         </div>
       )}
     </div>
@@ -2336,7 +2387,7 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
       <div role="button" tabIndex={0} aria-expanded={open}
         onClick={onToggleOpen}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleOpen(); } }}
-        style={St.collapseHead}>
+        style={St.collapseHead} className="goalHead">
         <span style={St.savingsGoalName}>{entry.label || TXT.unnamed}</span>
         <span style={{ flex: 1 }} />
         {/* Read-only here on purpose — this is the same monthly entry shown
@@ -2514,7 +2565,7 @@ function SubAccountRow({ sub, entryMonthlyAmount, sel, onChange, onRemove }) {
         </span>
         <input className="e-desc" aria-label={TXT.subAccountHolder} value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder}
           onChange={(e) => onChange({ holder: e.target.value })} style={St.nameInput} />
-        <span className="entryActions" style={St.rowActions}>
+        <EntryActions>
           <IconPopoverField icon={Percent} ariaLabel={TXT.subAccountShare} active={num(sub.sharePercent ?? 100) !== 100 || num(sub.interestRate) > 0}>
             {(markEditing) => (
               <>
@@ -2576,7 +2627,7 @@ function SubAccountRow({ sub, entryMonthlyAmount, sel, onChange, onRemove }) {
             )}
           </IconPopoverField>
           <button type="button" aria-label={TXT.delete} onClick={onRemove} style={St.iconBtn}><Trash2 size={16} /></button>
-        </span>
+        </EntryActions>
       </div>
     </div>
   );
@@ -2808,7 +2859,7 @@ function MonthCopyField({ pastMonths, futureMonths, onCopy }) {
   };
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }}>
-      <button type="button" aria-label={TXT.copyMonthAria} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
+      <button type="button" aria-label={TXT.copyMonthAria} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={{ ...St.iconBtn, gap: 6, alignItems: "center", fontSize: 13, fontFamily: "inherit" }}><Copy size={16} /><span className="mobileOnly">{TXT.copyMonth}</span></button>
       {open && (
         <span style={mobilePopupStyle({ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" })} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
           <div style={St.copyTitle}>{TXT.copyMonth}</div>
@@ -2935,7 +2986,7 @@ function FormulaField({ entry, monthData, onChange }) {
   const removeOpAt = (idx) => { const n = ops.slice(); n.splice(idx, 1); setOps(n); onChange({ formula: { sourceId, ops: n } }); };
   return (
     <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label={TXT.link} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
+      <button type="button" aria-label={TXT.sourceRule} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
         <Calculator size={16} />
       </button>
       {open && (
@@ -2980,6 +3031,23 @@ function FormulaField({ entry, monthData, onChange }) {
   );
 }
 
+// On wide screens the per-entry actions sit inline; on phones (see the
+// ≤640px CSS) they're tucked behind a "⋯" button and expand into their own
+// full-width row with finger-sized targets, instead of 9 tiny icons
+// squeezed next to the amount.
+function EntryActions({ children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" className="entryMore" aria-expanded={open} aria-label={TXT.moreActions}
+        onClick={() => setOpen((o) => !o)} style={{ ...St.iconBtn, color: open ? C.ink : C.muted }}>
+        <MoreHorizontal size={18} />
+      </button>
+      <span className={`entryActions${open ? " open" : ""}`}>{children}</span>
+    </>
+  );
+}
+
 function NoteField({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const editingRef = useRef(false);
@@ -3021,6 +3089,7 @@ const St = {
   warnBannerRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, fontSize: 13, flexWrap: "wrap" },
   warnBannerLabel: { color: C.ink, fontWeight: 700 },
 
+  errorBanner: { display: "flex", gap: 10, alignItems: "center", background: `color-mix(in srgb, ${C.exp} 10%, ${C.card})`, border: `1px solid ${C.exp}`, color: C.ink, borderRadius: 14, padding: "12px 14px", marginTop: 12, marginBottom: 4, fontSize: 13.5, flexWrap: "wrap" },
   historyBanner: { display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", background: C.canvas, border: `1px solid ${C.line}`, borderRadius: 12, padding: "10px 14px", marginTop: 12, marginBottom: 4, fontSize: 13.5, color: C.muted, flexWrap: "wrap" },
   historyBannerBtn: { border: "none", background: C.card, color: C.ink, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "7px 14px", borderRadius: 999, boxShadow: "0 1px 3px rgba(0,0,0,0.10)", flexShrink: 0 },
   historyLockedContent: { opacity: 0.75, filter: "grayscale(0.35)", pointerEvents: "none", userSelect: "none" },
@@ -3036,7 +3105,7 @@ const St = {
   navBtn: { border: "none", background: C.canvas, color: C.ink, cursor: "pointer", width: 38, height: 38, borderRadius: 10, display: "inline-flex", alignItems: "center", justifyContent: "center" },
   monthLabelWrap: { display: "flex", alignItems: "center", gap: 8, minWidth: 220, flex: "1 1 220px" },
   monthLabel: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 17, fontWeight: 700, textTransform: "capitalize" },
-  nowTag: { fontSize: 11, fontWeight: 700, color: C.save, background: "#E4F0E9", padding: "2px 7px", borderRadius: 999 },
+  nowTag: { fontSize: 11, fontWeight: 700, color: C.save, background: `color-mix(in srgb, ${C.save} 14%, transparent)`, padding: "2px 7px", borderRadius: 999 },
   monthSelect: { minWidth: 180, flex: "1 1 260px", border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 12px", background: C.canvas, color: C.ink, fontSize: 13, cursor: "pointer", outline: "none" },
   currentBtn: { minWidth: 140, border: "none", background: C.canvas, color: C.ink, cursor: "pointer", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 700, boxShadow: "0 1px 2px rgba(0,0,0,0.08)", whiteSpace: "nowrap" },
 
@@ -3219,20 +3288,72 @@ input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outli
 .entry .e-desc { flex: 1; min-width: 90px; }
 .entry .e-amount { display: inline-flex; flex-shrink: 0; }
 .entry .entryActions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
-@media (max-width: 560px) {
-  .entryWrap { background: ${C.card}; border: 1px solid ${C.line}; border-radius: 12px; padding: 10px 12px; }
-  .entry { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "desc amount" "lead actions"; gap: 8px; align-items: center; }
-  .entry .e-desc { grid-area: desc; min-width: 0; font-weight: 700; }
+.entryMore, .bottomNav, .mobileOnly, .monthPickHint { display: none !important; }
+.hScroll { width: 100%; }
+/* ── Phones ─────────────────────────────────────────────────────────
+   Everything below is layout only; the same components render on every
+   screen size. Inputs go to 16px so iOS Safari doesn't zoom on focus. */
+@media (max-width: 640px) {
+  html { -webkit-text-size-adjust: 100%; }
+  body { overflow-x: hidden; }
+  .page { padding: 8px 12px calc(84px + env(safe-area-inset-bottom)) !important; }
+  .appHeader { padding: 6px 2px 10px !important; }
+  .appTitle { font-size: 22px !important; }
+  .themeLabel, .viewTabs { display: none !important; }
+  input, select, textarea { font-size: 16px !important; }
+
+  /* Sticky one-row month bar */
+  .monthNav { position: sticky; top: 0; z-index: 20; display: grid !important; grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-areas: "prev label next" "cur cur cur"; gap: 8px !important; padding: 8px !important; margin: 0 -4px 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.06); }
+  .monthNav.isCurrent { grid-template-areas: "prev label next"; }
+  .monthNav.isCurrent .currentBtn { display: none; }
+  .navPrev { grid-area: prev; width: 44px !important; height: 44px !important; }
+  .navNext { grid-area: next; width: 44px !important; height: 44px !important; }
+  .navDelete { display: none !important; }
+  .monthLabelWrap { grid-area: label; min-width: 0 !important; justify-content: center; }
+  .monthPickHint { display: inline-block !important; }
+  .monthSelect { grid-area: label; opacity: 0; min-width: 0 !important; width: 100%; height: 44px; cursor: pointer; }
+  .currentBtn { grid-area: cur; min-width: 0 !important; padding: 8px !important; }
+
+  /* Entry cards: description + amount on top, category + ⋯ below, actions expand underneath */
+  .entryWrap { background: ${C.card}; border: 1px solid ${C.line}; border-radius: 14px; padding: 10px 12px; }
+  .entry, .entry.exp { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "desc amount amount" "lead lead more" "actions actions actions"; gap: 6px 8px; align-items: center; }
+  .entry .e-desc { grid-area: desc; min-width: 0; width: 100%; font-weight: 700; }
   .entry .e-amount { grid-area: amount; justify-self: end; }
   .entry .e-lead { grid-area: lead; display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .entry .entryActions { grid-area: actions; justify-self: end; margin-left: auto; }
-  .entryActions button { padding: 5px !important; }
+  .entry .e-lead input { flex: 1; min-width: 0; width: auto !important; background: transparent !important; border-bottom-style: dashed !important; padding: 6px 2px !important; }
+  .entry .e-lead [draggable] { display: none !important; } /* HTML5 drag & drop doesn't fire on touch */
+  .entryMore { grid-area: more; display: inline-flex !important; justify-self: end; padding: 10px !important; }
+  .entry .entryActions { grid-area: actions; display: none; justify-content: space-between; margin: 2px -4px 0; padding-top: 6px; border-top: 1px solid ${C.line}; }
+  .entry .entryActions.open { display: flex; }
+  .entryActions button { padding: 10px !important; }
+  .entry input[aria-label="${TXT.amount}"] { width: 76px !important; }
+
+  /* Footer: wrap actions into a tidy grid of tappable buttons */
+  .appFooter { flex-direction: column; align-items: stretch !important; }
+  .footerActions { display: grid !important; grid-template-columns: 1fr 1fr; gap: 6px !important; }
+  .footerActions > button, .footerActions > span > button, .footerActions > a { justify-content: center; min-height: 44px; background: ${C.card} !important; border: 1px solid ${C.line} !important; border-radius: 12px !important; padding: 8px !important; width: 100%; }
+  .footerActions > span { display: flex !important; }
+  .footerActions > a { display: none !important; }
+  .mobileOnly { display: inline-flex !important; }
+
+  /* Wide charts scroll sideways instead of squashing */
+  .hScroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .sankeyBox { min-width: 680px; }
+  .goalHead { flex-wrap: wrap; }
+
+  /* Bottom tab bar */
+  .bottomNav { display: flex !important; position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; background: color-mix(in srgb, ${C.card} 92%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid ${C.line}; padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); overflow-x: auto; }
+  .bottomNav button { flex: 1 0 64px; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; border: none; background: transparent; color: ${C.muted}; font: 600 10.5px/1.1 Inter, system-ui, sans-serif; padding: 6px 2px; border-radius: 12px; cursor: pointer; }
+  .bottomNav button span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bottomNav button.on { color: ${C.ink}; background: ${C.canvas}; }
+  .navAvatar { width: 22px; height: 22px; border-radius: 999px; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; opacity: .75; }
+  .bottomNav button.on .navAvatar { opacity: 1; box-shadow: 0 0 0 2px ${C.card}, 0 0 0 3.5px currentColor; }
 }
 @media (prefers-reduced-motion: reduce) { .fade, .spin { animation: none !important; } }
 .print-root { display: none; }
 @media print {
   body { background: #fff; }
-  .shell { display: none !important; }
+  .shell, .bottomNav { display: none !important; }
   .print-root { display: block; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif; }
 }
 `;
