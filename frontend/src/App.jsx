@@ -23,7 +23,7 @@ import {
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
   ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
   Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Percent, Printer,
-  MoreHorizontal, CalendarDays, Waypoints,
+  MoreHorizontal, CalendarDays, Waypoints, Search, X,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
@@ -824,6 +824,42 @@ export default function App() {
   const sortedExpenses = useMemo(() => sortItems("expenses", cur.expenses), [cur.expenses, listSort.expenses]);
   const sortedSavings = useMemo(() => sortItems("savings", cur.savings), [cur.savings, listSort.savings]);
 
+  // ── Search / filter ──
+  // A free-text query, matched word by word against name, category, note,
+  // correspondent, link and amount, plus an optional expense-category chip.
+  // Purely a view filter: totals, the split and storage are never affected.
+  const [query, setQuery] = useState("");
+  const [catFilter, setCatFilter] = useState(null);
+  const searchRef = useRef(null);
+  const queryWords = useMemo(() => query.trim().toLowerCase().split(/\s+/).filter(Boolean), [query]);
+  const filtering = queryWords.length > 0 || catFilter != null;
+  const matchesFilter = (e) => {
+    if (catFilter != null && !("category" in e && (e.category || TXT.otherCategory) === catFilter)) return false;
+    if (!queryWords.length) return true;
+    const hay = [e.name, e.label, e.category, e.note, e.correspondent, e.url, e.amount, e.income]
+      .filter((v) => v != null && v !== "").join(" ").toLowerCase();
+    return queryWords.every((w) => hay.includes(w));
+  };
+  const clearFilter = () => { setQuery(""); setCatFilter(null); };
+  // A category chip belongs to the list it was picked from, so drop it when switching pages.
+  useEffect(() => { setCatFilter(null); }, [view]);
+  // "/" focuses the search field, unless you're already typing somewhere.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = document.activeElement;
+      if (el && (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.isContentEditable)) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const visiblePartners = cur.partners.map((p, i) => ({ p, i })).filter(({ p }) => matchesFilter(p));
+  const visibleGov = sortedGovIncome.filter(matchesFilter);
+  const visibleExpenses = sortedExpenses.filter(matchesFilter);
+  const visibleSavings = sortedSavings.filter(matchesFilter);
+
   // Contracts (of any kind: income, gov income, expenses, savings) that are
   // expired or about to expire for the selected month, surfaced as a banner
   // at the top of the page so they aren't only visible on hover.
@@ -1235,10 +1271,11 @@ export default function App() {
     const togglePeriod = personId ? (id) => togglePersonalExpenseItemPeriod(personId, id) : (id) => toggleItemPeriod(kind, id);
     const remove = personId ? (id) => removePersonalExpenseItem(personId, id) : (id) => removeListItem(kind, id);
     const copyRange = personId ? (id, pk, fk) => copyPersonalExpenseEntryRange(personId, id, pk, fk) : (id, pk, fk) => copyEntryRange(kind, id, pk, fk);
+    const shown = filtering ? items.filter(matchesFilter) : items;
     return (
       <>
         {items.length > 1 && <SortToggle kind={kind} mode={listSort[kind]} onChange={(m) => setListSort(kind, m)} />}
-        {items.map((e) => {
+        {shown.map((e) => {
           const formulaActive = Boolean(e.formula);
           const displayAmount = formulaActive ? String(round2(entryAmount(e, cur))) : e.amount;
           return (
@@ -1267,8 +1304,8 @@ export default function App() {
             </div>
           );
         })}
-        <button type="button" onClick={onAdd} style={St.addBtn}><Plus size={16} /> {TXT.addExpense}</button>
-        {byCat.length > 0 && (
+        {!filtering && <button type="button" onClick={onAdd} style={St.addBtn}><Plus size={16} /> {TXT.addExpense}</button>}
+        {!filtering && byCat.length > 0 && (
           <div style={St.catSummary}>
             <div style={St.catSummaryTitle}>{TXT.perCategory}</div>
             <div style={St.pieBox}>
@@ -1293,10 +1330,25 @@ export default function App() {
             ))}
           </div>
         )}
+        {filtering && <FilterSum count={shown.length} total={items.length} monthly={sumM(shown, cur)} />}
         <SubTotal monthly={total} />
       </>
     );
   };
+
+  // Category chips for whichever expense list the current page shows.
+  const chipCategories = [...new Set((activePerson ? activePersonExpenses : cur.expenses).map((e) => e.category || TXT.otherCategory))].sort((a, b) => a.localeCompare(b));
+  const searchable = view === "month" || Boolean(activePerson);
+  const noMatches = filtering && (activePerson
+    ? !activePersonExpenses.some(matchesFilter)
+    : !(visiblePartners.length || visibleGov.length || visibleExpenses.length || visibleSavings.length));
+  const noMatchesBlock = (
+    <div style={St.emptyHist}>
+      <Search size={18} style={{ color: C.muted, flexShrink: 0 }} />
+      <span style={{ flex: 1 }}>{t(LANG, "noMatches", { month: monthLong(sel) })}</span>
+      <button type="button" onClick={clearFilter} style={St.historyBannerBtn}>{TXT.clearFilter}</button>
+    </div>
+  );
 
   // ── Render ──
   return (
@@ -1381,6 +1433,11 @@ export default function App() {
           </div>
         )}
 
+        {searchable && (
+          <SearchBar inputRef={searchRef} query={query} onQuery={setQuery} categories={chipCategories}
+            catFilter={catFilter} onCat={setCatFilter} onClear={clearFilter} filtering={filtering} />
+        )}
+
         {/* `inert` also blocks keyboard focus/editing, which pointer-events alone doesn't. */}
         <div style={historyLocked ? St.historyLockedContent : undefined} inert={historyLocked ? "" : undefined}>
         {view === "savings" ? (
@@ -1401,19 +1458,23 @@ export default function App() {
           <div className="fade">
             <ColTitle>{personName(activePerson, activePersonIndex)}</ColTitle>
             <div style={St.correspondentDocMuted}>{TXT.personalPageHint}</div>
+            {noMatches ? noMatchesBlock : (
             <Collapsible id={`person-${activePerson.id}`} title={TXT.fixedCosts}
               icon={<Receipt size={16} style={{ color: personColor(activePerson, activePersonIndex).main }} />} info={TXT.exp}
-              total={eur(sumM(activePersonExpenses, cur))} open={open[`person-${activePerson.id}`] ?? true} onToggle={toggleSec}
+              total={eur(sumM(activePersonExpenses, cur))} open={filtering || (open[`person-${activePerson.id}`] ?? true)} onToggle={toggleSec}
               style={sectionPersonalStyle(personColor(activePerson, activePersonIndex).main)}>
               {renderExpensesList("personalExpenses", sortItems("personalExpenses", activePersonExpenses), sumM(activePersonExpenses, cur), byCategoryOf(activePersonExpenses), () => addPersonalExpense(activePerson.id), personName(activePerson, activePersonIndex), activePerson.id)}
             </Collapsible>
+            )}
           </div>
         ) : (
         <>
-        <ColTitle>{TXT.incomes}</ColTitle>
+        {noMatches && noMatchesBlock}
+        {(!filtering || visiblePartners.length > 0 || visibleGov.length > 0) && <ColTitle>{TXT.incomes}</ColTitle>}
         {/* Income */}
-        <Collapsible id="inkomen" title={TXT.salarySection} icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen} onToggle={toggleSec} style={St.sectionIncome}>
-          {cur.partners.map((p, i) => (
+        {(!filtering || visiblePartners.length > 0) && (
+        <Collapsible id="inkomen" title={TXT.salarySection} icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen || filtering} onToggle={toggleSec} style={St.sectionIncome}>
+          {visiblePartners.map(({ p, i }) => (
             <div style={St.itemWrap} className="entryWrap" key={p.id}>
               <div className="entry">
                 <span className="e-lead"><span style={{ ...St.dot, background: personColor(p, i).main }} /></span>
@@ -1435,14 +1496,17 @@ export default function App() {
               <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} correspondent={p.correspondent} dot />
             </div>
           ))}
-          <button type="button" onClick={addPerson} style={St.addBtn}><Plus size={16} /> {TXT.addPerson}</button>
+          {!filtering && <button type="button" onClick={addPerson} style={St.addBtn}><Plus size={16} /> {TXT.addPerson}</button>}
+          {filtering && <FilterSum count={visiblePartners.length} total={cur.partners.length} monthly={visiblePartners.reduce((sum, { p }) => sum + monthlyInc(p), 0)} />}
           <SubTotal monthly={calc.total} />
         </Collapsible>
+        )}
 
         {/* Government */}
-        <Collapsible id="overheid" title={TXT.government} icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid} onToggle={toggleSec} style={St.sectionIncome}>
+        {(!filtering || visibleGov.length > 0) && (
+        <Collapsible id="overheid" title={TXT.government} icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid || filtering} onToggle={toggleSec} style={St.sectionIncome}>
           {cur.govIncome.length > 1 && <SortToggle kind="govIncome" mode={listSort.govIncome} onChange={(m) => setListSort("govIncome", m)} />}
-          {sortedGovIncome.map((g) => {
+          {visibleGov.map((g) => {
             const formulaActive = Boolean(g.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(g, cur))) : g.amount;
             const manual = listSort.govIncome === "manual";
@@ -1471,10 +1535,13 @@ export default function App() {
               </div>
             );
           })}
-          <button type="button" onClick={addGov} style={St.addBtn}><Plus size={16} /> {TXT.addGovernment}</button>
+          {!filtering && <button type="button" onClick={addGov} style={St.addBtn}><Plus size={16} /> {TXT.addGovernment}</button>}
+          {filtering && <FilterSum count={visibleGov.length} total={cur.govIncome.length} monthly={sumM(visibleGov, cur)} />}
           <SubTotal monthly={calc.govTotal} />
         </Collapsible>
+        )}
 
+        {!filtering && (<>
         <ColTitle>{TXT.allocationSection}</ColTitle>
         {/* Distribution (result) — full width */}
         <section style={St.hero} className="fade">
@@ -1565,17 +1632,21 @@ export default function App() {
             </div>
           )}
         </section>
+        </>)}
 
-        <ColTitle>{TXT.expensesSection}</ColTitle>
+        {(!filtering || visibleExpenses.length > 0 || visibleSavings.length > 0) && <ColTitle>{TXT.expensesSection}</ColTitle>}
         {/* Expenses */}
-        <Collapsible id="uitgaven" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven} onToggle={toggleSec} style={St.sectionExpenses}>
+        {(!filtering || visibleExpenses.length > 0) && (
+        <Collapsible id="uitgaven" title={TXT.fixedCosts} icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp} total={eur(calc.expensesTotal)} open={open.uitgaven || filtering} onToggle={toggleSec} style={St.sectionExpenses}>
           {renderExpensesList("expenses", sortedExpenses, calc.expensesTotal, byCategory, addExpense)}
         </Collapsible>
+        )}
 
         {/* Savings goals */}
-        <Collapsible id="sparen" title={TXT.savingsSection} icon={<PiggyBank size={16} style={{ color: C.save }} />} info={TXT.sav} total={eur(calc.savingsTotal)} open={open.sparen} onToggle={toggleSec} style={St.sectionExpenses}>
+        {(!filtering || visibleSavings.length > 0) && (
+        <Collapsible id="sparen" title={TXT.savingsSection} icon={<PiggyBank size={16} style={{ color: C.save }} />} info={TXT.sav} total={eur(calc.savingsTotal)} open={open.sparen || filtering} onToggle={toggleSec} style={St.sectionExpenses}>
           {cur.savings.length > 1 && <SortToggle kind="savings" mode={listSort.savings} onChange={(m) => setListSort("savings", m)} />}
-          {sortedSavings.map((s) => {
+          {visibleSavings.map((s) => {
             const formulaActive = Boolean(s.formula);
             const displayAmount = formulaActive ? String(round2(entryAmount(s, cur))) : s.amount;
             const manual = listSort.savings === "manual";
@@ -1604,10 +1675,14 @@ export default function App() {
               </div>
             );
           })}
-          <button type="button" onClick={addSaving} style={St.addBtn}><Plus size={16} /> {TXT.addSaving}</button>
+          {!filtering && <button type="button" onClick={addSaving} style={St.addBtn}><Plus size={16} /> {TXT.addSaving}</button>}
+          {filtering && <FilterSum count={visibleSavings.length} total={cur.savings.length} monthly={sumM(visibleSavings, cur)} />}
           <SubTotal monthly={calc.savingsTotal} />
         </Collapsible>
+        )}
 
+        {/* Statistics and change log are about the whole month, not the matches. */}
+        {!filtering && (<>
         {/* Statistics */}
         <div style={St.savingsPageHead}>
           <ColTitle>{TXT.statistics}</ColTitle>
@@ -1697,6 +1772,7 @@ export default function App() {
             </div>
           )}
         </Collapsible>
+        </>)}
         </>
         )}
         </div>
@@ -1893,6 +1969,47 @@ function DerivedLine({ monthly, period, percent, dot, correspondent }) {
       = {other}{percent != null ? ` · ${Math.round(percent * 100)}%` : ""}
       {PAPERLESS_ENABLED && correspondent && (
         <> · <span style={St.derivedCorrespondent}><Building2 size={11} style={{ verticalAlign: "-1px" }} /> {correspondent}</span></>
+      )}
+    </div>
+  );
+}
+
+// Shown under a section while searching: how many of its entries match and what they add up to.
+function FilterSum({ count, total, monthly }) {
+  return (
+    <div style={St.filterSum}>
+      <span>{t(LANG, "filterMatches", { count, total })}</span>
+      <span style={St.filterSumVal}>{eur(monthly)} <span style={St.subTotalYr}>· {eur(monthly * 12)} {TXT.perYearShort}</span></span>
+    </div>
+  );
+}
+
+// Free-text search over the current page's entries, plus a chip per expense
+// category. Lives outside the history lock, so past months stay searchable.
+function SearchBar({ inputRef, query, onQuery, categories, catFilter, onCat, onClear, filtering }) {
+  return (
+    <div style={St.searchWrap} className="fade">
+      <div style={{ ...St.searchField, ...(filtering ? { borderColor: C.b } : {}) }}>
+        <Search size={17} style={{ color: C.muted, flexShrink: 0 }} />
+        <input ref={inputRef} id="entry-search" type="search" value={query} onChange={(e) => onQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") { onClear(); e.currentTarget.blur(); } }}
+          placeholder={TXT.searchPlaceholder} aria-label={TXT.searchLabel} autoComplete="off" enterKeyHint="search" style={St.searchInput} />
+        {filtering
+          ? <button type="button" onClick={onClear} style={St.iconBtn} aria-label={TXT.clearFilter} title={TXT.clearFilter}><X size={16} /></button>
+          : <kbd className="searchKbd" style={St.kbd} title={TXT.searchShortcut}>/</kbd>}
+      </div>
+      {categories.length > 1 && (
+        <div style={St.chipRow} role="group" aria-label={TXT.filterByCategory}>
+          {categories.map((cat) => {
+            const on = catFilter === cat;
+            return (
+              <button key={cat} type="button" aria-pressed={on} onClick={() => onCat(on ? null : cat)} style={{ ...St.chip, ...(on ? St.chipOn : {}) }}>
+                <span style={{ ...St.catDot, width: 8, height: 8, background: categoryColor(cat === TXT.otherCategory ? "" : cat) }} />
+                {cat}
+              </button>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -3222,6 +3339,15 @@ const St = {
   logArrow: { color: C.muted },
   logNew: { color: C.ink, fontWeight: 600 },
 
+  filterSum: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginTop: 12, padding: "8px 12px", borderRadius: 10, background: `color-mix(in srgb, ${C.b} 10%, transparent)`, fontSize: 13, color: C.b, fontWeight: 600 },
+  filterSumVal: { fontVariantNumeric: "tabular-nums", color: C.ink, fontSize: 14 },
+  searchWrap: { display: "flex", flexDirection: "column", gap: 8, marginBottom: 14, minWidth: 0 },
+  searchField: { display: "flex", alignItems: "center", gap: 8, background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: "2px 6px 2px 12px" },
+  searchInput: { flex: 1, minWidth: 0, border: "none", outline: "none", background: "transparent", color: C.ink, fontSize: 14.5, fontFamily: "inherit", padding: "10px 0" },
+  kbd: { fontFamily: "ui-monospace, monospace", fontSize: 11.5, color: C.muted, border: `1px solid ${C.line}`, borderBottomWidth: 2, borderRadius: 6, padding: "1px 7px", marginRight: 4 },
+  chipRow: { display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none", WebkitOverflowScrolling: "touch" },
+  chip: { display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, border: `1px solid ${C.line}`, background: C.card, color: C.muted, fontSize: 12.5, fontWeight: 600, fontFamily: "inherit", padding: "6px 11px", borderRadius: 999, cursor: "pointer", whiteSpace: "nowrap" },
+  chipOn: { background: C.ink, color: C.card, borderColor: C.ink },
   subTotal: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.line}`, fontSize: 14, color: C.muted },
   subTotalVal: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 17, color: C.ink },
   subTotalYr: { fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: C.muted, fontWeight: 400 },
@@ -3274,6 +3400,7 @@ const CSS = `
   .shell { max-width: 1140px; }
 }
 input::placeholder { color: #9aa5a1; }
+input[type="search"]::-webkit-search-cancel-button, input[type="search"]::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
 input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outline: 2px solid ${C.b}; outline-offset: 2px; border-radius: 6px; }
 .spin { animation: sp 1s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
@@ -3299,7 +3426,7 @@ input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outli
   .page { padding: 8px 12px calc(84px + env(safe-area-inset-bottom)) !important; }
   .appHeader { padding: 6px 2px 10px !important; }
   .appTitle { font-size: 22px !important; }
-  .themeLabel, .viewTabs { display: none !important; }
+  .themeLabel, .viewTabs, .searchKbd { display: none !important; }
   input, select, textarea { font-size: 16px !important; }
 
   /* Sticky one-row month bar */
