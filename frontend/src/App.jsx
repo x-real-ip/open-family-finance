@@ -1999,7 +1999,7 @@ function SearchBar({ inputRef, query, onQuery, categories, catFilter, onCat, onC
           : <kbd className="searchKbd" style={St.kbd} title={TXT.searchShortcut}>/</kbd>}
       </div>
       {categories.length > 1 && (
-        <div style={St.chipRow} role="group" aria-label={TXT.filterByCategory}>
+        <div style={St.chipRow} className="chipRow" role="group" aria-label={TXT.filterByCategory}>
           {categories.map((cat) => {
             const on = catFilter === cat;
             return (
@@ -3345,7 +3345,7 @@ const St = {
   searchField: { display: "flex", alignItems: "center", gap: 8, background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, padding: "2px 6px 2px 12px" },
   searchInput: { flex: 1, minWidth: 0, border: "none", outline: "none", background: "transparent", color: C.ink, fontSize: 14.5, fontFamily: "inherit", padding: "10px 0" },
   kbd: { fontFamily: "ui-monospace, monospace", fontSize: 11.5, color: C.muted, border: `1px solid ${C.line}`, borderBottomWidth: 2, borderRadius: 6, padding: "1px 7px", marginRight: 4 },
-  chipRow: { display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2, scrollbarWidth: "none", WebkitOverflowScrolling: "touch" },
+  chipRow: { display: "flex", flexWrap: "wrap", gap: 6 },
   chip: { display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, border: `1px solid ${C.line}`, background: C.card, color: C.muted, fontSize: 12.5, fontWeight: 600, fontFamily: "inherit", padding: "6px 11px", borderRadius: 999, cursor: "pointer", whiteSpace: "nowrap" },
   chipOn: { background: C.ink, color: C.card, borderColor: C.ink },
   subTotal: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.line}`, fontSize: 14, color: C.muted },
@@ -3427,6 +3427,9 @@ input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outli
   .appHeader { padding: 6px 2px 10px !important; }
   .appTitle { font-size: 22px !important; }
   .themeLabel, .viewTabs, .searchKbd { display: none !important; }
+  /* One swipeable row of chips; the faded right edge hints there are more. */
+  .chipRow { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-right: 28px; margin-right: -12px; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); }
+  .chipRow::-webkit-scrollbar { display: none; }
   input, select, textarea { font-size: 16px !important; }
 
   /* Sticky one-row month bar */
