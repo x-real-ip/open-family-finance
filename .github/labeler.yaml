@@ -5,3 +5,6 @@ documentation:
 
 bug:
   - head-branch: ["^fix", "fix"]
+
+feature:
+  - head-branch: ["^feature", "^feat"]
