@@ -251,6 +251,10 @@ export default {
     deleteScopeBody: "Deze post staat ook in {range}. Waar wil je hem verwijderen?",
     deleteScopeThisMonth: "Alleen in {month}",
     deleteScopeForward: "In {month} en alle latere maanden",
+    amountScopeTitle: "{name} aangepast",
+    amountScopeBody: "Nieuw bedrag: {amount} in {month}. Deze post staat ook in {range} met een ander bedrag. Wil je het daar ook aanpassen?",
+    amountScopeThisMonth: "Alleen in {month}",
+    amountScopeForward: "Ook in alle latere maanden",
     cancel: "Annuleren",
   },
 };

@@ -251,6 +251,10 @@ export default {
     deleteScopeBody: "This entry also exists in {range}. Where do you want to delete it?",
     deleteScopeThisMonth: "Only in {month}",
     deleteScopeForward: "In {month} and all later months",
+    amountScopeTitle: "{name} changed",
+    amountScopeBody: "New amount: {amount} in {month}. This entry also exists in {range} with a different amount. Change it there too?",
+    amountScopeThisMonth: "Only in {month}",
+    amountScopeForward: "In all later months too",
     cancel: "Cancel",
   },
 };

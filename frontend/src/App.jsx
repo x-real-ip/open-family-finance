@@ -16,8 +16,10 @@
  *   keeps an `overrides` map ({ [entryId]: true }); editing an entry
  *   in a month marks it overridden there, so later edits to earlier
  *   months no longer touch it. Special keys: "__method", "__marge".
- *   Deleting an entry is the exception: it is scoped explicitly (only
- *   this month, or this month and every later one; see removeEntryFrom).
+ *   Amounts and deletes are the exception: they change only the selected
+ *   month, and when the entry also exists in later months a dialog asks
+ *   whether to apply the change there too (see commitAmount and
+ *   requestDelete), so a change is never silently skipped or spread.
  */
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
@@ -1252,6 +1254,41 @@ export default function App() {
     removeEntryFrom(kind, id, forward ? [sel, ...later] : [sel], personId);
     setPendingDelete(null);
   };
+  // Amounts: typing changes only the selected month (marked overridden);
+  // on blur, if later months hold this entry with a different amount, a
+  // dialog asks whether to apply the new amount there too, so a change is
+  // never silently left behind in (or pushed into) later months.
+  const amountField = (kind) => (kind === "partners" ? "income" : "amount");
+  const setAmountHere = (kind, id, value, personId = null) => setData((d) => {
+    const s = d.selectedMonth, fig = d.months[s], field = amountField(kind);
+    const list = listAt(fig, kind, personId).map((x) => x.id === id ? { ...x, [field]: value } : x);
+    const next = personId ? { ...fig, personalExpenses: { ...fig.personalExpenses, [personId]: list } } : { ...fig, [kind]: list };
+    return { ...d, months: { ...d.months, [s]: markOverride(next, id) } };
+  });
+  const [pendingAmount, setPendingAmount] = useState(null);
+  const commitAmount = (kind, e, personId, logLabel, oldV, newV) => {
+    logChange(logLabel, oldV, newV);
+    const curVal = valueOf(kind, e, cur);
+    const later = laterMonthsWith(kind, e.id, personId).filter((k) => compareSide(k, kind, e.id, curVal, personId).status === "changed");
+    if (later.length) setPendingAmount({ kind, id: e.id, personId, label: e.label || e.name || TXT.unnamed, amount: eur(curVal), later });
+  };
+  const confirmAmount = (forward) => {
+    const { kind, id, personId, later } = pendingAmount;
+    setPendingAmount(null);
+    if (!forward) return;
+    const field = amountField(kind);
+    setData((d) => {
+      const item = listAt(d.months[d.selectedMonth], kind, personId).find((x) => x.id === id);
+      if (!item) return d;
+      const months = { ...d.months };
+      for (const k of later) {
+        const fig = months[k];
+        const list = listAt(fig, kind, personId).map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x);
+        months[k] = personId ? { ...fig, personalExpenses: { ...fig.personalExpenses, [personId]: list } } : { ...fig, [kind]: list };
+      }
+      return { ...d, months };
+    });
+  };
   // Put a ghost row's entry (from a neighbour month) back into this month
   // only; marked overridden so an edit in an earlier month leaves it alone.
   const restoreEntry = (kind, entry, personId = null) => setData((d) => {
@@ -1408,7 +1445,7 @@ export default function App() {
                   <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => set(e.id, { category: ev.target.value })} style={St.catInput} />
                 </span>
                 <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => set(e.id, { label: ev.target.value })} style={St.nameInput} />
-                <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => set(e.id, { amount: v })} onPeriod={() => togglePeriod(e.id)} onCommit={(o, n) => logChange(`${logPrefix} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
+                <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setAmountHere(kind, e.id, v, personId)} onPeriod={() => togglePeriod(e.id)} onCommit={(o, n) => commitAmount(kind, e, personId, `${logPrefix} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                 <EntryActions>
                   <NoteField value={e.note || ""} onChange={(v) => set(e.id, { note: v })} />
                   <LinkField value={e.url || ""} onChange={(v) => set(e.id, { url: v })} />
@@ -1603,7 +1640,7 @@ export default function App() {
               <div className="entry">
                 <span className="e-lead"><span style={{ ...St.dot, background: personColor(p, i).main }} /></span>
                 <input className="e-desc" aria-label={t(LANG, "personName", { n: i + 1 })} value={p.name} placeholder={t(LANG, "personPlaceholder", { n: i + 1 })} onChange={(e) => setPartnerName(p.id, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
-                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setPartner(p.id, { income: v })} onPeriod={() => togglePartnerPeriod(p.id)} onCommit={(o, n) => logChange(`${TXT.salarySection} · ${personName(p, i)}`, o, n)} /></span>
+                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setAmountHere("partners", p.id, v)} onPeriod={() => togglePartnerPeriod(p.id)} onCommit={(o, n) => commitAmount("partners", { ...p, name: personName(p, i) }, null, `${TXT.salarySection} · ${personName(p, i)}`, o, n)} /></span>
                 <EntryActions>
                   <NoteField value={p.note || ""} onChange={(v) => setPartner(p.id, { note: v })} />
                   <LinkField value={p.url || ""} onChange={(v) => setPartner(p.id, { url: v })} />
@@ -1642,7 +1679,7 @@ export default function App() {
                     <span style={{ ...St.dot, background: C.gov }} />
                   </span>
                   <input className="e-desc" aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
-                  <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
+                  <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setAmountHere("govIncome", g.id, v)} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => commitAmount("govIncome", g, null, `${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
                   <EntryActions>
                     <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
                     <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
@@ -1783,7 +1820,7 @@ export default function App() {
                     <span style={{ ...St.dot, background: categoryColor(s.label) }} />
                   </span>
                   <input className="e-desc" aria-label={TXT.category} value={s.label} placeholder={TXT.categoryPlaceholder} onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
-                  <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`${TXT.savingsSection} · ${s.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
+                  <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setAmountHere("savings", s.id, v)} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => commitAmount("savings", s, null, `${TXT.savingsSection} · ${s.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                   <EntryActions>
                     <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
                     <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
@@ -1933,7 +1970,18 @@ export default function App() {
           </button>
         ))}
       </nav>
-      {pendingDelete && <DeleteScopeDialog label={pendingDelete.label} month={sel} later={pendingDelete.later} onPick={confirmDelete} onCancel={() => setPendingDelete(null)} />}
+      {pendingDelete && (
+        <ScopeDialog icon={<Trash2 size={16} style={{ color: C.exp }} />} title={t(LANG, "deleteScopeTitle", { name: pendingDelete.label })}
+          body={t(LANG, "deleteScopeBody", { range: monthRange(pendingDelete.later) })} month={sel} later={pendingDelete.later}
+          thisLabel={TXT.deleteScopeThisMonth} forwardLabel={TXT.deleteScopeForward} danger
+          onPick={confirmDelete} onCancel={() => setPendingDelete(null)} cancelLabel={TXT.cancel} />
+      )}
+      {pendingAmount && (
+        <ScopeDialog icon={<CalendarDays size={16} style={{ color: C.b }} />} title={t(LANG, "amountScopeTitle", { name: pendingAmount.label })}
+          body={t(LANG, "amountScopeBody", { amount: pendingAmount.amount, month: monthLong(sel), range: monthRange(pendingAmount.later) })} month={sel} later={pendingAmount.later}
+          thisLabel={TXT.amountScopeThisMonth} forwardLabel={TXT.amountScopeForward}
+          onPick={confirmAmount} onCancel={() => confirmAmount(false)} />
+      )}
       {printJob && <PrintDocument job={printJob} months={printMonths} appTitle={APP_TITLE} />}
     </div>
   );
@@ -2159,8 +2207,10 @@ function MonthDiffSummary({ prev, next, onGo }) {
   );
 }
 
-// Asked only when the entry being deleted still exists in later months.
-function DeleteScopeDialog({ label, month, later, onPick, onCancel }) {
+// "Only this month, or this month and later?" — asked when deleting an
+// entry, or changing its amount, while it still exists in later months.
+// Without a cancel button, Escape/backdrop simply mean "only this month".
+function ScopeDialog({ icon, title, body, month, later, thisLabel, forwardLabel, danger, cancelLabel, onPick, onCancel }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onCancel(); };
     window.addEventListener("keydown", onKey);
@@ -2168,18 +2218,18 @@ function DeleteScopeDialog({ label, month, later, onPick, onCancel }) {
   }, [onCancel]);
   return (
     <div style={St.dialogBackdrop} onClick={onCancel}>
-      <div role="dialog" aria-modal="true" aria-labelledby="delete-scope-title" style={St.dialog} onClick={(e) => e.stopPropagation()}>
-        <div id="delete-scope-title" style={St.dialogTitle}><Trash2 size={16} style={{ color: C.exp }} /> {t(LANG, "deleteScopeTitle", { name: label })}</div>
-        <p style={St.dialogBody}>{t(LANG, "deleteScopeBody", { range: monthRange(later) })}</p>
+      <div role="dialog" aria-modal="true" aria-labelledby="scope-dialog-title" style={St.dialog} onClick={(e) => e.stopPropagation()}>
+        <div id="scope-dialog-title" style={St.dialogTitle}>{icon} {title}</div>
+        <p style={St.dialogBody}>{body}</p>
         <button type="button" autoFocus onClick={() => onPick(false)} style={St.dialogOption}>
-          {t(LANG, "deleteScopeThisMonth", { month: monthLong(month) })}
+          {thisLabel.replace("{month}", monthLong(month))}
           <span style={St.dialogOptionSub}>{monthShortWithYear(month)}</span>
         </button>
-        <button type="button" onClick={() => onPick(true)} style={{ ...St.dialogOption, color: C.exp, borderColor: C.exp }}>
-          {t(LANG, "deleteScopeForward", { month: monthLong(month) })}
+        <button type="button" onClick={() => onPick(true)} style={{ ...St.dialogOption, ...(danger ? { color: C.exp, borderColor: C.exp } : { color: C.b, borderColor: C.b }) }}>
+          {forwardLabel.replace("{month}", monthLong(month))}
           <span style={St.dialogOptionSub}>{monthRange([month, later[later.length - 1]])}</span>
         </button>
-        <button type="button" onClick={onCancel} style={St.dialogCancel}>{TXT.cancel}</button>
+        {cancelLabel && <button type="button" onClick={onCancel} style={St.dialogCancel}>{cancelLabel}</button>}
       </div>
     </div>
   );
