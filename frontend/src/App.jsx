@@ -16,6 +16,10 @@
  *   keeps an `overrides` map ({ [entryId]: true }); editing an entry
  *   in a month marks it overridden there, so later edits to earlier
  *   months no longer touch it. Special keys: "__method", "__marge".
+ *   Amounts and deletes are the exception: they change only the selected
+ *   month, and when the entry also exists in later months a dialog asks
+ *   whether to apply the change there too (see commitAmount and
+ *   requestDelete), so a change is never silently skipped or spread.
  */
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
@@ -217,6 +221,8 @@ const figuresFor = (months, key) => {
   const earlier = Object.keys(months).filter((k) => k < key).sort();
   return earlier.length ? months[earlier[earlier.length - 1]] : DEFAULT_FIGURES;
 };
+// "nov '26" or "nov '26 – mrt '27" for a sorted, non-empty list of month keys.
+const monthRange = (keys) => keys.length === 1 ? monthShortWithYear(keys[0]) : `${monthShortWithYear(keys[0])} – ${monthShortWithYear(keys[keys.length - 1])}`;
 const fmtDate = (iso, locale = getRuntimeDateLocale()) => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(`${iso}T00:00:00`));
 
 // — contract duration: start/end date, "ending soon" warning and progress —
@@ -995,6 +1001,52 @@ export default function App() {
     return null;
   };
 
+  // ── Month comparison ──
+  // Every entry is compared (by id) with the nearest existing month on
+  // either side, so a difference shows right in the row (MonthRail) instead
+  // of only after opening the sparkline. Entries that exist in a neighbour
+  // month but not in this one show up as ghost rows (see renderGhosts).
+  // Amounts compare as monthly values, so /mnd ↔ /jr alone isn't a change.
+  const prevKey = pastMonths.length ? pastMonths[pastMonths.length - 1] : null;
+  const nextKey = futureMonths.length ? futureMonths[0] : null;
+  const valueOf = (kind, e, fig) => (kind === "partners" ? monthlyInc(e) : monthlyOf(e, fig));
+  const compareSide = (key, kind, id, curVal, personId) => {
+    if (!key) return null;
+    const fig = data.months[key];
+    const it = listAt(fig, kind, personId).find((x) => x.id === id);
+    if (!it) return { key, status: "absent" };
+    const value = valueOf(kind, it, fig);
+    return { key, value, status: Math.abs(value - curVal) < 0.005 ? "same" : "changed" };
+  };
+  const neighbours = (kind, e, personId = null) => {
+    const curVal = valueOf(kind, e, cur);
+    return { cur: curVal, prev: compareSide(prevKey, kind, e.id, curVal, personId), next: compareSide(nextKey, kind, e.id, curVal, personId) };
+  };
+  // Months after the selected one that still contain this entry.
+  const laterMonthsWith = (kind, id, personId = null) => futureMonths.filter((k) => listAt(data.months[k], kind, personId).some((x) => x.id === id));
+  // Whole-month summary against both neighbours, over every list (personal ones included).
+  const monthDiff = useMemo(() => {
+    const entriesOf = (fig) => [
+      ...fig.partners.map((e) => ({ kind: "partners", personId: null, e })),
+      ...entryKinds.flatMap((kind) => (fig[kind] || []).map((e) => ({ kind, personId: null, e }))),
+      ...Object.entries(fig.personalExpenses || {}).flatMap(([personId, list]) => list.map((e) => ({ kind: "personalExpenses", personId, e }))),
+    ];
+    const diff = (key) => {
+      if (!key) return null;
+      const out = { key, onlyHere: 0, onlyThere: 0, changed: 0 };
+      for (const { kind, personId, e } of entriesOf(cur)) {
+        const side = compareSide(key, kind, e.id, valueOf(kind, e, cur), personId);
+        if (side.status === "absent") out.onlyHere++;
+        else if (side.status === "changed") out.changed++;
+      }
+      for (const { kind, personId, e } of entriesOf(data.months[key])) {
+        if (!listAt(cur, kind, personId).some((x) => x.id === e.id)) out.onlyThere++;
+      }
+      return out;
+    };
+    return { prev: diff(prevKey), next: diff(nextKey) };
+  }, [data.months, sel]);
+
   const toggleSec = (id) => setOpen((o) => ({ ...o, [id]: !o[id] }));
 
   // ── Month navigation: seed a new month from the nearest earlier one ──
@@ -1164,7 +1216,6 @@ export default function App() {
   // JSON.stringify omits undefined values instead of preserving them.
   const setListItem = (k, id, patch) => editForward((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, ...patch } : x) }), id);
   const toggleItemPeriod = (k, id) => editForward((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x) }), id);
-  const removeListItem = (k, id) => editForward((f) => ({ ...f, [k]: f[k].filter((x) => x.id !== id) }), id);
   const addListItem = (kind, item) => editForward((f) => (
     (f[kind] || []).some((x) => x.id === item.id) ? f : { ...f, [kind]: [...(f[kind] || []), clone(item)] }
   ), item.id);
@@ -1176,7 +1227,78 @@ export default function App() {
   // threading an extra key through the generic ones.
   const setPersonalExpenseItem = (personId, id, patch) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: (f.personalExpenses[personId] || []).map((x) => x.id === id ? { ...x, ...patch } : x) } }), id);
   const togglePersonalExpenseItemPeriod = (personId, id) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: (f.personalExpenses[personId] || []).map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x) } }), id);
-  const removePersonalExpenseItem = (personId, id) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: (f.personalExpenses[personId] || []).filter((x) => x.id !== id) } }), id);
+  // Removing an entry is scoped explicitly instead of following
+  // editForward's override rules: an entry that still exists in later
+  // months asks whether to remove it only here or here and onwards
+  // (DeleteScopeDialog), since a silently surviving copy in some later
+  // month is easy to miss.
+  const removeEntryFrom = (kind, id, keys, personId = null) => setData((d) => {
+    const months = { ...d.months };
+    for (const k of keys) {
+      const fig = months[k];
+      if (!fig) continue;
+      months[k] = personId
+        ? { ...fig, personalExpenses: { ...fig.personalExpenses, [personId]: (fig.personalExpenses[personId] || []).filter((x) => x.id !== id) } }
+        : { ...fig, [kind]: (fig[kind] || []).filter((x) => x.id !== id) };
+    }
+    return { ...d, months };
+  });
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const requestDelete = (kind, e, personId = null) => {
+    const later = laterMonthsWith(kind, e.id, personId);
+    if (!later.length) removeEntryFrom(kind, e.id, [sel], personId);
+    else setPendingDelete({ kind, id: e.id, personId, label: e.label || TXT.unnamed, later });
+  };
+  const confirmDelete = (forward) => {
+    const { kind, id, personId, later } = pendingDelete;
+    removeEntryFrom(kind, id, forward ? [sel, ...later] : [sel], personId);
+    setPendingDelete(null);
+  };
+  // Amounts: typing changes only the selected month (marked overridden);
+  // on blur, if later months hold this entry with a different amount, a
+  // dialog asks whether to apply the new amount there too, so a change is
+  // never silently left behind in (or pushed into) later months.
+  const amountField = (kind) => (kind === "partners" ? "income" : "amount");
+  const setAmountHere = (kind, id, value, personId = null) => setData((d) => {
+    const s = d.selectedMonth, fig = d.months[s], field = amountField(kind);
+    const list = listAt(fig, kind, personId).map((x) => x.id === id ? { ...x, [field]: value } : x);
+    const next = personId ? { ...fig, personalExpenses: { ...fig.personalExpenses, [personId]: list } } : { ...fig, [kind]: list };
+    return { ...d, months: { ...d.months, [s]: markOverride(next, id) } };
+  });
+  const [pendingAmount, setPendingAmount] = useState(null);
+  const commitAmount = (kind, e, personId, logLabel, oldV, newV) => {
+    logChange(logLabel, oldV, newV);
+    const curVal = valueOf(kind, e, cur);
+    const later = laterMonthsWith(kind, e.id, personId).filter((k) => compareSide(k, kind, e.id, curVal, personId).status === "changed");
+    if (later.length) setPendingAmount({ kind, id: e.id, personId, label: e.label || e.name || TXT.unnamed, amount: eur(curVal), later });
+  };
+  const confirmAmount = (forward) => {
+    const { kind, id, personId, later } = pendingAmount;
+    setPendingAmount(null);
+    if (!forward) return;
+    const field = amountField(kind);
+    setData((d) => {
+      const item = listAt(d.months[d.selectedMonth], kind, personId).find((x) => x.id === id);
+      if (!item) return d;
+      const months = { ...d.months };
+      for (const k of later) {
+        const fig = months[k];
+        const list = listAt(fig, kind, personId).map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x);
+        months[k] = personId ? { ...fig, personalExpenses: { ...fig.personalExpenses, [personId]: list } } : { ...fig, [kind]: list };
+      }
+      return { ...d, months };
+    });
+  };
+  // Put a ghost row's entry (from a neighbour month) back into this month
+  // only; marked overridden so an edit in an earlier month leaves it alone.
+  const restoreEntry = (kind, entry, personId = null) => setData((d) => {
+    const s = d.selectedMonth, fig = d.months[s];
+    if (listAt(fig, kind, personId).some((x) => x.id === entry.id)) return d;
+    const next = personId
+      ? { ...fig, personalExpenses: { ...fig.personalExpenses, [personId]: [...(fig.personalExpenses[personId] || []), clone(entry)] } }
+      : { ...fig, [kind]: [...(fig[kind] || []), clone(entry)] };
+    return { ...d, months: { ...d.months, [s]: markOverride(next, entry.id) } };
+  });
   // One id for both the entry and its override key (they used to be two separate uid() calls).
   const addPersonalExpense = (personId) => {
     const id = uid();
@@ -1258,6 +1380,43 @@ export default function App() {
   const activePerson = activePersonIndex >= 0 ? cur.partners[activePersonIndex] : null;
   const activePersonExpenses = activePerson ? (cur.personalExpenses[activePerson.id] || []) : [];
 
+  // Entries that exist in a neighbour month but not in this one, shown
+  // faded under their list with one-tap fixes for the usual causes: removed
+  // here but forgotten in later months, or added later and wanted here too.
+  const renderGhosts = (kind, personId = null) => {
+    if (filtering) return null;
+    const here = new Set(listAt(cur, kind, personId).map((x) => x.id));
+    const seen = new Set();
+    const rows = [];
+    for (const key of [prevKey, nextKey]) {
+      if (!key) continue;
+      for (const e of listAt(data.months[key], kind, personId)) {
+        if (here.has(e.id) || seen.has(e.id)) continue;
+        seen.add(e.id);
+        rows.push({ key, e, value: valueOf(kind, e, data.months[key]), later: laterMonthsWith(kind, e.id, personId) });
+      }
+    }
+    return rows.map(({ key, e, value, later }) => {
+      const fromPast = key < sel;
+      const text = !later.length ? t(LANG, "ghostGone", { month: monthShortWithYear(key), current: monthShortWithYear(sel) })
+        : fromPast ? t(LANG, "ghostGap", { current: monthShortWithYear(sel), range: monthRange(later) })
+        : t(LANG, "ghostAppears", { month: monthShortWithYear(later[0]) });
+      return (
+        <div key={e.id} style={St.ghostRow}>
+          <div style={St.ghostHead}>
+            <span style={St.ghostLabel}>{e.label || TXT.unnamed}</span>
+            <span style={St.ghostAmount}>{eur(value)}</span>
+          </div>
+          <div style={St.ghostMeta}>
+            <span style={{ flex: "1 1 160px" }}>{text}</span>
+            <button type="button" onClick={() => restoreEntry(kind, e, personId)} style={St.ghostBtn}>{fromPast ? TXT.ghostRestore : TXT.ghostAddHere}</button>
+            {later.length > 0 && <button type="button" onClick={() => removeEntryFrom(kind, e.id, later, personId)} style={{ ...St.ghostBtn, color: C.exp }}>{TXT.ghostRemoveLater}</button>}
+          </div>
+        </div>
+      );
+    });
+  };
+
   // Shared by the joint "Vaste lasten" section and each partner's personal
   // page — same fields, same behavior (sorting, drag reorder, formulas,
   // correspondent/paperless, trend/sparkline, per-entry copy-forward), just
@@ -1269,7 +1428,6 @@ export default function App() {
     // mutators — chosen once here rather than branching inside every line.
     const set = personId ? (id, patch) => setPersonalExpenseItem(personId, id, patch) : (id, patch) => setListItem(kind, id, patch);
     const togglePeriod = personId ? (id) => togglePersonalExpenseItemPeriod(personId, id) : (id) => toggleItemPeriod(kind, id);
-    const remove = personId ? (id) => removePersonalExpenseItem(personId, id) : (id) => removeListItem(kind, id);
     const copyRange = personId ? (id, pk, fk) => copyPersonalExpenseEntryRange(personId, id, pk, fk) : (id, pk, fk) => copyEntryRange(kind, id, pk, fk);
     const shown = filtering ? items.filter(matchesFilter) : items;
     return (
@@ -1287,7 +1445,7 @@ export default function App() {
                   <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => set(e.id, { category: ev.target.value })} style={St.catInput} />
                 </span>
                 <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => set(e.id, { label: ev.target.value })} style={St.nameInput} />
-                <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => set(e.id, { amount: v })} onPeriod={() => togglePeriod(e.id)} onCommit={(o, n) => logChange(`${logPrefix} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
+                <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setAmountHere(kind, e.id, v, personId)} onPeriod={() => togglePeriod(e.id)} onCommit={(o, n) => commitAmount(kind, e, personId, `${logPrefix} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                 <EntryActions>
                   <NoteField value={e.note || ""} onChange={(v) => set(e.id, { note: v })} />
                   <LinkField value={e.url || ""} onChange={(v) => set(e.id, { url: v })} />
@@ -1297,13 +1455,14 @@ export default function App() {
                   <TrendIcon income={false} trend={entryTrend(kind, e.id, monthlyOf(e, cur), personId)} />
                   <SparkIcon history={entryHistory(kind, e.id, personId)} />
                   <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyRange(e.id, pk, fk)} />
-                  <button type="button" aria-label={TXT.delete} onClick={() => remove(e.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                  <button type="button" aria-label={TXT.delete} onClick={() => requestDelete(kind, e, personId)} style={St.iconBtn}><Trash2 size={16} /></button>
                 </EntryActions>
               </div>
-              <DerivedLine monthly={monthlyOf(e, cur)} period={e.period} percent={pctOf(monthlyOf(e, cur), total)} correspondent={e.correspondent} />
+              <DerivedLine monthly={monthlyOf(e, cur)} period={e.period} percent={pctOf(monthlyOf(e, cur), total)} correspondent={e.correspondent} compare={neighbours(kind, e, personId)} />
             </div>
           );
         })}
+        {renderGhosts(kind, personId)}
         {!filtering && <button type="button" onClick={onAdd} style={St.addBtn}><Plus size={16} /> {TXT.addExpense}</button>}
         {!filtering && byCat.length > 0 && (
           <div style={St.catSummary}>
@@ -1433,6 +1592,8 @@ export default function App() {
           </div>
         )}
 
+        {searchable && <MonthDiffSummary prev={monthDiff.prev} next={monthDiff.next} onGo={(key) => setData((d) => ({ ...d, selectedMonth: key }))} />}
+
         {searchable && (
           <SearchBar inputRef={searchRef} query={query} onQuery={setQuery} categories={chipCategories}
             catFilter={catFilter} onCat={setCatFilter} onClear={clearFilter} filtering={filtering} />
@@ -1479,7 +1640,7 @@ export default function App() {
               <div className="entry">
                 <span className="e-lead"><span style={{ ...St.dot, background: personColor(p, i).main }} /></span>
                 <input className="e-desc" aria-label={t(LANG, "personName", { n: i + 1 })} value={p.name} placeholder={t(LANG, "personPlaceholder", { n: i + 1 })} onChange={(e) => setPartnerName(p.id, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
-                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setPartner(p.id, { income: v })} onPeriod={() => togglePartnerPeriod(p.id)} onCommit={(o, n) => logChange(`${TXT.salarySection} · ${personName(p, i)}`, o, n)} /></span>
+                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setAmountHere("partners", p.id, v)} onPeriod={() => togglePartnerPeriod(p.id)} onCommit={(o, n) => commitAmount("partners", { ...p, name: personName(p, i) }, null, `${TXT.salarySection} · ${personName(p, i)}`, o, n)} /></span>
                 <EntryActions>
                   <NoteField value={p.note || ""} onChange={(v) => setPartner(p.id, { note: v })} />
                   <LinkField value={p.url || ""} onChange={(v) => setPartner(p.id, { url: v })} />
@@ -1493,7 +1654,7 @@ export default function App() {
                   )}
                 </EntryActions>
               </div>
-              <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} correspondent={p.correspondent} dot />
+              <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} correspondent={p.correspondent} compare={neighbours("partners", p)} dot />
             </div>
           ))}
           {!filtering && <button type="button" onClick={addPerson} style={St.addBtn}><Plus size={16} /> {TXT.addPerson}</button>}
@@ -1518,7 +1679,7 @@ export default function App() {
                     <span style={{ ...St.dot, background: C.gov }} />
                   </span>
                   <input className="e-desc" aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
-                  <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setListItem("govIncome", g.id, { amount: v })} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => logChange(`${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
+                  <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setAmountHere("govIncome", g.id, v)} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => commitAmount("govIncome", g, null, `${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
                   <EntryActions>
                     <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
                     <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
@@ -1528,13 +1689,14 @@ export default function App() {
                     <TrendIcon income trend={entryTrend("govIncome", g.id, monthlyOf(g, cur))} />
                     <SparkIcon history={entryHistory("govIncome", g.id)} />
                     <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("govIncome", g.id, pk, fk)} />
-                    <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("govIncome", g.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                    <button type="button" aria-label={TXT.delete} onClick={() => requestDelete("govIncome", g)} style={St.iconBtn}><Trash2 size={16} /></button>
                   </EntryActions>
                 </div>
-                <DerivedLine monthly={monthlyOf(g, cur)} period={g.period} percent={pctOf(monthlyOf(g, cur), calc.govTotal)} correspondent={g.correspondent} dot />
+                <DerivedLine monthly={monthlyOf(g, cur)} period={g.period} percent={pctOf(monthlyOf(g, cur), calc.govTotal)} correspondent={g.correspondent} compare={neighbours("govIncome", g)} dot />
               </div>
             );
           })}
+          {renderGhosts("govIncome")}
           {!filtering && <button type="button" onClick={addGov} style={St.addBtn}><Plus size={16} /> {TXT.addGovernment}</button>}
           {filtering && <FilterSum count={visibleGov.length} total={cur.govIncome.length} monthly={sumM(visibleGov, cur)} />}
           <SubTotal monthly={calc.govTotal} />
@@ -1658,7 +1820,7 @@ export default function App() {
                     <span style={{ ...St.dot, background: categoryColor(s.label) }} />
                   </span>
                   <input className="e-desc" aria-label={TXT.category} value={s.label} placeholder={TXT.categoryPlaceholder} onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
-                  <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setListItem("savings", s.id, { amount: v })} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => logChange(`${TXT.savingsSection} · ${s.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
+                  <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setAmountHere("savings", s.id, v)} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => commitAmount("savings", s, null, `${TXT.savingsSection} · ${s.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
                   <EntryActions>
                     <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
                     <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
@@ -1668,13 +1830,14 @@ export default function App() {
                     <TrendIcon income={false} trend={entryTrend("savings", s.id, monthlyOf(s, cur))} />
                     <SparkIcon history={entryHistory("savings", s.id)} />
                     <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("savings", s.id, pk, fk)} />
-                    <button type="button" aria-label={TXT.delete} onClick={() => removeListItem("savings", s.id)} style={St.iconBtn}><Trash2 size={16} /></button>
+                    <button type="button" aria-label={TXT.delete} onClick={() => requestDelete("savings", s)} style={St.iconBtn}><Trash2 size={16} /></button>
                   </EntryActions>
                 </div>
-                <DerivedLine monthly={monthlyOf(s, cur)} period={s.period} percent={pctOf(monthlyOf(s, cur), calc.savingsTotal)} correspondent={s.correspondent} dot />
+                <DerivedLine monthly={monthlyOf(s, cur)} period={s.period} percent={pctOf(monthlyOf(s, cur), calc.savingsTotal)} correspondent={s.correspondent} compare={neighbours("savings", s)} dot />
               </div>
             );
           })}
+          {renderGhosts("savings")}
           {!filtering && <button type="button" onClick={addSaving} style={St.addBtn}><Plus size={16} /> {TXT.addSaving}</button>}
           {filtering && <FilterSum count={visibleSavings.length} total={cur.savings.length} monthly={sumM(visibleSavings, cur)} />}
           <SubTotal monthly={calc.savingsTotal} />
@@ -1807,6 +1970,18 @@ export default function App() {
           </button>
         ))}
       </nav>
+      {pendingDelete && (
+        <ScopeDialog icon={<Trash2 size={16} style={{ color: C.exp }} />} title={t(LANG, "deleteScopeTitle", { name: pendingDelete.label })}
+          body={t(LANG, "deleteScopeBody", { range: monthRange(pendingDelete.later) })} month={sel} later={pendingDelete.later}
+          thisLabel={TXT.deleteScopeThisMonth} forwardLabel={TXT.deleteScopeForward} danger
+          onPick={confirmDelete} onCancel={() => setPendingDelete(null)} cancelLabel={TXT.cancel} />
+      )}
+      {pendingAmount && (
+        <ScopeDialog icon={<CalendarDays size={16} style={{ color: C.b }} />} title={t(LANG, "amountScopeTitle", { name: pendingAmount.label })}
+          body={t(LANG, "amountScopeBody", { amount: pendingAmount.amount, month: monthLong(sel), range: monthRange(pendingAmount.later) })} month={sel} later={pendingAmount.later}
+          thisLabel={TXT.amountScopeThisMonth} forwardLabel={TXT.amountScopeForward}
+          onPick={confirmAmount} onCancel={() => confirmAmount(false)} />
+      )}
       {printJob && <PrintDocument job={printJob} months={printMonths} appTitle={APP_TITLE} />}
     </div>
   );
@@ -1962,7 +2137,7 @@ function AmountField({ value, period, onValue, onPeriod, onCommit, disabled }) {
 // like the description — instead of only being visible after opening the
 // correspondent popover. Styled to stand out from the rest of this otherwise
 // muted line, since it's easy to miss otherwise.
-function DerivedLine({ monthly, period, percent, dot, correspondent }) {
+function DerivedLine({ monthly, period, percent, dot, correspondent, compare }) {
   const other = period === "year" ? `${eur(monthly)} ${TXT.perMonth}` : `${eur(monthly * 12)} ${TXT.perYear}`;
   return (
     <div style={{ ...St.derived, marginLeft: dot ? 20 : 2 }}>
@@ -1970,6 +2145,92 @@ function DerivedLine({ monthly, period, percent, dot, correspondent }) {
       {PAPERLESS_ENABLED && correspondent && (
         <> · <span style={St.derivedCorrespondent}><Building2 size={11} style={{ verticalAlign: "-1px" }} /> {correspondent}</span></>
       )}
+      {compare && <MonthRail {...compare} />}
+    </div>
+  );
+}
+
+// Where an entry stands against the nearest month on either side: three
+// dots (previous · this · next) — green when equal, amber when the amount
+// differs, hollow red when the entry is missing there. Only differences
+// get words, so an all-green rail reads as "exactly the same".
+const RAIL_COLOR = { same: C.save, changed: C.warn, absent: C.exp };
+const signedEur = (n) => `${n > 0 ? "+" : "−"}${eur(Math.abs(n))}`;
+function MonthRail({ prev, next, cur }) {
+  if (!prev && !next) return null;
+  const describe = (side, isPrev) => {
+    const month = monthShort(side.key);
+    if (side.status === "same") return t(LANG, "railSame", { month });
+    if (side.status === "absent") return t(LANG, isPrev ? "railNew" : "railStops", { month });
+    return isPrev ? t(LANG, "railDiff", { diff: signedEur(cur - side.value), month }) : t(LANG, "railNext", { month, amount: eur(side.value) });
+  };
+  const sides = [prev && { side: prev, text: describe(prev, true) }, next && { side: next, text: describe(next, false) }].filter(Boolean);
+  const dot = (side) => side
+    ? <span style={{ ...St.railDot, ...(side.status === "absent" ? { border: `1.5px solid ${C.exp}` } : { background: RAIL_COLOR[side.status] }) }} />
+    : <span style={{ ...St.railDot, visibility: "hidden" }} />;
+  const label = sides.map((x) => x.text).join(" · ");
+  return (
+    <span style={St.rail} title={label} role="img" aria-label={label}>
+      <span style={St.railTrack}>
+        {dot(prev)}<span style={{ ...St.railLine, ...(prev ? {} : { visibility: "hidden" }) }} />
+        <span style={St.railCur} />
+        <span style={{ ...St.railLine, ...(next ? {} : { visibility: "hidden" }) }} />{dot(next)}
+      </span>
+      {sides.filter((x) => x.side.status !== "same").map((x) => (
+        <span key={x.side.key} style={{ color: RAIL_COLOR[x.side.status], fontWeight: 600 }}>{x.text}</span>
+      ))}
+    </span>
+  );
+}
+
+// One line under the month bar: how this month differs from the nearest
+// month on either side, counted over every list. Tapping a side jumps there.
+function MonthDiffSummary({ prev, next, onGo }) {
+  if (!prev && !next) return null;
+  const chip = (d, labelKey, hereKey, thereKey) => {
+    if (!d) return null;
+    const parts = [[d.onlyHere, hereKey], [d.onlyThere, thereKey], [d.changed, "compareChanged"]]
+      .filter(([n]) => n > 0).map(([n, key]) => t(LANG, key, { count: n }));
+    return (
+      <button type="button" onClick={() => onGo(d.key)} style={St.diffChip} title={t(LANG, "compareGoTo", { month: monthLong(d.key) })}>
+        {parts.length ? <span style={{ ...St.railDot, background: C.warn }} /> : <Check size={13} style={{ color: C.save, flexShrink: 0 }} />}
+        <span style={St.diffChipLabel}>{t(LANG, labelKey, { month: monthShort(d.key) })}</span>
+        <span>{parts.length ? parts.join(" · ") : TXT.compareSame}</span>
+      </button>
+    );
+  };
+  return (
+    <div style={St.diffRow} className="fade">
+      {chip(prev, "compareVsPrev", "compareNew", "compareGone")}
+      {chip(next, "compareVsNext", "compareStops", "compareAppears")}
+    </div>
+  );
+}
+
+// "Only this month, or this month and later?" — asked when deleting an
+// entry, or changing its amount, while it still exists in later months.
+// Without a cancel button, Escape/backdrop simply mean "only this month".
+function ScopeDialog({ icon, title, body, month, later, thisLabel, forwardLabel, danger, cancelLabel, onPick, onCancel }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onCancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  return (
+    <div style={St.dialogBackdrop} onClick={onCancel}>
+      <div role="dialog" aria-modal="true" aria-labelledby="scope-dialog-title" style={St.dialog} onClick={(e) => e.stopPropagation()}>
+        <div id="scope-dialog-title" style={St.dialogTitle}>{icon} {title}</div>
+        <p style={St.dialogBody}>{body}</p>
+        <button type="button" autoFocus onClick={() => onPick(false)} style={St.dialogOption}>
+          {thisLabel.replace("{month}", monthLong(month))}
+          <span style={St.dialogOptionSub}>{monthShortWithYear(month)}</span>
+        </button>
+        <button type="button" onClick={() => onPick(true)} style={{ ...St.dialogOption, ...(danger ? { color: C.exp, borderColor: C.exp } : { color: C.b, borderColor: C.b }) }}>
+          {forwardLabel.replace("{month}", monthLong(month))}
+          <span style={St.dialogOptionSub}>{monthRange([month, later[later.length - 1]])}</span>
+        </button>
+        {cancelLabel && <button type="button" onClick={onCancel} style={St.dialogCancel}>{cancelLabel}</button>}
+      </div>
     </div>
   );
 }
@@ -3290,6 +3551,27 @@ const St = {
   catInput: { width: 104, flexShrink: 0, border: "none", borderBottom: `1px solid ${C.line}`, background: C.canvas, borderRadius: "6px 6px 0 0", padding: "8px 8px", fontSize: 12.5, color: C.muted, fontFamily: "inherit", outline: "none" },
   derived: { fontSize: 12, color: C.muted, marginTop: 4, fontVariantNumeric: "tabular-nums" },
   derivedCorrespondent: { color: C.b, fontWeight: 600 },
+  rail: { display: "inline-flex", alignItems: "center", flexWrap: "wrap", gap: "2px 8px", marginLeft: 8, verticalAlign: "middle" },
+  railTrack: { display: "inline-flex", alignItems: "center" },
+  railDot: { width: 8, height: 8, borderRadius: 999, boxSizing: "border-box", flexShrink: 0, display: "inline-block" },
+  railLine: { width: 7, height: 1.5, background: C.line },
+  railCur: { width: 5, height: 5, borderRadius: 999, background: C.ink, flexShrink: 0 },
+  ghostRow: { border: `1px dashed ${C.line}`, borderRadius: 12, padding: "8px 12px", marginBottom: 12, opacity: 0.85 },
+  ghostHead: { display: "flex", justifyContent: "space-between", gap: 10, fontSize: 14, color: C.muted, textDecoration: "line-through", textDecorationColor: C.line },
+  ghostLabel: { fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  ghostAmount: { fontVariantNumeric: "tabular-nums", flexShrink: 0 },
+  ghostMeta: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px 10px", marginTop: 6, fontSize: 12.5, color: C.muted },
+  ghostBtn: { border: `1px solid ${C.line}`, background: C.card, color: C.ink, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "5px 10px", borderRadius: 999 },
+  diffRow: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: -4, marginBottom: 12 },
+  diffChip: { display: "inline-flex", alignItems: "center", gap: 7, border: `1px solid ${C.line}`, background: C.card, color: C.ink, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit", padding: "6px 12px", borderRadius: 999, textAlign: "left" },
+  diffChipLabel: { color: C.muted },
+  dialogBackdrop: { position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
+  dialog: { width: "min(420px, 100%)", background: C.card, color: C.ink, borderRadius: 16, padding: 18, boxShadow: "0 12px 40px rgba(0,0,0,0.25)" },
+  dialogTitle: { display: "flex", alignItems: "center", gap: 8, fontSize: 16, fontWeight: 700 },
+  dialogBody: { fontSize: 13.5, lineHeight: 1.5, color: C.muted, margin: "8px 0 12px" },
+  dialogOption: { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, width: "100%", border: `1px solid ${C.line}`, background: C.canvas, color: C.ink, fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "11px 14px", borderRadius: 12, marginTop: 8, textAlign: "left" },
+  dialogOptionSub: { fontSize: 12, fontWeight: 400, color: C.muted },
+  dialogCancel: { width: "100%", border: "none", background: "transparent", color: C.muted, fontSize: 13.5, cursor: "pointer", fontFamily: "inherit", padding: "10px", marginTop: 6 },
 
   amountField: { display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 },
   periodPill: { border: "none", background: C.canvas, color: C.muted, fontSize: 11, fontWeight: 700, padding: "5px 7px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", minWidth: 38, textAlign: "center" },
