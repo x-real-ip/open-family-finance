@@ -24,10 +24,10 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
-  ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, MessageSquare, History, Link2,
-  ArrowDown, ArrowUp, Minus, Copy, LineChart as LineChartIcon, Sun, Moon,
+  ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, History, Link2,
+  Copy, Sun, Moon,
   Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Percent, Printer,
-  MoreHorizontal, CalendarDays, Waypoints, Search, X,
+  MoreHorizontal, CalendarDays, Waypoints, Search, X, Users, StickyNote,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
@@ -67,6 +67,7 @@ function sectionPersonalStyle(color) {
 }
 
 const KEY = "open-family-finance:v1";
+const OPEN_KEY = "open-family-finance:open";
 const APP_TITLE = getRuntimeAppTitle();
 
 // User-defined labels get a stable auto color from a hash of the name.
@@ -681,7 +682,13 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(true);
   const [view, setView] = useState("month");
-  const [open, setOpen] = useState({ inkomen: false, overheid: false, uitgaven: false, sparen: false, statsIncome: true, statsTotals: false, log: false });
+  // Which sections are expanded is remembered per browser, so the page
+  // comes back the way you left it.
+  const [open, setOpen] = useState(() => {
+    const defaults = { inkomen: true, overheid: true, uitgaven: true, sparen: true, statsIncome: true, statsTotals: false, log: false };
+    try { return { ...defaults, ...JSON.parse(window.localStorage.getItem(OPEN_KEY) || "{}") }; } catch { return defaults; }
+  });
+  useEffect(() => { try { window.localStorage.setItem(OPEN_KEY, JSON.stringify(open)); } catch { /* storage unavailable */ } }, [open]);
   const [showDetails, setShowDetails] = useState(false);
   // null = unbounded, so the range always defaults to (and grows with) all available months.
   const [statsFrom, setStatsFrom] = useState(null);
@@ -985,22 +992,6 @@ export default function App() {
     }
     return out;
   };
-  // Compare the current value to the most recent earlier month that had an entered value.
-  const entryTrend = (kind, id, curVal, personId = null) => {
-    if (!(curVal > 0)) return null;
-    const idx = sortedMonths.indexOf(sel);
-    for (let i = idx - 1; i >= 0; i--) {
-      const it = listAt(data.months[sortedMonths[i]], kind, personId).find((x) => x.id === id);
-      if (!it) continue;
-      const prev = toMonthly(kind === "partners" ? it.income : it.amount, it.period);
-      if (prev > 0) {
-        if (Math.abs(curVal - prev) < 0.005) return null;
-        return { dir: curVal > prev ? "up" : "down", prev, cur: curVal };
-      }
-    }
-    return null;
-  };
-
   // ── Month comparison ──
   // Every entry is compared (by id) with the nearest existing month on
   // either side, so a difference shows right in the row (MonthRail) instead
@@ -1377,6 +1368,8 @@ export default function App() {
   };
   const personName = (p, i) => p.name || t(LANG, "personName", { n: i + 1 });
   const personView = view.startsWith("person:") ? view.slice(7) : null;
+  // The household month page and the personal pages share the "Maand" tab.
+  const onMonthPage = view === "month" || Boolean(personView);
   // If the person currently being viewed gets removed, fall back to the
   // month view instead of rendering a blank/broken personal page.
   useEffect(() => {
@@ -1423,51 +1416,153 @@ export default function App() {
     });
   };
 
+  // ── Entry rows and the detail panel ──
+  // A row shows only what you scan for (name, category, amount and how it
+  // compares to the neighbour months); everything else about an entry
+  // (contract, note, link, correspondent, formula, history, copy, delete)
+  // lives in one detail panel: a side panel on wide screens, a bottom sheet
+  // on phones. Clicking a row (outside its inputs) opens it.
+  const [detail, setDetail] = useState(null);
+  const openDetail = (kind, id, personId = null) => setDetail({ kind, id, personId });
+  const closeDetail = () => setDetail(null);
+  const detailEntry = detail ? listAt(cur, detail.kind, detail.personId).find((x) => x.id === detail.id) : null;
+  // Close once the entry is gone (deleted, or absent in the month switched to).
+  useEffect(() => { if (detail && !detailEntry) setDetail(null); }, [detail, detailEntry]);
+  useEffect(() => {
+    if (!detail) return;
+    const onKey = (e) => { if (e.key === "Escape") setDetail(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detail]);
+
+  const sectionLabel = (kind, personId) => personId
+    ? personName(cur.partners.find((p) => p.id === personId) || {}, cur.partners.findIndex((p) => p.id === personId))
+    : { partners: TXT.salarySection, govIncome: TXT.government, expenses: TXT.expensesSection, savings: TXT.savingsSection }[kind];
+  // Personal expenses are one level deeper (keyed by person id) and people
+  // have their own mutators, so the right set is picked once per kind here.
+  const entryOps = (kind, personId) => {
+    const set = kind === "partners" ? (id, patch) => setPartner(id, patch)
+      : personId ? (id, patch) => setPersonalExpenseItem(personId, id, patch)
+      : (id, patch) => setListItem(kind, id, patch);
+    return {
+      set,
+      setName: kind === "partners" ? (id, v) => setPartnerName(id, v) : (id, v) => set(id, { label: v }),
+      togglePeriod: kind === "partners" ? (id) => togglePartnerPeriod(id)
+        : personId ? (id) => togglePersonalExpenseItemPeriod(personId, id)
+        : (id) => toggleItemPeriod(kind, id),
+      copyRange: personId ? (id, pk, fk) => copyPersonalExpenseEntryRange(personId, id, pk, fk) : (id, pk, fk) => copyEntryRange(kind, id, pk, fk),
+    };
+  };
+  const hasCategory = (kind) => kind === "expenses" || kind === "personalExpenses";
+  const entryName = (kind, e, index) => (kind === "partners" ? personName(e, index) : e.label || TXT.unnamed);
+  const amountProps = (kind, e, personId, index) => {
+    const ops = entryOps(kind, personId);
+    return {
+      value: kind === "partners" ? e.income : e.formula ? String(round2(entryAmount(e, cur))) : e.amount,
+      period: e.period,
+      onValue: (v) => setAmountHere(kind, e.id, v, personId),
+      onPeriod: () => ops.togglePeriod(e.id),
+      onCommit: (o, n) => commitAmount(kind, kind === "partners" ? { ...e, name: personName(e, index) } : e, personId, `${sectionLabel(kind, personId)} · ${entryName(kind, e, index)}`, o, n),
+      disabled: Boolean(e.formula),
+    };
+  };
+
+  const renderRow = (kind, e, { personId = null, index = -1, total = 0, manual = false } = {}) => {
+    const ops = entryOps(kind, personId);
+    const isPerson = kind === "partners";
+    const withCat = hasCategory(kind);
+    const draggable = !isPerson && manual;
+    const selected = detail?.kind === kind && detail?.id === e.id && detail?.personId === personId;
+    const dragging = draggable && dragItem?.kind === kind && dragItem?.personId === personId && dragItem.id === e.id;
+    const dot = isPerson ? personColor(e, index).main : kind === "govIncome" ? C.gov : kind === "savings" ? categoryColor(e.label) : categoryColor(e.category);
+    const monthly = valueOf(kind, e, cur);
+    const onRowClick = (ev) => { if (!ev.target.closest("input, button, select, textarea, a, [draggable]")) openDetail(kind, e.id, personId); };
+    return (
+      <div key={e.id} style={{ ...St.itemWrap, ...(dragging ? { opacity: 0.4 } : {}) }} className={`entryWrap${selected ? " selected" : ""}`}
+        onClick={onRowClick} {...(draggable ? dragRowProps(kind, e.id, personId) : {})}>
+        <div className="entry">
+          <span className="e-lead">
+            <DragHandle active={draggable} {...dragHandleProps(kind, e.id, personId)} />
+            <span style={{ ...St.dot, background: dot }} title={withCat ? (e.category || TXT.otherCategory) : undefined} />
+            {withCat && <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => ops.set(e.id, { category: ev.target.value })} style={St.catInput} />}
+          </span>
+          <input className="e-desc" aria-label={isPerson ? t(LANG, "personName", { n: index + 1 }) : TXT.description}
+            value={isPerson ? e.name : e.label} placeholder={isPerson ? t(LANG, "personPlaceholder", { n: index + 1 }) : TXT.descriptionPlaceholder}
+            onChange={(ev) => ops.setName(e.id, ev.target.value)} style={{ ...St.nameInput, ...(isPerson ? { fontWeight: 600 } : {}) }} />
+          <span className="e-amount"><AmountField {...amountProps(kind, e, personId, index)} /></span>
+          <button type="button" className="entryOpen" aria-label={t(LANG, "openDetails", { name: entryName(kind, e, index) })} aria-expanded={selected}
+            onClick={() => (selected ? closeDetail() : openDetail(kind, e.id, personId))} style={{ ...St.iconBtn, color: selected ? C.b : C.muted }}>
+            <ChevronRight size={18} />
+          </button>
+        </div>
+        <DerivedLine monthly={monthly} period={e.period} percent={pctOf(monthly, total)} correspondent={e.correspondent} compare={neighbours(kind, e, personId)}
+          dot={!withCat} category={withCat ? e.category || TXT.otherCategory : null} entry={e} />
+      </div>
+    );
+  };
+
+  const renderDrawer = () => {
+    if (!detailEntry) return null;
+    const { kind, personId } = detail;
+    const e = detailEntry;
+    const ops = entryOps(kind, personId);
+    const isPerson = kind === "partners";
+    const index = isPerson ? cur.partners.findIndex((p) => p.id === e.id) : -1;
+    const monthly = valueOf(kind, e, cur);
+    const other = e.period === "year" ? `= ${eur(monthly)} ${TXT.perMonth}` : `= ${eur(monthly * 12)} ${TXT.perYear}`;
+    const canDelete = !isPerson || cur.partners.length > 1;
+    const section = (title, body) => <section style={St.drawerSection}><div style={St.drawerLabel}>{title}</div>{body}</section>;
+    return (
+      <React.Fragment key={`${kind}-${personId || ""}-${e.id}`}>
+        <div className="drawerBackdrop" onClick={closeDetail} />
+        <aside className="drawer" role="dialog" aria-label={entryName(kind, e, index)} style={St.drawer}>
+          <div style={St.drawerHead}>
+            <span style={St.drawerCrumb}>{sectionLabel(kind, personId)}{hasCategory(kind) && e.category ? ` · ${e.category}` : ""} · {monthLong(sel)}</span>
+            <button type="button" onClick={closeDetail} style={St.iconBtn} aria-label={TXT.close}><X size={18} /></button>
+          </div>
+          {historyLocked && <div style={{ ...St.historyBanner, marginTop: 4 }}><span>{TXT.historyLockedHint}</span></div>}
+          <div inert={historyLocked ? "" : undefined} style={historyLocked ? { opacity: 0.6 } : undefined}>
+            <input value={isPerson ? e.name : e.label} placeholder={isPerson ? t(LANG, "personPlaceholder", { n: index + 1 }) : TXT.descriptionPlaceholder}
+              onChange={(ev) => ops.setName(e.id, ev.target.value)} style={St.drawerTitle} className="drawerTitle" aria-label={TXT.description} />
+            {hasCategory(kind) && (
+              <label style={{ ...St.drawerSub, marginBottom: 10 }}>{TXT.category}
+                <input list="cats" value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => ops.set(e.id, { category: ev.target.value })} style={St.drawerInput} />
+              </label>
+            )}
+            <div style={St.drawerAmountRow}>
+              <AmountField {...amountProps(kind, e, personId, index)} />
+              <span style={St.drawerMuted}>{other}</span>
+            </div>
+            <div style={{ ...St.derived, marginTop: 6 }}><MonthRail {...neighbours(kind, e, personId)} /></div>
+            {section(TXT.priceTrend, <Sparkline data={entryHistory(kind, e.id, personId)} />)}
+            {section(TXT.duration, <DurationEditor entry={e} onChange={(patch) => ops.set(e.id, patch)} />)}
+            {section(TXT.note, <NoteEditor value={e.note || ""} onChange={(v) => ops.set(e.id, { note: v })} />)}
+            {section(TXT.link, <LinkEditor value={e.url || ""} onChange={(v) => ops.set(e.id, { url: v })} />)}
+            {PAPERLESS_ENABLED && section(TXT.correspondent, <CorrespondentEditor entry={e} onChange={(patch) => ops.set(e.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />)}
+            {!isPerson && section(TXT.sourceRule, <FormulaEditor entry={e} monthData={cur} onChange={(patch) => ops.set(e.id, patch)} />)}
+            {section(TXT.copyAmount, <CopyPicker pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => ops.copyRange(e.id, pk, fk)} emptyText={TXT.noMonthsToCopy} />)}
+            {canDelete && (
+              <button type="button" onClick={() => (isPerson ? removePerson(e.id) : requestDelete(kind, e, personId))} style={St.drawerDelete}>
+                <Trash2 size={15} /> {isPerson ? TXT.removePerson : TXT.delete}
+              </button>
+            )}
+          </div>
+        </aside>
+      </React.Fragment>
+    );
+  };
+
   // Shared by the joint "Vaste lasten" section and each partner's personal
   // page — same fields, same behavior (sorting, drag reorder, formulas,
   // correspondent/paperless, trend/sparkline, per-entry copy-forward), just
   // scoped to a different list (`kind`) and its own subtotal/category split.
-  const renderExpensesList = (kind, items, total, byCat, onAdd, logPrefix = TXT.expensesSection, personId = null) => {
+  const renderExpensesList = (kind, items, total, byCat, onAdd, personId = null) => {
     const manual = listSort[kind] === "manual";
-    // Personal expenses are one level deeper (keyed by person id) than the
-    // other flat lists, so their edits route through a separate set of
-    // mutators — chosen once here rather than branching inside every line.
-    const set = personId ? (id, patch) => setPersonalExpenseItem(personId, id, patch) : (id, patch) => setListItem(kind, id, patch);
-    const togglePeriod = personId ? (id) => togglePersonalExpenseItemPeriod(personId, id) : (id) => toggleItemPeriod(kind, id);
-    const copyRange = personId ? (id, pk, fk) => copyPersonalExpenseEntryRange(personId, id, pk, fk) : (id, pk, fk) => copyEntryRange(kind, id, pk, fk);
     const shown = filtering ? items.filter(matchesFilter) : items;
     return (
       <>
         {items.length > 1 && <SortToggle kind={kind} mode={listSort[kind]} onChange={(m) => setListSort(kind, m)} />}
-        {shown.map((e) => {
-          const formulaActive = Boolean(e.formula);
-          const displayAmount = formulaActive ? String(round2(entryAmount(e, cur))) : e.amount;
-          return (
-            <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === kind && dragItem?.personId === personId && dragItem.id === e.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={e.id} {...(manual ? dragRowProps(kind, e.id, personId) : {})}>
-              <div className="entry exp">
-                <span className="e-lead">
-                  <DragHandle active={manual} {...dragHandleProps(kind, e.id, personId)} />
-                  <span style={{ ...St.catDot, background: categoryColor(e.category) }} title={e.category || TXT.otherCategory} />
-                  <input list="cats" aria-label={TXT.category} value={e.category} placeholder={TXT.categoryPlaceholder} onChange={(ev) => set(e.id, { category: ev.target.value })} style={St.catInput} />
-                </span>
-                <input className="e-desc" aria-label={TXT.description} value={e.label} placeholder={TXT.descriptionPlaceholder} onChange={(ev) => set(e.id, { label: ev.target.value })} style={St.nameInput} />
-                <span className="e-amount"><AmountField value={displayAmount} period={e.period} onValue={(v) => setAmountHere(kind, e.id, v, personId)} onPeriod={() => togglePeriod(e.id)} onCommit={(o, n) => commitAmount(kind, e, personId, `${logPrefix} · ${e.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
-                <EntryActions>
-                  <NoteField value={e.note || ""} onChange={(v) => set(e.id, { note: v })} />
-                  <LinkField value={e.url || ""} onChange={(v) => set(e.id, { url: v })} />
-                  <CorrespondentField entry={e} onChange={(patch) => set(e.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
-                  <DurationField entry={e} onChange={(patch) => set(e.id, patch)} />
-                  <FormulaField entry={e} monthData={cur} onChange={(patch) => set(e.id, patch)} />
-                  <TrendIcon income={false} trend={entryTrend(kind, e.id, monthlyOf(e, cur), personId)} />
-                  <SparkIcon history={entryHistory(kind, e.id, personId)} />
-                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyRange(e.id, pk, fk)} />
-                  <button type="button" aria-label={TXT.delete} onClick={() => requestDelete(kind, e, personId)} style={St.iconBtn}><Trash2 size={16} /></button>
-                </EntryActions>
-              </div>
-              <DerivedLine monthly={monthlyOf(e, cur)} period={e.period} percent={pctOf(monthlyOf(e, cur), total)} correspondent={e.correspondent} compare={neighbours(kind, e, personId)} />
-            </div>
-          );
-        })}
+        {shown.map((e) => renderRow(kind, e, { personId, total, manual }))}
         {renderGhosts(kind, personId)}
         {!filtering && <button type="button" onClick={onAdd} style={St.addBtn}><Plus size={16} /> {TXT.addExpense}</button>}
         {!filtering && byCat.length > 0 && (
@@ -1553,40 +1648,53 @@ export default function App() {
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} <span className="themeLabel">{theme === "dark" ? TXT.themeLight : TXT.themeDark}</span>
             </button>
           </div>
-          <div style={{ ...St.toggle, marginTop: 10 }} className="viewTabs" role="group" aria-label={TXT.viewToggleAria}>
-            <button type="button" onClick={() => setView("month")} style={{ ...St.toggleBtn, ...(view === "month" ? St.toggleOn : {}) }}>{TXT.monthView}</button>
-            <button type="button" onClick={() => setView("savings")} style={{ ...St.toggleBtn, ...(view === "savings" ? St.toggleOn : {}) }}>{TXT.savingsOverviewView}</button>
-            <button type="button" onClick={() => setView("cashflow")} style={{ ...St.toggleBtn, ...(view === "cashflow" ? St.toggleOn : {}) }}>{TXT.cashflowView}</button>
-            {cur.partners.map((p, i) => (
-              <button key={p.id} type="button" onClick={() => setView(`person:${p.id}`)}
-                style={{ ...St.toggleBtn, ...(personView === p.id ? { ...St.toggleOn, color: personColor(p, i).main } : {}) }}>
-                {personName(p, i)}
-              </button>
-            ))}
+          <div style={St.navRow}>
+            <div style={St.toggle} className="viewTabs" role="group" aria-label={TXT.viewToggleAria}>
+              {[["month", TXT.monthView], ["savings", TXT.savingsOverviewView], ["cashflow", TXT.cashflowView], ["history", TXT.historyView]].map(([v, label]) => {
+                const on = v === "month" ? onMonthPage : view === v;
+                return <button key={v} type="button" aria-pressed={on} onClick={() => { if (!on) setView(v); }} style={{ ...St.toggleBtn, ...(on ? St.toggleOn : {}) }}>{label}</button>;
+              })}
+            </div>
+            {onMonthPage && (
+              <div style={St.viewAs} className="viewAs" role="group" aria-label={TXT.viewAs}>
+                <span style={St.viewAsLabel} className="viewAsLabel">{TXT.viewAs}</span>
+                <button type="button" aria-pressed={view === "month"} onClick={() => setView("month")} style={{ ...St.viewAsBtn, ...(view === "month" ? St.viewAsOn : {}) }}>
+                  <span style={{ ...St.avatar, background: C.ink, color: C.card }}><Users size={14} /></span>{TXT.household}
+                </button>
+                {cur.partners.map((p, i) => {
+                  const on = personView === p.id;
+                  return (
+                    <button key={p.id} type="button" aria-pressed={on} title={personName(p, i)} onClick={() => setView(`person:${p.id}`)} style={{ ...St.viewAsBtn, ...(on ? St.viewAsOn : { padding: 3 }) }}>
+                      <span style={{ ...St.avatar, background: personColor(p, i).main, opacity: on ? 1 : 0.6 }}>{(personName(p, i)[0] || "?").toUpperCase()}</span>
+                      {on && personName(p, i)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </header>
 
-        {/* Month — shared by both views: the savings overview edits each
-            linked entry's amount for whichever month is selected here, the
-            same way the monthly view does. */}
-        {/* On phones (≤640px CSS) this collapses into one sticky row:
-            ‹ month › — the native <select> is laid invisibly over the month
-            label, so tapping the label opens the OS month picker. */}
+        {/* Month — shared by every page. The native <select> is laid
+            invisibly over the month label, so clicking the label opens the
+            month picker. On phones (≤640px CSS) this becomes one sticky row. */}
         <div style={St.monthNav} className={`fade monthNav${isCurrentRealMonth ? " isCurrent" : ""}`}>
           <button type="button" onClick={() => goMonth(-1)} style={St.navBtn} className="navPrev" aria-label={TXT.previousMonth}><ChevronLeft size={18} /></button>
           <div style={St.monthLabelWrap} className="monthLabelWrap">
             <span style={St.monthLabel}>{monthLong(sel)}</span>
             {isCurrentRealMonth && <span style={St.nowTag}>{TXT.nowTag}</span>}
-            <ChevronDown size={16} className="monthPickHint" style={{ color: C.muted }} />
+            <ChevronDown size={16} style={{ color: C.muted, flexShrink: 0 }} />
+            <select value={sel} onChange={(e) => setData((d) => ({ ...d, selectedMonth: e.target.value }))} style={St.monthSelect} aria-label={TXT.chooseMonth}>
+              {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
+            </select>
           </div>
-          <select value={sel} onChange={(e) => setData((d) => ({ ...d, selectedMonth: e.target.value }))} style={St.monthSelect} className="monthSelect" aria-label={TXT.chooseMonth}>
-            {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
-          </select>
-          <button type="button" onClick={goCurrent} style={St.currentBtn} className="currentBtn" aria-label={TXT.currentMonth}>{TXT.currentMonth}</button>
           <button type="button" onClick={() => goMonth(1)} style={St.navBtn} className="navNext" aria-label={TXT.nextMonth}><ChevronRight size={18} /></button>
-          {sortedMonths.length > 1 && (
-            <button type="button" onClick={() => deleteMonth(sel)} style={St.navBtn} className="navDelete" aria-label={`${TXT.deleteMonth} · ${monthLong(sel)}`}><Trash2 size={16} /></button>
-          )}
+          {!isCurrentRealMonth && <button type="button" onClick={goCurrent} style={St.currentBtn} className="currentBtn">{TXT.currentMonth}</button>}
+          <span style={{ flex: 1 }} className="navSpacer" />
+          <MonthActions pastMonths={pastMonths} futureMonths={futureMonths} printing={Boolean(printJob)} canDelete={sortedMonths.length > 1}
+            onCopy={(pk, fk) => copyMonth([...pk, ...fk])} onReset={resetMonth}
+            onPrintMonth={() => setPrintJob({ type: "month", key: sel })} onPrintYear={() => setPrintJob({ type: "year", year: sel.slice(0, 4) })}
+            onDelete={() => deleteMonth(sel)} />
         </div>
 
         {isHistoryMonth && (
@@ -1597,6 +1705,8 @@ export default function App() {
             </button>
           </div>
         )}
+
+        {view === "month" && <ResultTiles partners={cur.partners} calc={calc} names={cur.partners.map((p, i) => personName(p, i))} />}
 
         {searchable && <MonthDiffSummary sel={sel} prev={monthDiff.prev} next={monthDiff.next} onGo={(key) => setData((d) => ({ ...d, selectedMonth: key }))} />}
 
@@ -1621,6 +1731,98 @@ export default function App() {
           />
         ) : view === "cashflow" ? (
           <CashflowPage cur={cur} calc={calc} />
+        ) : view === "history" ? (
+          <div className="fade">
+        {/* Statistics */}
+        <div style={St.savingsPageHead}>
+          <ColTitle>{TXT.statistics}</ColTitle>
+          <span style={St.headTotal}>{t(LANG, "months", { count: sortedMonths.length })}</span>
+        </div>
+        {sortedMonths.length >= 2 && (
+          <div style={St.statsPeriodRow}>
+            <span style={St.sortLabel}>{TXT.statsPeriod}</span>
+            <select
+              value={statsFrom || sortedMonths[0]}
+              onChange={(e) => { const v = e.target.value; setStatsFrom(v === sortedMonths[0] ? null : v); if (v > (statsTo || sortedMonths[sortedMonths.length - 1])) setStatsTo(null); }}
+              style={St.copySel} aria-label={TXT.statsPeriodFrom}>
+              {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
+            </select>
+            <span style={St.sortLabel}>–</span>
+            <select
+              value={statsTo || sortedMonths[sortedMonths.length - 1]}
+              onChange={(e) => { const v = e.target.value; setStatsTo(v === sortedMonths[sortedMonths.length - 1] ? null : v); if (v < (statsFrom || sortedMonths[0])) setStatsFrom(null); }}
+              style={St.copySel} aria-label={TXT.statsPeriodTo}>
+              {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
+            </select>
+            {statsFiltered && (
+              <button type="button" onClick={() => { setStatsFrom(null); setStatsTo(null); }} style={St.resetBtn}><RotateCcw size={13} /> {TXT.statsPeriodReset}</button>
+            )}
+          </div>
+        )}
+        {statsSeries.length < 2 ? (
+          <div style={St.emptyHist}>
+            <TrendingUp size={18} style={{ color: C.muted }} />
+            <span>{TXT.noSeries}</span>
+          </div>
+        ) : (
+          <>
+            <Collapsible id="statsIncome" title={TXT.incomePerMonth} open={open.statsIncome} onToggle={toggleSec}>
+              <div style={St.chartBox}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={statsSeries} margin={{ top: 6, right: 4, left: -6, bottom: 0 }}>
+                    <CartesianGrid stroke={C.line} vertical={false} />
+                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
+                    <YAxis tick={tick} axisLine={false} tickLine={false} width={58} tickFormatter={eur0} />
+                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
+                    {cur.partners.map((p, i) => (
+                      <Bar key={p.id} dataKey={`inleg_${p.id}`} name={personName(p, i)} fill={personColor(p, i).main} radius={[4, 4, 0, 0]} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Collapsible>
+            <Collapsible id="statsTotals" title={TXT.monthTotals} open={open.statsTotals} onToggle={toggleSec}>
+              <div style={St.chartBox}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={statsSeries} margin={{ top: 6, right: 8, left: -6, bottom: 0 }}>
+                    <CartesianGrid stroke={C.line} vertical={false} />
+                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
+                    <YAxis tick={tick} axisLine={false} tickLine={false} width={58} tickFormatter={eur0} />
+                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
+                    <Bar dataKey="income" name={TXT.incomes} fill={C.inc} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="gov" name={TXT.government} fill={C.gov} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="expenses" name={TXT.expenses} fill={C.exp} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="savings" name={TXT.savings} fill={C.save} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Collapsible>
+          </>
+        )}
+
+        {/* Change log */}
+        <Collapsible id="log" title={TXT.logbook} icon={<History size={16} style={{ color: C.muted }} />} total={`${(data.log || []).length}`} open={open.log} onToggle={toggleSec}>
+          {(data.log || []).length === 0 ? (
+            <div style={St.logEmpty}>{TXT.logEmpty}</div>
+          ) : (
+            <div style={St.logList}>
+              {(data.log || []).map((l) => (
+                <div key={l.id} style={St.logRow}>
+                  <span style={St.logTime}>{dt(l.ts)}</span>
+                  <span style={St.logBody}>
+                    <span style={St.logLabel}>{l.label}</span>
+                    <span style={St.logChange}>
+                      <span style={St.logOld}>{l.old || "—"}</span>
+                      <span style={St.logArrow}>→</span>
+                      <span style={St.logNew}>{l.next || "—"}</span>
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Collapsible>
+          </div>
         ) : activePerson ? (
           <div className="fade">
             <ColTitle>{personName(activePerson, activePersonIndex)}</ColTitle>
@@ -1630,39 +1832,20 @@ export default function App() {
               icon={<Receipt size={16} style={{ color: personColor(activePerson, activePersonIndex).main }} />} info={TXT.exp}
               total={eur(sumM(activePersonExpenses, cur))} open={filtering || (open[`person-${activePerson.id}`] ?? true)} onToggle={toggleSec}
               style={sectionPersonalStyle(personColor(activePerson, activePersonIndex).main)}>
-              {renderExpensesList("personalExpenses", sortItems("personalExpenses", activePersonExpenses), sumM(activePersonExpenses, cur), byCategoryOf(activePersonExpenses), () => addPersonalExpense(activePerson.id), personName(activePerson, activePersonIndex), activePerson.id)}
+              {renderExpensesList("personalExpenses", sortItems("personalExpenses", activePersonExpenses), sumM(activePersonExpenses, cur), byCategoryOf(activePersonExpenses), () => addPersonalExpense(activePerson.id), activePerson.id)}
             </Collapsible>
             )}
           </div>
         ) : (
         <>
         {noMatches && noMatchesBlock}
+        <div className={`monthGrid${filtering ? " single" : ""}`}>
+        <div className="mg-inc">
         {(!filtering || visiblePartners.length > 0 || visibleGov.length > 0) && <ColTitle>{TXT.incomes}</ColTitle>}
         {/* Income */}
         {(!filtering || visiblePartners.length > 0) && (
         <Collapsible id="inkomen" title={TXT.salarySection} icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary} total={eur(calc.total)} open={open.inkomen || filtering} onToggle={toggleSec} style={St.sectionIncome}>
-          {visiblePartners.map(({ p, i }) => (
-            <div style={St.itemWrap} className="entryWrap" key={p.id}>
-              <div className="entry">
-                <span className="e-lead"><span style={{ ...St.dot, background: personColor(p, i).main }} /></span>
-                <input className="e-desc" aria-label={t(LANG, "personName", { n: i + 1 })} value={p.name} placeholder={t(LANG, "personPlaceholder", { n: i + 1 })} onChange={(e) => setPartnerName(p.id, e.target.value)} style={{ ...St.nameInput, fontWeight: 600 }} />
-                <span className="e-amount"><AmountField value={p.income} period={p.period} onValue={(v) => setAmountHere("partners", p.id, v)} onPeriod={() => togglePartnerPeriod(p.id)} onCommit={(o, n) => commitAmount("partners", { ...p, name: personName(p, i) }, null, `${TXT.salarySection} · ${personName(p, i)}`, o, n)} /></span>
-                <EntryActions>
-                  <NoteField value={p.note || ""} onChange={(v) => setPartner(p.id, { note: v })} />
-                  <LinkField value={p.url || ""} onChange={(v) => setPartner(p.id, { url: v })} />
-                  <CorrespondentField entry={p} onChange={(patch) => setPartner(p.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
-                  <DurationField entry={p} onChange={(patch) => setPartner(p.id, patch)} />
-                  <TrendIcon income trend={entryTrend("partners", p.id, monthlyInc(p))} />
-                  <SparkIcon history={entryHistory("partners", p.id)} />
-                  <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("partners", p.id, pk, fk)} />
-                  {cur.partners.length > 1 && (
-                    <button type="button" aria-label={TXT.delete} onClick={() => removePerson(p.id)} style={St.iconBtn}><Trash2 size={16} /></button>
-                  )}
-                </EntryActions>
-              </div>
-              <DerivedLine monthly={monthlyInc(p)} period={p.period} percent={pctOf(monthlyInc(p), calc.total)} correspondent={p.correspondent} compare={neighbours("partners", p)} dot />
-            </div>
-          ))}
+          {visiblePartners.map(({ p, i }) => renderRow("partners", p, { index: i, total: calc.total }))}
           {!filtering && <button type="button" onClick={addPerson} style={St.addBtn}><Plus size={16} /> {TXT.addPerson}</button>}
           {filtering && <FilterSum count={visiblePartners.length} total={cur.partners.length} monthly={visiblePartners.reduce((sum, { p }) => sum + monthlyInc(p), 0)} />}
           <SubTotal monthly={calc.total} />
@@ -1673,35 +1856,7 @@ export default function App() {
         {(!filtering || visibleGov.length > 0) && (
         <Collapsible id="overheid" title={TXT.government} icon={<Landmark size={16} style={{ color: C.gov }} />} info={TXT.gov} total={eur(calc.govTotal)} open={open.overheid || filtering} onToggle={toggleSec} style={St.sectionIncome}>
           {cur.govIncome.length > 1 && <SortToggle kind="govIncome" mode={listSort.govIncome} onChange={(m) => setListSort("govIncome", m)} />}
-          {visibleGov.map((g) => {
-            const formulaActive = Boolean(g.formula);
-            const displayAmount = formulaActive ? String(round2(entryAmount(g, cur))) : g.amount;
-            const manual = listSort.govIncome === "manual";
-            return (
-              <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === "govIncome" && dragItem.id === g.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={g.id} {...(manual ? dragRowProps("govIncome", g.id) : {})}>
-                <div className="entry">
-                  <span className="e-lead">
-                    <DragHandle active={manual} {...dragHandleProps("govIncome", g.id)} />
-                    <span style={{ ...St.dot, background: C.gov }} />
-                  </span>
-                  <input className="e-desc" aria-label={TXT.description} value={g.label} placeholder={TXT.descriptionPlaceholder} onChange={(e) => setListItem("govIncome", g.id, { label: e.target.value })} style={St.nameInput} />
-                  <span className="e-amount"><AmountField value={displayAmount} period={g.period} onValue={(v) => setAmountHere("govIncome", g.id, v)} onPeriod={() => toggleItemPeriod("govIncome", g.id)} onCommit={(o, n) => commitAmount("govIncome", g, null, `${TXT.government} · ${g.label || TXT.government}`, o, n)} disabled={formulaActive} /></span>
-                  <EntryActions>
-                    <NoteField value={g.note || ""} onChange={(v) => setListItem("govIncome", g.id, { note: v })} />
-                    <LinkField value={g.url || ""} onChange={(v) => setListItem("govIncome", g.id, { url: v })} />
-                    <CorrespondentField entry={g} onChange={(patch) => setListItem("govIncome", g.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
-                    <DurationField entry={g} onChange={(patch) => setListItem("govIncome", g.id, patch)} />
-                    <FormulaField entry={g} monthData={cur} onChange={(patch) => setListItem("govIncome", g.id, patch)} />
-                    <TrendIcon income trend={entryTrend("govIncome", g.id, monthlyOf(g, cur))} />
-                    <SparkIcon history={entryHistory("govIncome", g.id)} />
-                    <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("govIncome", g.id, pk, fk)} />
-                    <button type="button" aria-label={TXT.delete} onClick={() => requestDelete("govIncome", g)} style={St.iconBtn}><Trash2 size={16} /></button>
-                  </EntryActions>
-                </div>
-                <DerivedLine monthly={monthlyOf(g, cur)} period={g.period} percent={pctOf(monthlyOf(g, cur), calc.govTotal)} correspondent={g.correspondent} compare={neighbours("govIncome", g)} dot />
-              </div>
-            );
-          })}
+          {visibleGov.map((g) => renderRow("govIncome", g, { total: calc.govTotal, manual: listSort.govIncome === "manual" }))}
           {renderGhosts("govIncome")}
           {!filtering && <button type="button" onClick={addGov} style={St.addBtn}><Plus size={16} /> {TXT.addGovernment}</button>}
           {filtering && <FilterSum count={visibleGov.length} total={cur.govIncome.length} monthly={sumM(visibleGov, cur)} />}
@@ -1709,7 +1864,8 @@ export default function App() {
         </Collapsible>
         )}
 
-        {!filtering && (<>
+        </div>
+        {!filtering && (<div className="mg-res">
         <ColTitle>{TXT.allocationSection}</ColTitle>
         {/* Distribution (result) — full width */}
         <section style={St.hero} className="fade">
@@ -1800,8 +1956,9 @@ export default function App() {
             </div>
           )}
         </section>
-        </>)}
+        </div>)}
 
+        <div className="mg-exp">
         {(!filtering || visibleExpenses.length > 0 || visibleSavings.length > 0) && <ColTitle>{TXT.expensesSection}</ColTitle>}
         {/* Expenses */}
         {(!filtering || visibleExpenses.length > 0) && (
@@ -1814,134 +1971,16 @@ export default function App() {
         {(!filtering || visibleSavings.length > 0) && (
         <Collapsible id="sparen" title={TXT.savingsSection} icon={<PiggyBank size={16} style={{ color: C.save }} />} info={TXT.sav} total={eur(calc.savingsTotal)} open={open.sparen || filtering} onToggle={toggleSec} style={St.sectionExpenses}>
           {cur.savings.length > 1 && <SortToggle kind="savings" mode={listSort.savings} onChange={(m) => setListSort("savings", m)} />}
-          {visibleSavings.map((s) => {
-            const formulaActive = Boolean(s.formula);
-            const displayAmount = formulaActive ? String(round2(entryAmount(s, cur))) : s.amount;
-            const manual = listSort.savings === "manual";
-            return (
-              <div style={{ ...St.itemWrap, ...(manual && dragItem?.kind === "savings" && dragItem.id === s.id ? { opacity: 0.4 } : {}) }} className="entryWrap" key={s.id} {...(manual ? dragRowProps("savings", s.id) : {})}>
-                <div className="entry">
-                  <span className="e-lead">
-                    <DragHandle active={manual} {...dragHandleProps("savings", s.id)} />
-                    <span style={{ ...St.dot, background: categoryColor(s.label) }} />
-                  </span>
-                  <input className="e-desc" aria-label={TXT.category} value={s.label} placeholder={TXT.categoryPlaceholder} onChange={(e) => setListItem("savings", s.id, { label: e.target.value })} style={St.nameInput} />
-                  <span className="e-amount"><AmountField value={displayAmount} period={s.period} onValue={(v) => setAmountHere("savings", s.id, v)} onPeriod={() => toggleItemPeriod("savings", s.id)} onCommit={(o, n) => commitAmount("savings", s, null, `${TXT.savingsSection} · ${s.label || TXT.unnamed}`, o, n)} disabled={formulaActive} /></span>
-                  <EntryActions>
-                    <NoteField value={s.note || ""} onChange={(v) => setListItem("savings", s.id, { note: v })} />
-                    <LinkField value={s.url || ""} onChange={(v) => setListItem("savings", s.id, { url: v })} />
-                    <CorrespondentField entry={s} onChange={(patch) => setListItem("savings", s.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />
-                    <DurationField entry={s} onChange={(patch) => setListItem("savings", s.id, patch)} />
-                    <FormulaField entry={s} monthData={cur} onChange={(patch) => setListItem("savings", s.id, patch)} />
-                    <TrendIcon income={false} trend={entryTrend("savings", s.id, monthlyOf(s, cur))} />
-                    <SparkIcon history={entryHistory("savings", s.id)} />
-                    <CopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => copyEntryRange("savings", s.id, pk, fk)} />
-                    <button type="button" aria-label={TXT.delete} onClick={() => requestDelete("savings", s)} style={St.iconBtn}><Trash2 size={16} /></button>
-                  </EntryActions>
-                </div>
-                <DerivedLine monthly={monthlyOf(s, cur)} period={s.period} percent={pctOf(monthlyOf(s, cur), calc.savingsTotal)} correspondent={s.correspondent} compare={neighbours("savings", s)} dot />
-              </div>
-            );
-          })}
+          {visibleSavings.map((s) => renderRow("savings", s, { total: calc.savingsTotal, manual: listSort.savings === "manual" }))}
           {renderGhosts("savings")}
           {!filtering && <button type="button" onClick={addSaving} style={St.addBtn}><Plus size={16} /> {TXT.addSaving}</button>}
           {filtering && <FilterSum count={visibleSavings.length} total={cur.savings.length} monthly={sumM(visibleSavings, cur)} />}
           <SubTotal monthly={calc.savingsTotal} />
         </Collapsible>
         )}
-
-        {/* Statistics and change log are about the whole month, not the matches. */}
-        {!filtering && (<>
-        {/* Statistics */}
-        <div style={St.savingsPageHead}>
-          <ColTitle>{TXT.statistics}</ColTitle>
-          <span style={St.headTotal}>{t(LANG, "months", { count: sortedMonths.length })}</span>
         </div>
-        {sortedMonths.length >= 2 && (
-          <div style={St.statsPeriodRow}>
-            <span style={St.sortLabel}>{TXT.statsPeriod}</span>
-            <select
-              value={statsFrom || sortedMonths[0]}
-              onChange={(e) => { const v = e.target.value; setStatsFrom(v === sortedMonths[0] ? null : v); if (v > (statsTo || sortedMonths[sortedMonths.length - 1])) setStatsTo(null); }}
-              style={St.copySel} aria-label={TXT.statsPeriodFrom}>
-              {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
-            </select>
-            <span style={St.sortLabel}>–</span>
-            <select
-              value={statsTo || sortedMonths[sortedMonths.length - 1]}
-              onChange={(e) => { const v = e.target.value; setStatsTo(v === sortedMonths[sortedMonths.length - 1] ? null : v); if (v < (statsFrom || sortedMonths[0])) setStatsFrom(null); }}
-              style={St.copySel} aria-label={TXT.statsPeriodTo}>
-              {sortedMonths.map((m) => <option key={m} value={m}>{monthLong(m)}</option>)}
-            </select>
-            {statsFiltered && (
-              <button type="button" onClick={() => { setStatsFrom(null); setStatsTo(null); }} style={St.resetBtn}><RotateCcw size={13} /> {TXT.statsPeriodReset}</button>
-            )}
-          </div>
-        )}
-        {statsSeries.length < 2 ? (
-          <div style={St.emptyHist}>
-            <TrendingUp size={18} style={{ color: C.muted }} />
-            <span>{TXT.noSeries}</span>
-          </div>
-        ) : (
-          <>
-            <Collapsible id="statsIncome" title={TXT.incomePerMonth} open={open.statsIncome} onToggle={toggleSec}>
-              <div style={St.chartBox}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={statsSeries} margin={{ top: 6, right: 4, left: -6, bottom: 0 }}>
-                    <CartesianGrid stroke={C.line} vertical={false} />
-                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
-                    <YAxis tick={tick} axisLine={false} tickLine={false} width={58} tickFormatter={eur0} />
-                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
-                    {cur.partners.map((p, i) => (
-                      <Bar key={p.id} dataKey={`inleg_${p.id}`} name={personName(p, i)} fill={personColor(p, i).main} radius={[4, 4, 0, 0]} />
-                    ))}
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </Collapsible>
-            <Collapsible id="statsTotals" title={TXT.monthTotals} open={open.statsTotals} onToggle={toggleSec}>
-              <div style={St.chartBox}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={statsSeries} margin={{ top: 6, right: 8, left: -6, bottom: 0 }}>
-                    <CartesianGrid stroke={C.line} vertical={false} />
-                    <XAxis dataKey="label" tick={tick} axisLine={false} tickLine={false} />
-                    <YAxis tick={tick} axisLine={false} tickLine={false} width={58} tickFormatter={eur0} />
-                    <Tooltip {...tooltipProps} /><Legend {...legendProps} />
-                    <Bar dataKey="income" name={TXT.incomes} fill={C.inc} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="gov" name={TXT.government} fill={C.gov} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="expenses" name={TXT.expenses} fill={C.exp} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="savings" name={TXT.savings} fill={C.save} radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </Collapsible>
-          </>
-        )}
+        </div>
 
-        {/* Change log */}
-        <Collapsible id="log" title={TXT.logbook} icon={<History size={16} style={{ color: C.muted }} />} total={`${(data.log || []).length}`} open={open.log} onToggle={toggleSec}>
-          {(data.log || []).length === 0 ? (
-            <div style={St.logEmpty}>{TXT.logEmpty}</div>
-          ) : (
-            <div style={St.logList}>
-              {(data.log || []).map((l) => (
-                <div key={l.id} style={St.logRow}>
-                  <span style={St.logTime}>{dt(l.ts)}</span>
-                  <span style={St.logBody}>
-                    <span style={St.logLabel}>{l.label}</span>
-                    <span style={St.logChange}>
-                      <span style={St.logOld}>{l.old || "—"}</span>
-                      <span style={St.logArrow}>→</span>
-                      <span style={St.logNew}>{l.next || "—"}</span>
-                    </span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Collapsible>
-        </>)}
         </>
         )}
         </div>
@@ -1950,31 +1989,22 @@ export default function App() {
           <span style={St.saveState}>
             {loadError ? (<><AlertTriangle size={14} style={{ color: C.exp }} /> {TXT.loadFailed.split(".")[0]}</>) : !loaded ? (<><Loader2 size={14} className="spin" /> {TXT.loading}</>) : saved ? (<><Check size={14} style={{ color: C.save }} /> {TXT.saved}</>) : (<><Loader2 size={14} className="spin" /> {TXT.saving}</>) }
           </span>
-          <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }} className="footerActions">
-            {view === "month" && sortedMonths.length > 1 && <button type="button" onClick={() => deleteMonth(sel)} style={St.resetBtn} className="mobileOnly"><Trash2 size={14} /> {TXT.deleteMonth}</button>}
-            {view === "month" && <MonthCopyField pastMonths={pastMonths} futureMonths={futureMonths} onCopy={copyMonth} />}
-            {view === "month" && <button type="button" onClick={resetMonth} style={St.resetBtn}><RotateCcw size={14} /> {TXT.restoreThisMonth}</button>}
-            {view === "month" && <button type="button" disabled={Boolean(printJob)} onClick={() => setPrintJob({ type: "month", key: sel })} style={St.resetBtn}><Printer size={14} /> {TXT.printMonthBtn}</button>}
-            {view === "month" && <button type="button" disabled={Boolean(printJob)} onClick={() => setPrintJob({ type: "year", year: sel.slice(0, 4) })} style={St.resetBtn}><Printer size={14} /> {TXT.printYearBtn}</button>}
-            <a href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer" style={St.githubLink} aria-label={TXT.sourceOnGitHub} title={TXT.sourceOnGitHub}>
-              <Github size={16} />
-            </a>
-          </div>
+          <a href="https://github.com/x-real-ip/open-family-finance" target="_blank" rel="noopener noreferrer" style={St.githubLink} aria-label={TXT.sourceOnGitHub} title={TXT.sourceOnGitHub}>
+            <Github size={16} />
+          </a>
         </footer>
       </div>
 
       {/* Phone-only bottom tab bar (hidden ≥641px, where the header tabs show). */}
       <nav className="bottomNav" aria-label={TXT.viewToggleAria}>
-        {[["month", CalendarDays, TXT.navMonth], ["savings", PiggyBank, TXT.navSavings], ["cashflow", Waypoints, TXT.navCashflow]].map(([v, Icon, label]) => (
-          <button key={v} type="button" onClick={() => { setView(v); window.scrollTo({ top: 0 }); }} className={view === v ? "on" : undefined} aria-current={view === v ? "page" : undefined}>
-            <Icon size={20} /><span>{label}</span>
-          </button>
-        ))}
-        {cur.partners.map((p, i) => (
-          <button key={p.id} type="button" onClick={() => { setView(`person:${p.id}`); window.scrollTo({ top: 0 }); }} className={personView === p.id ? "on" : undefined} aria-current={personView === p.id ? "page" : undefined}>
-            <span className="navAvatar" style={{ background: personColor(p, i).main }}>{(personName(p, i)[0] || "?").toUpperCase()}</span><span>{personName(p, i)}</span>
-          </button>
-        ))}
+        {[["month", CalendarDays, TXT.navMonth], ["savings", PiggyBank, TXT.navSavings], ["cashflow", Waypoints, TXT.navCashflow], ["history", History, TXT.navHistory]].map(([v, Icon, label]) => {
+          const on = v === "month" ? onMonthPage : view === v;
+          return (
+            <button key={v} type="button" onClick={() => { if (!on) setView(v); window.scrollTo({ top: 0 }); }} className={on ? "on" : undefined} aria-current={on ? "page" : undefined}>
+              <Icon size={20} /><span>{label}</span>
+            </button>
+          );
+        })}
       </nav>
       {pendingDelete && (
         <ScopeDialog icon={<Trash2 size={16} style={{ color: C.exp }} />} title={t(LANG, "deleteScopeTitle", { name: pendingDelete.label })}
@@ -1988,6 +2018,7 @@ export default function App() {
           thisLabel={TXT.amountScopeThisMonth} forwardLabel={TXT.amountScopeForward}
           onPick={confirmAmount} onCancel={() => confirmAmount(false)} />
       )}
+      {renderDrawer()}
       {printJob && <PrintDocument job={printJob} months={printMonths} appTitle={APP_TITLE} />}
     </div>
   );
@@ -2124,7 +2155,7 @@ function InfoDot({ text, align = "left" }) {
 
 function PeriodPill({ period, onToggle }) {
   return (
-    <button type="button" onClick={onToggle} style={St.periodPill} aria-label={TXT.periodToggle} title={TXT.periodToggle}>
+    <button type="button" onClick={onToggle} style={St.periodPill} className={`periodPill pill-${period}`} aria-label={TXT.periodToggle} title={TXT.periodToggle}>
       {period === "year" ? TXT.periodYearAbbr : TXT.periodMonthAbbr}
     </button>
   );
@@ -2143,13 +2174,23 @@ function AmountField({ value, period, onValue, onPeriod, onCommit, disabled }) {
 // like the description — instead of only being visible after opening the
 // correspondent popover. Styled to stand out from the rest of this otherwise
 // muted line, since it's easy to miss otherwise.
-function DerivedLine({ monthly, period, percent, dot, correspondent, compare }) {
+function DerivedLine({ monthly, period, percent, dot, correspondent, compare, category, entry }) {
   const other = period === "year" ? `${eur(monthly)} ${TXT.perMonth}` : `${eur(monthly * 12)} ${TXT.perYear}`;
+  const contract = entry && (entry.startDate || entry.endDate) ? contractState(entry) : null;
   return (
-    <div style={{ ...St.derived, marginLeft: dot ? 20 : 2 }}>
-      = {other}{percent != null ? ` · ${Math.round(percent * 100)}%` : ""}
+    <div style={{ ...St.derived, marginLeft: dot ? 20 : 2 }} className="derived">
+      {category && <span className="d-cat">{category}</span>}
+      <span className="d-calc">= {other}{percent != null ? ` · ${Math.round(percent * 100)}%` : ""}</span>
       {PAPERLESS_ENABLED && correspondent && (
-        <> · <span style={St.derivedCorrespondent}><Building2 size={11} style={{ verticalAlign: "-1px" }} /> {correspondent}</span></>
+        <span style={St.derivedCorrespondent}><Building2 size={11} style={{ verticalAlign: "-1px" }} /> {correspondent}</span>
+      )}
+      {entry && (
+        <span style={St.flags} aria-hidden="true">
+          {entry.note?.trim() && <StickyNote size={12} />}
+          {entry.url?.trim() && <Link2 size={12} />}
+          {entry.formula && <Calculator size={12} />}
+          {contract && <span style={{ ...St.flagChip, color: contract.color }}><CalendarClock size={12} />{(contract.expired || contract.endingSoon) && contract.status}</span>}
+        </span>
       )}
       {compare && <MonthRail {...compare} />}
     </div>
@@ -2185,6 +2226,77 @@ function MonthRail({ prev, next, cur }) {
       {sides.filter((x) => x.side.status !== "same").map((x) => (
         <span key={x.side.key} style={{ color: RAIL_COLOR[x.side.status], fontWeight: 600 }}>{x.text}</span>
       ))}
+    </span>
+  );
+}
+
+// The answer the month page exists for, right under the month bar: what
+// each person transfers and keeps, and what the household pays together.
+function ResultTiles({ partners, calc, names }) {
+  const keeps = partners.map((p) => calc.keeps[p.id] || 0);
+  const sameKeep = keeps.every((k) => Math.abs(k - keeps[0]) < 0.005);
+  return (
+    <div style={St.tiles} className="fade tiles">
+      {partners.map((p, i) => (
+        <div key={p.id} style={St.tile}>
+          <div style={{ ...St.tileLabel, color: personColor(p, i).main }}>{t(LANG, "kpiTransfers", { name: names[i] })}</div>
+          <div style={St.tileValue}>{eur0(calc.transfers[p.id] || 0)}</div>
+          <div style={St.tileSub}>{t(LANG, "kpiKeeps", { amount: eur0(calc.leftovers[p.id] || 0) })}</div>
+        </div>
+      ))}
+      <div style={St.tile}>
+        <div style={St.tileLabel}>{TXT.kpiTogether}</div>
+        <div style={St.tileValue}>{eur0(calc.coupleFunds)}</div>
+        <div style={St.tileSub}>{TXT.kpiTogetherSub}</div>
+      </div>
+      <div style={St.tile}>
+        <div style={St.tileLabel}>{TXT.kpiKeepPct}</div>
+        <div style={St.tileValue}>{sameKeep ? pct(keeps[0] || 0) : keeps.map(pct).join(" · ")}</div>
+        <div style={St.tileSub}>{TXT.kpiKeepPctSub}</div>
+      </div>
+    </div>
+  );
+}
+
+// Everything you do with a whole month, in one menu next to it instead of
+// a row of buttons at the bottom of the page. Copying swaps the menu for a
+// month picker in the same popover. Both drop down from the bar, also on
+// phones: the bar is sticky there, so a fixed sheet would end up behind
+// the bottom navigation.
+function MonthActions({ pastMonths, futureMonths, printing, canDelete, onCopy, onReset, onPrintMonth, onPrintYear, onDelete }) {
+  const [mode, setMode] = useState(null); // null | "menu" | "copy"
+  const rootRef = useRef(null);
+  useClickOutside(rootRef, Boolean(mode), () => setMode(null));
+  useEffect(() => {
+    if (!mode) return;
+    const onKey = (e) => { if (e.key === "Escape") setMode(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mode]);
+  const run = (fn) => () => { setMode(null); fn(); };
+  return (
+    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} className="navMore">
+      <button type="button" aria-haspopup="menu" aria-expanded={Boolean(mode)} onClick={() => setMode((m) => (m ? null : "menu"))} style={St.monthActionsBtn} aria-label={TXT.monthActions}>
+        <span className="monthActionsLabel">{TXT.monthActions}</span><MoreHorizontal size={18} />
+      </button>
+      {mode === "menu" && (
+        <span role="menu" style={St.menuPop}>
+          <button type="button" role="menuitem" onClick={() => setMode("copy")} style={St.menuItem}><Copy size={15} /> {TXT.copyMonthMenu}</button>
+          <button type="button" role="menuitem" onClick={run(onReset)} style={St.menuItem}><RotateCcw size={15} /> {TXT.restoreThisMonth}</button>
+          <button type="button" role="menuitem" disabled={printing} onClick={run(onPrintMonth)} style={St.menuItem}><Printer size={15} /> {TXT.printMonthBtn}</button>
+          <button type="button" role="menuitem" disabled={printing} onClick={run(onPrintYear)} style={St.menuItem}><Printer size={15} /> {TXT.printYearBtn}</button>
+          {canDelete && (<>
+            <span style={St.menuDivider} />
+            <button type="button" role="menuitem" onClick={run(onDelete)} style={{ ...St.menuItem, color: C.exp }}><Trash2 size={15} /> {TXT.deleteMonthMenu}</button>
+          </>)}
+        </span>
+      )}
+      {mode === "copy" && (
+        <span style={St.copyPop}>
+          <div style={St.copyTitle}>{TXT.copyMonth}</div>
+          <CopyPicker pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => { setMode(null); onCopy(pk, fk); }} emptyText={TXT.noPrevMonths} />
+        </span>
+      )}
     </span>
   );
 }
@@ -2337,50 +2449,41 @@ function DragHandle({ active, ...dragProps }) {
   return <span {...dragProps} style={St.dragHandle} aria-label={TXT.dragHandle} title={TXT.dragHandle}><GripVertical size={14} /></span>;
 }
 
-// Correspondent editing is hidden behind an icon like Note/Link so entries
-// that don't need one don't carry a permanently visible input — but once set,
-// the name itself is shown directly on DerivedLine (below), so you don't have
-// to reopen this popover just to see who it is. Free-text with paperless-ngx
-// suggestions (see the #correspondents datalist); when the typed value
-// matches a known paperless correspondent, also looks up (and links to) the
-// most recent document paperless has for it. Renders nothing
+// Correspondent, shown in the entry detail panel. Free-text with
+// paperless-ngx suggestions (see the #correspondents datalist); when the
+// typed value matches a known paperless correspondent, also looks up (and
+// links to) the most recent document paperless has for it. Renders nothing
 // when the integration is off, per PAPERLESS_ENABLED.
-function CorrespondentField({ entry, onChange, onSync, correspondents, labels }) {
-  const [open, setOpen] = useState(false);
-  const editingRef = useRef(false);
-  const timer = useRef(null);
-  const rootRef = useRef(null);
+function CorrespondentEditor({ entry, onChange, onSync, correspondents, labels }) {
   const [doc, setDoc] = useState(null);
   const [docLoading, setDocLoading] = useState(false);
   const [docKey, setDocKey] = useState(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  useClickOutside(rootRef, open, () => setOpen(false));
 
   const value = entry.correspondent || "";
   const mode = entry.documentMode || "auto";
   const has = value.trim().length > 0;
   const match = has ? correspondents.find((c) => c.name.toLowerCase() === value.trim().toLowerCase()) : null;
 
-  // Auto mode: (re)fetch whenever the popover opens, the correspondent
-  // resolves, or the entry's preferred label changes.
+  // Auto mode: (re)fetch whenever the correspondent resolves or the entry's preferred label changes.
   useEffect(() => {
-    if (!open || mode !== "auto" || !match) return;
+    if (!PAPERLESS_ENABLED || mode !== "auto" || !match) return;
     const key = `auto:${match.id}:${entry.documentLabel?.kind || ""}:${entry.documentLabel?.id || ""}`;
     if (docKey === key) return;
     setDocLoading(true);
     paperless.latestDocument(match.id, entry.documentLabel).then((d) => { setDoc(d); setDocKey(key); setDocLoading(false); });
-  }, [open, mode, match?.id, entry.documentLabel?.kind, entry.documentLabel?.id]);
+  }, [mode, match?.id, entry.documentLabel?.kind, entry.documentLabel?.id]);
 
-  // Manual mode: fetch the pinned document's details whenever it's open and the pin changes.
+  // Manual mode: fetch the pinned document's details whenever the pin changes.
   useEffect(() => {
-    if (!open || mode !== "manual" || !entry.documentId) return;
+    if (!PAPERLESS_ENABLED || mode !== "manual" || !entry.documentId) return;
     const key = `manual:${entry.documentId}`;
     if (docKey === key) return;
     setDocLoading(true);
     paperless.getDocument(entry.documentId).then((d) => { setDoc(d); setDocKey(key); setDocLoading(false); });
-  }, [open, mode, entry.documentId]);
+  }, [mode, entry.documentId]);
 
   const runSearch = (q) => {
     setQuery(q);
@@ -2395,11 +2498,6 @@ function CorrespondentField({ entry, onChange, onSync, correspondents, labels })
     const found = (kind === "tag" ? labels.tags : labels.types).find((l) => String(l.id) === idStr);
     onChange({ documentLabel: found ? { kind, id: found.id, name: found.name } : null });
   };
-
-  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
-  const markEditing = () => { editingRef.current = true; };
-  const unmarkEditing = () => { editingRef.current = false; };
   if (!PAPERLESS_ENABLED) return null;
 
   const docBlock = docLoading ? (
@@ -2411,146 +2509,102 @@ function CorrespondentField({ entry, onChange, onSync, correspondents, labels })
   );
 
   return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label={TXT.correspondent}
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        style={{ ...St.iconBtn, color: (has || entry.documentId) ? C.b : C.muted }}>
-        <Building2 size={16} />
-      </button>
-      {open && (
-        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <input list="correspondents" value={value} placeholder={TXT.correspondentPlaceholder}
-            onChange={(e) => onChange({ correspondent: e.target.value })}
-            onFocus={markEditing}
-            onBlur={(e) => { unmarkEditing(); onSync(e.target.value); }}
-            style={St.noteInput} aria-label={TXT.correspondent} />
-          {match && (
+    <>
+      <input list="correspondents" value={value} placeholder={TXT.correspondentPlaceholder}
+        onChange={(e) => onChange({ correspondent: e.target.value })}
+        onBlur={(e) => onSync(e.target.value)}
+        style={St.drawerInput} aria-label={TXT.correspondent} />
+      {match && (
+        <>
+          <div style={St.correspondentModeRow}>
+            <button type="button" onClick={() => onChange({ documentMode: "auto" })} style={{ ...St.toggleBtn, ...(mode === "auto" ? St.toggleOn : {}) }}>{TXT.documentModeAuto}</button>
+            <button type="button" onClick={() => onChange({ documentMode: "manual" })} style={{ ...St.toggleBtn, ...(mode === "manual" ? St.toggleOn : {}) }}>{TXT.documentModeManual}</button>
+          </div>
+          {mode === "auto" ? (
             <>
-              <div style={St.correspondentModeRow}>
-                <button type="button" onClick={() => onChange({ documentMode: "auto" })} style={{ ...St.toggleBtn, ...(mode === "auto" ? St.toggleOn : {}) }}>{TXT.documentModeAuto}</button>
-                <button type="button" onClick={() => onChange({ documentMode: "manual" })} style={{ ...St.toggleBtn, ...(mode === "manual" ? St.toggleOn : {}) }}>{TXT.documentModeManual}</button>
-              </div>
-              {mode === "auto" ? (
-                <>
-                  <select
-                    value={entry.documentLabel ? `${entry.documentLabel.kind}:${entry.documentLabel.id}` : ""}
-                    onChange={(e) => changeLabel(e.target.value)}
-                    onFocus={markEditing} onBlur={unmarkEditing}
-                    style={{ ...St.copySel, width: "100%", maxWidth: "none", marginBottom: 8 }}>
-                    <option value="">{TXT.noLabelPreference}</option>
-                    <optgroup label={TXT.documentTypes}>
-                      {labels.types.map((t) => <option key={`type:${t.id}`} value={`type:${t.id}`}>{t.name}</option>)}
-                    </optgroup>
-                    <optgroup label={TXT.documentTags}>
-                      {labels.tags.map((t) => <option key={`tag:${t.id}`} value={`tag:${t.id}`}>{t.name}</option>)}
-                    </optgroup>
-                  </select>
-                  <div style={St.correspondentDoc}>{docBlock}</div>
-                </>
-              ) : (
-                <>
-                  <input value={query} placeholder={TXT.searchDocumentsPlaceholder}
-                    onChange={(e) => runSearch(e.target.value)}
-                    onFocus={markEditing} onBlur={unmarkEditing}
-                    style={St.noteInput} aria-label={TXT.searchDocumentsPlaceholder} />
-                  {searching && <span style={St.correspondentDocMuted}><Loader2 size={13} className="spin" /> {TXT.searchingDocument}</span>}
-                  {!searching && results.length > 0 && (
-                    <div style={St.correspondentResults}>
-                      {results.map((r) => (
-                        <button key={r.id} type="button" onClick={() => pickDocument(r.id)} style={St.correspondentResult}>
-                          {r.documentType ? `${r.documentType} · ` : ""}{r.title}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {entry.documentId && (
-                    <div style={St.correspondentDoc}>
-                      {docBlock}
-                      <button type="button" onClick={() => { onChange({ documentId: null }); setDocKey(null); }} style={St.correspondentUnlink}>{TXT.clearPinnedDocument}</button>
-                    </div>
-                  )}
-                </>
+              <select
+                value={entry.documentLabel ? `${entry.documentLabel.kind}:${entry.documentLabel.id}` : ""}
+                onChange={(e) => changeLabel(e.target.value)}
+                style={{ ...St.drawerInput, marginBottom: 8 }}>
+                <option value="">{TXT.noLabelPreference}</option>
+                <optgroup label={TXT.documentTypes}>
+                  {labels.types.map((t) => <option key={`type:${t.id}`} value={`type:${t.id}`}>{t.name}</option>)}
+                </optgroup>
+                <optgroup label={TXT.documentTags}>
+                  {labels.tags.map((t) => <option key={`tag:${t.id}`} value={`tag:${t.id}`}>{t.name}</option>)}
+                </optgroup>
+              </select>
+              <div style={St.correspondentDoc}>{docBlock}</div>
+            </>
+          ) : (
+            <>
+              <input value={query} placeholder={TXT.searchDocumentsPlaceholder}
+                onChange={(e) => runSearch(e.target.value)}
+                style={St.drawerInput} aria-label={TXT.searchDocumentsPlaceholder} />
+              {searching && <span style={St.correspondentDocMuted}><Loader2 size={13} className="spin" /> {TXT.searchingDocument}</span>}
+              {!searching && results.length > 0 && (
+                <div style={St.correspondentResults}>
+                  {results.map((r) => (
+                    <button key={r.id} type="button" onClick={() => pickDocument(r.id)} style={St.correspondentResult}>
+                      {r.documentType ? `${r.documentType} · ` : ""}{r.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {entry.documentId && (
+                <div style={St.correspondentDoc}>
+                  {docBlock}
+                  <button type="button" onClick={() => { onChange({ documentId: null }); setDocKey(null); }} style={St.correspondentUnlink}>{TXT.clearPinnedDocument}</button>
+                </div>
               )}
             </>
           )}
-        </span>
+        </>
       )}
-    </span>
+    </>
   );
 }
 
-// Contract/subscription duration: start + end date, a progress bar, and a
-// warning state (color-coded, visible even with the popover closed) once the
-// end date is within CONTRACT_WARNING_DAYS or already passed.
-function DurationField({ entry, onChange }) {
-  const [open, setOpen] = useState(false);
-  // Tracks whether a field in this popover has been focused since it opened.
-  // Only reset on an explicit close (outside click / toggling the button
-  // shut), never on blur: some browsers momentarily blur the date input while
-  // its native calendar overlay is open, which — combined with the pointer
-  // appearing to leave the popover onto that overlay — used to auto-close the
-  // whole popover mid-pick, forcing a second click before the day could be
-  // selected. Once you've started editing, only an explicit close dismisses it.
-  const editingRef = useRef(false);
-  const timer = useRef(null);
-  const rootRef = useRef(null);
-  const closeNow = () => { clearTimeout(timer.current); editingRef.current = false; setOpen(false); };
-  useClickOutside(rootRef, open, closeNow);
-
-  const start = entry.startDate || "";
-  const end = entry.endDate || "";
+// Contract/subscription state of an entry: "ending soon" once the end date
+// is within its warning days (default CONTRACT_WARNING_DAYS), "expired"
+// after it. Shared by the editor below and the row's indicator chip.
+function contractState(entry) {
+  const start = entry.startDate || "", end = entry.endDate || "";
   const warningDays = entry.warningDays ? num(entry.warningDays) : CONTRACT_WARNING_DAYS;
-  const has = Boolean(start || end);
   const left = daysUntil(end);
   const expired = left != null && left < 0;
   const endingSoon = left != null && left >= 0 && left <= warningDays;
-  const progress = durationProgress(start, end);
-  const color = expired ? C.exp : endingSoon ? C.warn : has ? C.b : C.muted;
-
-  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
-  const markEditing = () => { editingRef.current = true; };
-
-  // Picking a start date defaults the end date to one year later, but only
-  // when there's no end date yet — an already-set end date is left alone.
-  const setStart = (value) => onChange(value && !end ? { startDate: value, endDate: addOneYear(value) } : { startDate: value });
-
+  const color = expired ? C.exp : endingSoon ? C.warn : (start || end) ? C.b : C.muted;
   const status = expired ? t(LANG, "contractExpired", { days: Math.abs(left) })
     : endingSoon ? t(LANG, "contractEndingSoon", { days: left })
     : end ? t(LANG, "contractActiveUntil", { date: fmtDate(end) })
     : null;
+  return { start, end, expired, endingSoon, color, status, progress: durationProgress(start, end) };
+}
 
+// Contract duration: start + end date, warning days and a progress bar.
+function DurationEditor({ entry, onChange }) {
+  const { start, end, color, status, progress } = contractState(entry);
+  // Picking a start date defaults the end date to one year later, but only
+  // when there's no end date yet — an already-set end date is left alone.
+  const setStart = (value) => onChange(value && !end ? { startDate: value, endDate: addOneYear(value) } : { startDate: value });
   return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label={TXT.duration}
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => { if (o) editingRef.current = false; return !o; }); }}
-        style={{ ...St.iconBtn, color }}>
-        <CalendarClock size={16} />
-      </button>
-      {open && (
-        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <div style={St.copyTitle}>{TXT.duration}</div>
-          <label style={St.copyRow}>
-            <span style={St.copyLbl}>{TXT.startDate}</span>
-            <input type="date" lang={LANG} value={start} onChange={(e) => setStart(e.target.value)} onFocus={markEditing} style={St.copySel} />
-          </label>
-          <label style={St.copyRow}>
-            <span style={St.copyLbl}>{TXT.endDate}</span>
-            <input type="date" lang={LANG} value={end} onChange={(e) => onChange({ endDate: e.target.value })} onFocus={markEditing} style={St.copySel} />
-          </label>
-          <label style={St.copyRow}>
-            <span style={St.copyLbl}>{TXT.warningDays}</span>
-            <input inputMode="numeric" value={entry.warningDays || ""} placeholder={String(CONTRACT_WARNING_DAYS)}
-              onChange={(e) => onChange({ warningDays: e.target.value.replace(/[^0-9]/g, "") })}
-              onFocus={markEditing} style={{ ...St.copySel, width: 60 }} />
-          </label>
-          {progress != null && (
-            <div style={St.progressTrack}><div style={{ ...St.progressFill, width: `${progress * 100}%`, background: color }} /></div>
-          )}
-          {status && <div style={{ ...St.correspondentDocMuted, color, marginTop: progress != null ? 6 : 8 }}>{status}</div>}
-        </span>
+    <>
+      <div style={St.drawerPair}>
+        <label style={St.drawerSub}>{TXT.startDate}<input type="date" lang={LANG} value={start} onChange={(e) => setStart(e.target.value)} style={St.drawerInput} /></label>
+        <label style={St.drawerSub}>{TXT.endDate}<input type="date" lang={LANG} value={end} onChange={(e) => onChange({ endDate: e.target.value })} style={St.drawerInput} /></label>
+      </div>
+      <label style={{ ...St.drawerSub, flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}>
+        {TXT.warningDays}
+        <input inputMode="numeric" value={entry.warningDays || ""} placeholder={String(CONTRACT_WARNING_DAYS)}
+          onChange={(e) => onChange({ warningDays: e.target.value.replace(/[^0-9]/g, "") })}
+          style={{ ...St.drawerInput, width: 70 }} />
+      </label>
+      {progress != null && (
+        <div style={{ ...St.progressTrack, marginTop: 10 }}><div style={{ ...St.progressFill, width: `${progress * 100}%`, background: color }} /></div>
       )}
-    </span>
+      {status && <div style={{ ...St.correspondentDocMuted, color, marginTop: 6 }}>{status}</div>}
+    </>
   );
 }
 
@@ -2967,8 +3021,8 @@ function SubAccountRow({ sub, entryMonthlyAmount, sel, onChange, onRemove }) {
   const hasCheckpoints = Boolean(sub.checkpoints && Object.keys(sub.checkpoints).length);
 
   return (
-    <div style={St.itemWrap} className="entryWrap">
-      <div className="entry">
+    <div style={St.subRow} className="subWrap">
+      <div className="entry sub">
         <span className="e-lead">
           <span style={{ ...St.catDot, background: categoryColor(sub.holder || sub.id) }} />
           <input list="banks" aria-label={TXT.subAccountBank} value={sub.bank} placeholder={TXT.subAccountBankPlaceholder}
@@ -3140,7 +3194,7 @@ function CustomPctRemaining({ pcts }) {
 function MoneyInput({ value, onChange, onCommit, disabled }) {
   const startRef = useRef(null);
   return (
-    <div style={St.money}>
+    <div style={St.money} className="money">
       <span style={St.euro}>€</span>
       <input inputMode="decimal" value={value} placeholder="0"
         onFocus={() => { startRef.current = value; }}
@@ -3151,19 +3205,6 @@ function MoneyInput({ value, onChange, onCommit, disabled }) {
         disabled={disabled} />
     </div>
   );
-}
-
-function TrendIcon({ trend, income }) {
-  const up = trend && trend.dir === "up";     // amount increased vs previous month
-  const down = trend && trend.dir === "down"; // amount decreased vs previous month
-  let Icon = Minus, color = C.muted, title = TXT.trendNoChange;
-  if (up || down) {
-    Icon = up ? ArrowUp : ArrowDown;                  // arrow follows the number
-    const good = income ? up : down;                  // income: up is good · expenses/savings: down is good
-    color = good ? C.save : C.exp;                    // green = good, red = bad
-    title = `${up ? TXT.trendHigher : TXT.trendLower} (${eur(trend.prev)} → ${eur(trend.cur)})`;
-  }
-  return <span style={St.trendIcon} title={title}><Icon size={16} color={color} /></span>;
 }
 
 function Sparkline({ data }) {
@@ -3186,7 +3227,7 @@ function Sparkline({ data }) {
   );
 }
 
-// Shared by CopyField and MonthCopyField: a checkbox list of months with
+// Shared by the entry and month CopyPicker: a checkbox list of months with
 // select-all/none, used identically for the "past" and "future" side of
 // either copy popover so both features behave the same way.
 function MonthChecklist({ months, selected, onToggle, onSelectAll, onClear }) {
@@ -3210,154 +3251,45 @@ function MonthChecklist({ months, selected, onToggle, onSelectAll, onClear }) {
 
 function toggleIn(setSel) { return (key) => setSel((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]); }
 
-function CopyField({ pastMonths, futureMonths, onCopy }) {
-  const [open, setOpen] = useState(false);
+// Pick individual past and/or future months, used both to copy one entry's
+// amount (detail panel) and to copy a whole month (month actions).
+function CopyPicker({ pastMonths, futureMonths, onCopy, emptyText }) {
   const [pastSel, setPastSel] = useState([]);
   const [futureSel, setFutureSel] = useState([]);
-  const editingRef = useRef(false);
-  const timer = useRef(null);
-  const rootRef = useRef(null);
-  const has = pastMonths.length || futureMonths.length;
-  useClickOutside(rootRef, open, () => setOpen(false));
-  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 220); };
-  const apply = () => { if (pastSel.length || futureSel.length) { onCopy(pastSel, futureSel); setOpen(false); setPastSel([]); setFutureSel([]); } };
+  if (!pastMonths.length && !futureMonths.length) return <div style={St.copyEmpty}>{emptyText}</div>;
+  const none = !pastSel.length && !futureSel.length;
+  const apply = () => { if (!none) { onCopy(pastSel, futureSel); setPastSel([]); setFutureSel([]); } };
   return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }}>
-      <button type="button" aria-label={TXT.copyAmountAria} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={St.iconBtn}><Copy size={16} /></button>
-      {open && (
-        <span style={mobilePopupStyle(St.copyPop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <div style={St.copyTitle}>{TXT.copyAmount}</div>
-          {!has ? (
-            <div style={St.copyEmpty}>{TXT.noMonthsToCopy}</div>
-          ) : (
-            <>
-              {pastMonths.length > 0 && (
-                <>
-                  <div style={St.copySubLabel}>{TXT.copyToPast}</div>
-                  <MonthChecklist months={pastMonths.slice().reverse()} selected={pastSel} onToggle={toggleIn(setPastSel)} onSelectAll={() => setPastSel(pastMonths.slice())} onClear={() => setPastSel([])} />
-                </>
-              )}
-              {futureMonths.length > 0 && (
-                <>
-                  <div style={St.copySubLabel}>{TXT.copyToFuture}</div>
-                  <MonthChecklist months={futureMonths} selected={futureSel} onToggle={toggleIn(setFutureSel)} onSelectAll={() => setFutureSel(futureMonths.slice())} onClear={() => setFutureSel([])} />
-                </>
-              )}
-              <button type="button" onClick={apply} disabled={!pastSel.length && !futureSel.length} style={{ ...St.copyApply, opacity: (!pastSel.length && !futureSel.length) ? 0.5 : 1 }}>{TXT.copy}</button>
-            </>
-          )}
-        </span>
+    <>
+      {pastMonths.length > 0 && (
+        <>
+          <div style={St.copySubLabel}>{TXT.copyToPast}</div>
+          <MonthChecklist months={pastMonths.slice().reverse()} selected={pastSel} onToggle={toggleIn(setPastSel)} onSelectAll={() => setPastSel(pastMonths.slice())} onClear={() => setPastSel([])} />
+        </>
       )}
-    </span>
+      {futureMonths.length > 0 && (
+        <>
+          <div style={St.copySubLabel}>{TXT.copyToFuture}</div>
+          <MonthChecklist months={futureMonths} selected={futureSel} onToggle={toggleIn(setFutureSel)} onSelectAll={() => setFutureSel(futureMonths.slice())} onClear={() => setFutureSel([])} />
+        </>
+      )}
+      <button type="button" onClick={apply} disabled={none} style={{ ...St.copyApply, opacity: none ? 0.5 : 1 }}>{TXT.copy}</button>
+    </>
   );
 }
 
-function MonthCopyField({ pastMonths, futureMonths, onCopy }) {
-  const [open, setOpen] = useState(false);
-  const [pastSel, setPastSel] = useState([]);
-  const [futureSel, setFutureSel] = useState([]);
-  const editingRef = useRef(false);
-  const timer = useRef(null);
-  const rootRef = useRef(null);
-  const has = pastMonths.length || futureMonths.length;
-  useClickOutside(rootRef, open, () => setOpen(false));
-  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 220); };
-  const apply = () => {
-    const targets = [...pastSel, ...futureSel];
-    if (targets.length) { onCopy(targets); setOpen(false); setPastSel([]); setFutureSel([]); }
-  };
-  return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }}>
-      <button type="button" aria-label={TXT.copyMonthAria} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={{ ...St.iconBtn, gap: 6, alignItems: "center", fontSize: 13, fontFamily: "inherit" }}><Copy size={16} /><span className="mobileOnly">{TXT.copyMonth}</span></button>
-      {open && (
-        <span style={mobilePopupStyle({ ...St.copyPop, top: "auto", bottom: "calc(100% + 8px)" })} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <div style={St.copyTitle}>{TXT.copyMonth}</div>
-          {!has ? (
-            <div style={St.copyEmpty}>{TXT.noPrevMonths}</div>
-          ) : (
-            <>
-              {pastMonths.length > 0 && (
-                <>
-                  <div style={St.copySubLabel}>{TXT.copyToPast}</div>
-                  <MonthChecklist months={pastMonths.slice().reverse()} selected={pastSel} onToggle={toggleIn(setPastSel)} onSelectAll={() => setPastSel(pastMonths.slice())} onClear={() => setPastSel([])} />
-                </>
-              )}
-              {futureMonths.length > 0 && (
-                <>
-                  <div style={St.copySubLabel}>{TXT.copyToFuture}</div>
-                  <MonthChecklist months={futureMonths} selected={futureSel} onToggle={toggleIn(setFutureSel)} onSelectAll={() => setFutureSel(futureMonths.slice())} onClear={() => setFutureSel([])} />
-                </>
-              )}
-              <button type="button" onClick={apply} disabled={!pastSel.length && !futureSel.length} style={{ ...St.copyApply, opacity: (!pastSel.length && !futureSel.length) ? 0.5 : 1 }}>{TXT.copy}</button>
-            </>
-          )}
-        </span>
-      )}
-    </span>
-  );
-}
-
-function SparkIcon({ history }) {
-  const [open, setOpen] = useState(false);
-  const timer = useRef(null);
-  const rootRef = useRef(null);
-  useClickOutside(rootRef, open, () => setOpen(false));
-  const has = history && history.length >= 2;
-  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => setOpen(false), 200); };
-  return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label={TXT.priceTrend} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
-        <LineChartIcon size={16} />
-      </button>
-      {open && (
-        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <div style={St.sparkTitle}>{TXT.priceTrend}</div>
-          <Sparkline data={history} />
-        </span>
-      )}
-    </span>
-  );
-}
-
-function LinkField({ value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const editingRef = useRef(false);
-  const timer = useRef(null);
-  const rootRef = useRef(null);
-  useClickOutside(rootRef, open, () => setOpen(false));
+function LinkEditor({ value, onChange }) {
   const has = value && value.trim().length > 0;
   const href = has ? (/^https?:\/\//i.test(value.trim()) ? value.trim() : `https://${value.trim()}`) : null;
-  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  // Note: saving happens live via onChange; closing only hides the popover.
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
   return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label={TXT.link}
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
-        <Link2 size={16} />
-      </button>
-      {open && (
-        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="https://…"
-            onFocus={() => { editingRef.current = true; }}
-            onBlur={() => { editingRef.current = false; setOpen(false); }}
-            style={St.noteInput} aria-label={TXT.link} />
-          {href && <a href={href} target="_blank" rel="noopener noreferrer" style={St.noteLink}>{TXT.openLink}</a>}
-        </span>
-      )}
-    </span>
+    <>
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="https://…" style={St.drawerInput} aria-label={TXT.link} />
+      {href && <a href={href} target="_blank" rel="noopener noreferrer" style={{ ...St.noteLink, borderTop: "none", paddingTop: 0 }}>{TXT.openLink}</a>}
+    </>
   );
 }
 
-function FormulaField({ entry, monthData, onChange }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
-  useClickOutside(rootRef, open, () => setOpen(false));
+function FormulaEditor({ entry, monthData, onChange }) {
   const [sourceId, setSourceId] = useState(entry.formula?.sourceId || "");
   // ops: sequential operations [{op: 'minus'|'times'|'divide'|'plus', factor: '12'}]
   const [ops, setOps] = useState(() => {
@@ -3365,11 +3297,7 @@ function FormulaField({ entry, monthData, onChange }) {
     if (entry.formula?.op) return [{ op: entry.formula.op, factor: String(entry.formula.factor ?? "0") }];
     return [];
   });
-  const editingRef = useRef(false);
-  const timer = useRef(null);
   const has = Boolean(entry.formula);
-  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
   const entries = [];
   for (const kind of entryKinds) {
     for (const item of monthData[kind] || []) {
@@ -3381,71 +3309,48 @@ function FormulaField({ entry, monthData, onChange }) {
       entries.push({ id: item.id, label, kind });
     }
   }
-  const selected = entries.find((e) => e.id === sourceId);
   const preview = computeFormulaAmount({ ...entry, formula: { sourceId, ops } }, monthData);
-  const onSave = () => {
-    if (!sourceId) return;
-    onChange({ formula: { sourceId, ops } });
-  };
   const onRemove = () => {
     setSourceId(""); setOps([]); onChange({ formula: undefined });
   };
-  const updateSource = (value) => { setSourceId(value); setOpen(true); onChange({ formula: { sourceId: value, ops } }); };
+  const updateSource = (value) => { setSourceId(value); onChange({ formula: { sourceId: value, ops } }); };
   const updateOpAt = (idx, newOp) => { const n = ops.slice(); n[idx] = { ...n[idx], op: newOp }; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
   const updateFactorAt = (idx, newFactor) => { const n = ops.slice(); n[idx] = { ...n[idx], factor: newFactor }; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
   const addOp = () => { const n = [...ops, { op: "minus", factor: "0" }]; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
   const removeOpAt = (idx) => { const n = ops.slice(); n.splice(idx, 1); setOps(n); onChange({ formula: { sourceId, ops: n } }); };
   return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label={TXT.sourceRule} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
-        <Calculator size={16} />
-      </button>
-      {open && (
-        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <div style={St.copyTitle}>{TXT.sourceRule}</div>
-          <label style={St.copyRow}>
-            <span style={St.copyLbl}>{TXT.sourceRule}</span>
-            <select value={sourceId} onChange={(e) => updateSource(e.target.value)} onFocus={() => { editingRef.current = true; }} onBlur={() => { editingRef.current = false; }} style={St.copySel}>
-              <option value="">— {TXT.selectSource} —</option>
-              {entries.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-            </select>
-          </label>
-          <div style={{ marginBottom: 6 }}>
-            <div style={{ marginBottom: 6, fontSize: 13, color: C.muted }}>{TXT.addOperation}</div>
-            {ops.map((step, idx) => (
-              <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                <select value={step.op} onChange={(e) => updateOpAt(idx, e.target.value)} style={St.copySel}>
-                  <option value="minus">{TXT.minus || "min"}</option>
-                  <option value="plus">{TXT.plus || "plus"}</option>
-                  <option value="times">{TXT.times || "keer"}</option>
-                  <option value="divide">{TXT.divide || "gedeeld door"}</option>
-                </select>
-                <input value={step.factor} onChange={(e) => updateFactorAt(idx, e.target.value.replace(/[^0-9.,-]/g, ""))} style={{ ...St.copySel, width: 110 }} inputMode="decimal" />
-                <button type="button" onClick={() => removeOpAt(idx)} style={{ ...St.copyApply, background: C.exp }}>{TXT.delete}</button>
-              </div>
-            ))}
-            <button type="button" onClick={addOp} style={{ ...St.copyApply, marginTop: 4 }}>{TXT.addOperation}</button>
+    <>
+      <select value={sourceId} onChange={(e) => updateSource(e.target.value)} style={{ ...St.drawerInput, marginBottom: 8 }} aria-label={TXT.sourceRule}>
+        <option value="">— {TXT.selectSource} —</option>
+        {entries.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+      </select>
+      {sourceId && (
+        <>
+          {ops.map((step, idx) => (
+            <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+              <select value={step.op} onChange={(e) => updateOpAt(idx, e.target.value)} style={{ ...St.drawerInput, width: "auto" }}>
+                <option value="minus">{TXT.minus || "min"}</option>
+                <option value="plus">{TXT.plus || "plus"}</option>
+                <option value="times">{TXT.times || "keer"}</option>
+                <option value="divide">{TXT.divide || "gedeeld door"}</option>
+              </select>
+              <input value={step.factor} onChange={(e) => updateFactorAt(idx, e.target.value.replace(/[^0-9.,-]/g, ""))} style={{ ...St.drawerInput, width: 100 }} inputMode="decimal" />
+              <button type="button" onClick={() => removeOpAt(idx)} style={St.iconBtn} aria-label={TXT.delete}><X size={16} /></button>
+            </div>
+          ))}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 4 }}>
+            <button type="button" onClick={addOp} style={St.ghostBtn}><Plus size={13} style={{ verticalAlign: "-2px" }} /> {TXT.addOperation}</button>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{TXT.preview}: {preview != null ? eur(preview) : "—"}</span>
           </div>
-          <div style={{ marginTop: 10, fontSize: 13, color: C.muted }}>
-            {selected ? `${TXT.sourceLabel}: ${selected.label}` : TXT.selectSource}
-          </div>
-          <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600 }}>
-            {TXT.preview}: {preview != null ? eur(preview) : "—"}
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 10 }}>
-            <button type="button" onClick={onSave} style={{ ...St.copyApply, opacity: sourceId ? 1 : 0.5 }} disabled={!sourceId}>{TXT.save}</button>
-            {has && <button type="button" onClick={onRemove} style={{ ...St.copyApply, background: C.exp }}>{TXT.delete}</button>}
-          </div>
-        </span>
+          {has && <button type="button" onClick={onRemove} style={{ ...St.ghostBtn, color: C.exp, marginTop: 10 }}>{TXT.delete}</button>}
+        </>
       )}
-    </span>
+    </>
   );
 }
 
-// On wide screens the per-entry actions sit inline; on phones (see the
-// ≤640px CSS) they're tucked behind a "⋯" button and expand into their own
-// full-width row with finger-sized targets, instead of 9 tiny icons
-// squeezed next to the amount.
+// Savings sub-accounts keep their few settings as inline icons; on phones
+// (see the ≤640px CSS) they're tucked behind a "⋯" button instead.
 function EntryActions({ children }) {
   const [open, setOpen] = useState(false);
   return (
@@ -3459,33 +3364,8 @@ function EntryActions({ children }) {
   );
 }
 
-function NoteField({ value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const editingRef = useRef(false);
-  const timer = useRef(null);
-  const rootRef = useRef(null);
-  useClickOutside(rootRef, open, () => setOpen(false));
-  const has = value && value.trim().length > 0;
-  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
-  return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label={TXT.note}
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        style={{ ...St.iconBtn, color: has ? C.b : C.muted }}>
-        <MessageSquare size={16} />
-      </button>
-      {open && (
-        <span style={mobilePopupStyle(St.notePop)} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3}
-            placeholder={TXT.notePlaceholder}
-            onFocus={() => { editingRef.current = true; }}
-            onBlur={() => { editingRef.current = false; setOpen(false); }}
-            style={St.noteArea} />
-        </span>
-      )}
-    </span>
-  );
+function NoteEditor({ value, onChange }) {
+  return <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={3} placeholder={TXT.notePlaceholder} style={{ ...St.drawerInput, resize: "vertical", lineHeight: 1.45 }} aria-label={TXT.note} />;
 }
 
 /* ----------------------------------------------------------------
@@ -3512,13 +3392,13 @@ const St = {
   h1: { fontFamily: "'Inter', system-ui, sans-serif", fontSize: 32, lineHeight: 1.05, margin: 0, fontWeight: 800, letterSpacing: "-0.02em" },
   colTitle: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: "-0.01em", color: C.ink, margin: "4px 2px 14px" },
 
-  monthNav: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: "10px 14px", marginBottom: 14, flexWrap: "wrap" },
+  monthNav: { display: "flex", alignItems: "center", gap: 8, background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: "10px 14px", marginBottom: 14, flexWrap: "wrap" },
   navBtn: { border: "none", background: C.canvas, color: C.ink, cursor: "pointer", width: 38, height: 38, borderRadius: 10, display: "inline-flex", alignItems: "center", justifyContent: "center" },
-  monthLabelWrap: { display: "flex", alignItems: "center", gap: 8, minWidth: 220, flex: "1 1 220px" },
-  monthLabel: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 17, fontWeight: 700, textTransform: "capitalize" },
+  monthLabelWrap: { position: "relative", display: "flex", alignItems: "center", gap: 8, minWidth: 0, padding: "0 6px", cursor: "pointer" },
+  monthLabel: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 19, fontWeight: 700, textTransform: "capitalize" },
   nowTag: { fontSize: 11, fontWeight: 700, color: C.save, background: `color-mix(in srgb, ${C.save} 14%, transparent)`, padding: "2px 7px", borderRadius: 999 },
-  monthSelect: { minWidth: 180, flex: "1 1 260px", border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 12px", background: C.canvas, color: C.ink, fontSize: 13, cursor: "pointer", outline: "none" },
-  currentBtn: { minWidth: 140, border: "none", background: C.canvas, color: C.ink, cursor: "pointer", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 700, boxShadow: "0 1px 2px rgba(0,0,0,0.08)", whiteSpace: "nowrap" },
+  monthSelect: { position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", fontSize: 16 },
+  currentBtn: { minWidth: 0, border: "none", background: C.canvas, color: C.ink, cursor: "pointer", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 700, boxShadow: "0 1px 2px rgba(0,0,0,0.08)", whiteSpace: "nowrap" },
 
   hero: { background: C.card, borderRadius: 20, padding: 20, border: `1px solid ${C.line}`, marginBottom: 14 },
   methodRow: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 10, flexWrap: "wrap" },
@@ -3575,16 +3455,46 @@ const St = {
   h2: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 19, fontWeight: 700, margin: 0, display: "inline-flex", alignItems: "center", gap: 6 },
   headTotal: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 16, color: C.ink, fontVariantNumeric: "tabular-nums" },
 
-  itemWrap: { marginBottom: 12 },
+  itemWrap: { padding: "6px 8px", margin: "0 -8px 4px", borderRadius: 12 },
+  subRow: { marginBottom: 12 },
+  flags: { display: "inline-flex", alignItems: "center", gap: 6, color: C.muted, verticalAlign: "middle" },
+  flagChip: { display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 600 },
+  drawer: { background: C.card, color: C.ink, fontFamily: "'Inter', system-ui, sans-serif" },
+  drawerHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 4 },
+  drawerCrumb: { fontSize: 12.5, color: C.muted, minWidth: 0 },
+  drawerTitle: { width: "100%", border: "none", borderBottom: `1px solid transparent`, background: "transparent", color: C.ink, fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 24, fontWeight: 700, padding: "4px 0 6px", outline: "none", marginBottom: 6 },
+  drawerAmountRow: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px 12px" },
+  drawerMuted: { fontSize: 12.5, color: C.muted, fontVariantNumeric: "tabular-nums" },
+  drawerSection: { borderTop: `1px solid ${C.line}`, paddingTop: 12, marginTop: 14 },
+  drawerLabel: { fontSize: 11.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: C.muted, marginBottom: 8 },
+  drawerSub: { display: "flex", flexDirection: "column", gap: 4, fontSize: 12.5, color: C.muted, minWidth: 0 },
+  drawerPair: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 8 },
+  drawerInput: { width: "100%", border: `1px solid ${C.line}`, borderRadius: 10, background: C.canvas, color: C.ink, fontFamily: "inherit", fontSize: 14, padding: "8px 10px", outline: "none", boxSizing: "border-box" },
+  drawerDelete: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", marginTop: 18, border: `1px solid ${C.exp}`, background: "transparent", color: C.exp, fontFamily: "inherit", fontSize: 14, fontWeight: 600, padding: "10px 12px", borderRadius: 12, cursor: "pointer" },
+  navRow: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginTop: 10 },
+  viewAs: { display: "inline-flex", alignItems: "center", gap: 6 },
+  viewAsLabel: { fontSize: 12.5, color: C.muted, marginRight: 2 },
+  viewAsBtn: { display: "inline-flex", alignItems: "center", gap: 7, border: "1px solid transparent", background: "transparent", color: C.ink, fontFamily: "inherit", fontSize: 13, fontWeight: 600, padding: "3px 12px 3px 3px", borderRadius: 999, cursor: "pointer" },
+  viewAsOn: { background: C.card, borderColor: C.line, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" },
+  avatar: { width: 28, height: 28, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700, flexShrink: 0 },
+  tiles: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, marginBottom: 12 },
+  tile: { background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 14px", minWidth: 0 },
+  tileLabel: { fontSize: 12.5, fontWeight: 600, color: C.muted },
+  tileValue: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 23, fontWeight: 700, marginTop: 2, fontVariantNumeric: "tabular-nums" },
+  tileSub: { fontSize: 12, color: C.muted },
+  monthActionsBtn: { display: "inline-flex", alignItems: "center", gap: 8, border: "none", background: C.canvas, color: C.ink, fontFamily: "inherit", fontSize: 13, fontWeight: 600, height: 38, padding: "0 12px", borderRadius: 10, cursor: "pointer" },
+  menuPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 260, background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,0.16)", padding: 6, zIndex: 50, display: "flex", flexDirection: "column" },
+  menuItem: { display: "flex", alignItems: "center", gap: 10, border: "none", background: "transparent", color: C.ink, fontFamily: "inherit", fontSize: 13.5, textAlign: "left", padding: "9px 10px", borderRadius: 8, cursor: "pointer" },
+  menuDivider: { height: 1, background: C.line, margin: "4px 6px" },
   row: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
   rowActions: { display: "inline-flex", alignItems: "center", gap: 2, flexShrink: 0 },
   expRow: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
   dot: { width: 10, height: 10, borderRadius: 999, flexShrink: 0 },
   nameInput: { flex: 1, minWidth: 90, border: "none", borderBottom: `1px solid ${C.line}`, background: "transparent", padding: "8px 2px", fontSize: 15, color: C.ink, fontFamily: "inherit", outline: "none" },
-  catInput: { width: 104, flexShrink: 0, border: "none", borderBottom: `1px solid ${C.line}`, background: C.canvas, borderRadius: "6px 6px 0 0", padding: "8px 8px", fontSize: 12.5, color: C.muted, fontFamily: "inherit", outline: "none" },
+  catInput: { width: 128, flexShrink: 0, border: "none", borderBottom: `1px solid ${C.line}`, background: C.canvas, borderRadius: "6px 6px 0 0", padding: "8px 8px", fontSize: 12.5, color: C.muted, fontFamily: "inherit", outline: "none" },
   derived: { fontSize: 12, color: C.muted, marginTop: 4, fontVariantNumeric: "tabular-nums" },
   derivedCorrespondent: { color: C.b, fontWeight: 600 },
-  rail: { display: "inline-flex", alignItems: "center", flexWrap: "wrap", gap: "2px 8px", marginLeft: 8, verticalAlign: "middle" },
+  rail: { display: "inline-flex", alignItems: "center", flexWrap: "wrap", gap: "2px 8px", verticalAlign: "middle" },
   railTrack: { display: "inline-flex", alignItems: "center" },
   railDot: { width: 8, height: 8, borderRadius: 999, boxSizing: "border-box", flexShrink: 0, display: "inline-block" },
   railLine: { width: 7, height: 1.5, background: C.line },
@@ -3734,7 +3644,25 @@ input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outli
 .entry .e-desc { flex: 1; min-width: 90px; }
 .entry .e-amount { display: inline-flex; flex-shrink: 0; }
 .entry .entryActions { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
-.entryMore, .bottomNav, .mobileOnly, .monthPickHint { display: none !important; }
+.entryMore, .bottomNav, .mobileOnly { display: none !important; }
+.entryWrap { cursor: pointer; transition: background .12s; }
+.entryWrap:hover { background: color-mix(in srgb, ${C.card} 55%, transparent); }
+.entryWrap.selected { background: ${C.card}; box-shadow: 0 0 0 1.5px ${C.b}; }
+.derived { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; }
+.derived .d-cat { display: none; }
+/* Month page: one column; on wide screens incomes + expenses on the left
+   and the split sticky on the right, so an edit shows its effect at once. */
+.monthGrid { display: grid; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1100px) {
+  .shell { max-width: 1360px !important; }
+  .monthGrid:not(.single) { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); grid-template-areas: "inc res" "exp res"; column-gap: 22px; align-items: start; }
+  .monthGrid:not(.single) .mg-inc { grid-area: inc; }
+  .monthGrid:not(.single) .mg-exp { grid-area: exp; }
+  .monthGrid:not(.single) .mg-res { grid-area: res; position: sticky; top: 12px; }
+}
+/* Entry detail panel: side panel on wide screens, bottom sheet on phones. */
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); z-index: 80; overflow-y: auto; border-left: 1px solid ${C.line}; box-shadow: -12px 0 40px rgba(0,0,0,.14); padding: 16px 20px 32px; }
+.drawerBackdrop { display: none; }
 .hScroll { width: 100%; }
 /* ── Phones ─────────────────────────────────────────────────────────
    Everything below is layout only; the same components render on every
@@ -3751,39 +3679,51 @@ input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outli
   .chipRow::-webkit-scrollbar { display: none; }
   input, select, textarea { font-size: 16px !important; }
 
-  /* Sticky one-row month bar */
-  .monthNav { position: sticky; top: 0; z-index: 20; display: grid !important; grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-areas: "prev label next" "cur cur cur"; gap: 8px !important; padding: 8px !important; margin: 0 -4px 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.06); }
-  .monthNav.isCurrent { grid-template-areas: "prev label next"; }
-  .monthNav.isCurrent .currentBtn { display: none; }
+  /* Sticky month bar: ‹ month › ⋯, with "current month" on a second row when needed */
+  .monthNav { position: sticky; top: 0; z-index: 20; display: grid !important; grid-template-columns: 44px minmax(0, 1fr) 44px 44px; grid-template-areas: "prev label next more" "cur cur cur cur"; gap: 8px !important; padding: 8px !important; margin: 0 -4px 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.06); }
+  .monthNav.isCurrent { grid-template-areas: "prev label next more"; }
   .navPrev { grid-area: prev; width: 44px !important; height: 44px !important; }
   .navNext { grid-area: next; width: 44px !important; height: 44px !important; }
-  .navDelete { display: none !important; }
-  .monthLabelWrap { grid-area: label; min-width: 0 !important; justify-content: center; }
-  .monthPickHint { display: inline-block !important; }
-  .monthSelect { grid-area: label; opacity: 0; min-width: 0 !important; width: 100%; height: 44px; cursor: pointer; }
-  .currentBtn { grid-area: cur; min-width: 0 !important; padding: 8px !important; }
+  .navMore { grid-area: more; }
+  .navMore > button { width: 44px; height: 44px !important; padding: 0 !important; justify-content: center; }
+  .monthActionsLabel, .navSpacer, .viewAsLabel { display: none; }
+  .monthLabelWrap { grid-area: label; justify-content: center; }
+  .currentBtn { grid-area: cur; padding: 8px !important; }
+  .appHeader .viewAs { width: 100%; }
+  .tiles { grid-template-columns: 1fr 1fr !important; }
 
-  /* Entry cards: description + amount on top, category + ⋯ below, actions expand underneath */
-  .entryWrap { background: ${C.card}; border: 1px solid ${C.line}; border-radius: 14px; padding: 10px 12px; }
-  .entry, .entry.exp { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "desc amount amount" "lead lead more" "actions actions actions"; gap: 6px 8px; align-items: center; }
-  .entry .e-desc { grid-area: desc; min-width: 0; width: 100%; font-weight: 700; }
-  .entry .e-amount { grid-area: amount; justify-self: end; }
-  .entry .e-lead { grid-area: lead; display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .entry .e-lead input { flex: 1; min-width: 0; width: auto !important; background: transparent !important; border-bottom-style: dashed !important; padding: 6px 2px !important; }
-  .entry .e-lead [draggable] { display: none !important; } /* HTML5 drag & drop doesn't fire on touch */
+  /* Entries: a compact list, one line per entry (name, amount, ›) with the
+     category and month rail underneath; everything else is in the sheet. */
+  .entryWrap { margin: 0 !important; padding: 11px 2px !important; border-radius: 0 !important; border-bottom: 1px solid ${C.line}; }
+  .entryWrap:hover, .entryWrap.selected { background: transparent; box-shadow: none; }
+  .entry:not(.sub) { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto 28px; grid-template-areas: "lead desc amount open"; gap: 0 10px; align-items: center; }
+  .entry:not(.sub) .e-lead { grid-area: lead; display: flex; }
+  .entry:not(.sub) .e-lead input, .entry:not(.sub) .e-lead [draggable] { display: none !important; }
+  .entry:not(.sub) .e-desc { grid-area: desc; min-width: 0; width: 100%; font-weight: 700; border-bottom: none !important; padding: 2px 0 !important; }
+  .entry:not(.sub) .e-amount { grid-area: amount; }
+  .entry:not(.sub) .pill-month { display: none; }
+  .entry:not(.sub) .money { background: transparent !important; padding: 0 !important; }
+  .entry:not(.sub) input[aria-label="${TXT.amount}"] { width: 76px !important; font-weight: 700; }
+  .entryOpen { grid-area: open; padding: 4px !important; }
+  .derived { margin: 0 0 0 22px !important; }
+  .derived .d-cat { display: inline; }
+  .derived .d-calc { display: none; }
+  .drawer { top: auto; left: 0; width: 100%; max-height: 88vh; border-left: none; border-radius: 20px 20px 0 0; padding: 14px 18px calc(28px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 40px rgba(0,0,0,.18); }
+  .drawer .drawerTitle { font-size: 22px !important; }
+  .drawerBackdrop { display: block; position: fixed; inset: 0; z-index: 79; background: rgba(0,0,0,.35); }
+
+  /* Savings sub-accounts keep the card layout with a ⋯ for their settings */
+  .subWrap { background: ${C.card}; border: 1px solid ${C.line}; border-radius: 14px; padding: 10px 12px; }
+  .entry.sub { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "desc amount amount" "lead lead more" "actions actions actions"; gap: 6px 8px; align-items: center; }
+  .entry.sub .e-desc { grid-area: desc; min-width: 0; width: 100%; font-weight: 700; }
+  .entry.sub .e-lead { grid-area: lead; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .entry.sub .e-lead input { flex: 1; min-width: 0; width: auto !important; background: transparent !important; border-bottom-style: dashed !important; padding: 6px 2px !important; }
   .entryMore { grid-area: more; display: inline-flex !important; justify-self: end; padding: 10px !important; }
   .entry .entryActions { grid-area: actions; display: none; justify-content: space-between; margin: 2px -4px 0; padding-top: 6px; border-top: 1px solid ${C.line}; }
   .entry .entryActions.open { display: flex; }
   .entryActions button { padding: 10px !important; }
-  .entry input[aria-label="${TXT.amount}"] { width: 76px !important; }
 
-  /* Footer: wrap actions into a tidy grid of tappable buttons */
-  .appFooter { flex-direction: column; align-items: stretch !important; }
-  .footerActions { display: grid !important; grid-template-columns: 1fr 1fr; gap: 6px !important; }
-  .footerActions > button, .footerActions > span > button, .footerActions > a { justify-content: center; min-height: 44px; background: ${C.card} !important; border: 1px solid ${C.line} !important; border-radius: 12px !important; padding: 8px !important; width: 100%; }
-  .footerActions > span { display: flex !important; }
-  .footerActions > a { display: none !important; }
-  .mobileOnly { display: inline-flex !important; }
+  .appFooter { justify-content: center !important; }
 
   /* Wide charts scroll sideways instead of squashing */
   .hScroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
