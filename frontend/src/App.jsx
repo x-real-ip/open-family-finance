@@ -1024,23 +1024,29 @@ export default function App() {
   };
   // Months after the selected one that still contain this entry.
   const laterMonthsWith = (kind, id, personId = null) => futureMonths.filter((k) => listAt(data.months[k], kind, personId).some((x) => x.id === id));
-  // Whole-month summary against both neighbours, over every list (personal ones included).
+  // Whole-month summary against both neighbours, over every list (personal
+  // ones included): which entries are only here, only there, or differ.
   const monthDiff = useMemo(() => {
+    const sectionOf = (kind, personId, fig) => {
+      if (kind !== "personalExpenses") return { partners: TXT.salarySection, govIncome: TXT.government, expenses: TXT.fixedCosts, savings: TXT.savingsSection }[kind];
+      const i = fig.partners.findIndex((p) => p.id === personId);
+      return (i >= 0 && fig.partners[i].name) || t(LANG, "personName", { n: i + 1 });
+    };
     const entriesOf = (fig) => [
       ...fig.partners.map((e) => ({ kind: "partners", personId: null, e })),
       ...entryKinds.flatMap((kind) => (fig[kind] || []).map((e) => ({ kind, personId: null, e }))),
       ...Object.entries(fig.personalExpenses || {}).flatMap(([personId, list]) => list.map((e) => ({ kind: "personalExpenses", personId, e }))),
-    ];
+    ].map((x) => ({ ...x, label: x.e.label || x.e.name || TXT.unnamed, section: sectionOf(x.kind, x.personId, fig), value: valueOf(x.kind, x.e, fig) }));
     const diff = (key) => {
       if (!key) return null;
-      const out = { key, onlyHere: 0, onlyThere: 0, changed: 0 };
-      for (const { kind, personId, e } of entriesOf(cur)) {
-        const side = compareSide(key, kind, e.id, valueOf(kind, e, cur), personId);
-        if (side.status === "absent") out.onlyHere++;
-        else if (side.status === "changed") out.changed++;
+      const out = { key, onlyHere: [], onlyThere: [], changed: [] };
+      for (const x of entriesOf(cur)) {
+        const side = compareSide(key, x.kind, x.e.id, x.value, x.personId);
+        if (side.status === "absent") out.onlyHere.push(x);
+        else if (side.status === "changed") out.changed.push({ ...x, other: side.value });
       }
-      for (const { kind, personId, e } of entriesOf(data.months[key])) {
-        if (!listAt(cur, kind, personId).some((x) => x.id === e.id)) out.onlyThere++;
+      for (const x of entriesOf(data.months[key])) {
+        if (!listAt(cur, x.kind, x.personId).some((y) => y.id === x.e.id)) out.onlyThere.push(x);
       }
       return out;
     };
@@ -1592,7 +1598,7 @@ export default function App() {
           </div>
         )}
 
-        {searchable && <MonthDiffSummary prev={monthDiff.prev} next={monthDiff.next} onGo={(key) => setData((d) => ({ ...d, selectedMonth: key }))} />}
+        {searchable && <MonthDiffSummary sel={sel} prev={monthDiff.prev} next={monthDiff.next} onGo={(key) => setData((d) => ({ ...d, selectedMonth: key }))} />}
 
         {searchable && (
           <SearchBar inputRef={searchRef} query={query} onQuery={setQuery} categories={chipCategories}
@@ -2183,26 +2189,53 @@ function MonthRail({ prev, next, cur }) {
   );
 }
 
-// One line under the month bar: how this month differs from the nearest
-// month on either side, counted over every list. Tapping a side jumps there.
-function MonthDiffSummary({ prev, next, onGo }) {
+// Under the month bar: how this month differs from the nearest month on
+// either side, in words ("2 entries gone · 1 different amount"). Tapping a
+// side opens the actual list of entries, plus a jump to that month.
+const plural = (key, n) => t(LANG, n === 1 ? `${key}One` : `${key}Many`, { count: n });
+function MonthDiffSummary({ sel, prev, next, onGo }) {
+  const [openKey, setOpenKey] = useState(null);
+  useEffect(() => { setOpenKey(null); }, [sel]);
   if (!prev && !next) return null;
-  const chip = (d, labelKey, hereKey, thereKey) => {
+  const isPrev = (d) => d === prev;
+  // Per side: [count key, list heading key, items]; next-side "only here" = stops after this month.
+  const groupsOf = (d) => isPrev(d)
+    ? [["compareNew", "compareListNewPrev", d.onlyHere], ["compareGone", "compareListGonePrev", d.onlyThere], ["compareChanged", "compareListChangedPrev", d.changed]]
+    : [["compareStops", "compareListStopsNext", d.onlyHere], ["compareNew", "compareListNewNext", d.onlyThere], ["compareChanged", "compareListChangedNext", d.changed]];
+  const chip = (d) => {
     if (!d) return null;
-    const parts = [[d.onlyHere, hereKey], [d.onlyThere, thereKey], [d.changed, "compareChanged"]]
-      .filter(([n]) => n > 0).map(([n, key]) => t(LANG, key, { count: n }));
+    const parts = groupsOf(d).filter(([, , items]) => items.length).map(([key, , items]) => plural(key, items.length));
+    const on = openKey === d.key;
     return (
-      <button type="button" onClick={() => onGo(d.key)} style={St.diffChip} title={t(LANG, "compareGoTo", { month: monthLong(d.key) })}>
+      <button type="button" onClick={() => setOpenKey(on ? null : d.key)} aria-expanded={on} style={{ ...St.diffChip, ...(on ? { borderColor: C.ink } : {}) }}>
         {parts.length ? <span style={{ ...St.railDot, background: C.warn }} /> : <Check size={13} style={{ color: C.save, flexShrink: 0 }} />}
-        <span style={St.diffChipLabel}>{t(LANG, labelKey, { month: monthShort(d.key) })}</span>
-        <span>{parts.length ? parts.join(" · ") : TXT.compareSame}</span>
+        <span><span style={St.diffChipLabel}>{t(LANG, isPrev(d) ? "compareVsPrev" : "compareVsNext", { month: monthLong(d.key) })}: </span>{parts.length ? parts.join(" · ") : TXT.compareSame}</span>
+        <ChevronDown size={14} style={{ color: C.muted, flexShrink: 0, transform: on ? "rotate(180deg)" : "none" }} />
       </button>
     );
   };
+  const d = [prev, next].find((x) => x && x.key === openKey);
+  const vars = d && { current: monthLong(sel), other: monthLong(d.key) };
   return (
-    <div style={St.diffRow} className="fade">
-      {chip(prev, "compareVsPrev", "compareNew", "compareGone")}
-      {chip(next, "compareVsNext", "compareStops", "compareAppears")}
+    <div style={{ marginTop: -4, marginBottom: 12 }} className="fade">
+      <div style={St.diffRow}>{chip(prev)}{chip(next)}</div>
+      {d && (
+        <div style={St.diffPanel}>
+          {groupsOf(d).every(([, , items]) => !items.length) && <div style={St.diffItem}>{t(LANG, "compareListSame", vars)}</div>}
+          {groupsOf(d).filter(([, , items]) => items.length).map(([, headKey, items]) => (
+            <div key={headKey} style={{ marginBottom: 10 }}>
+              <div style={St.diffHead}>{t(LANG, headKey, vars)}</div>
+              {items.map((x) => (
+                <div key={`${x.section}-${x.e.id}`} style={St.diffItem}>
+                  <span style={{ minWidth: 0 }}>{x.label} <span style={{ color: C.muted }}>· {x.section}</span></span>
+                  <span style={St.diffAmount}>{x.other == null ? eur(x.value) : isPrev(d) ? `${eur(x.other)} → ${eur(x.value)}` : `${eur(x.value)} → ${eur(x.other)}`}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+          <button type="button" onClick={() => onGo(d.key)} style={St.ghostBtn}>{t(LANG, "compareGoTo", { month: monthLong(d.key) })}</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -3562,7 +3595,11 @@ const St = {
   ghostAmount: { fontVariantNumeric: "tabular-nums", flexShrink: 0 },
   ghostMeta: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px 10px", marginTop: 6, fontSize: 12.5, color: C.muted },
   ghostBtn: { border: `1px solid ${C.line}`, background: C.card, color: C.ink, fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "5px 10px", borderRadius: 999 },
-  diffRow: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: -4, marginBottom: 12 },
+  diffRow: { display: "flex", flexWrap: "wrap", gap: 8 },
+  diffPanel: { background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: "12px 14px", marginTop: 8 },
+  diffHead: { fontSize: 12, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 4 },
+  diffItem: { display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13.5, padding: "3px 0" },
+  diffAmount: { fontVariantNumeric: "tabular-nums", flexShrink: 0, color: C.ink },
   diffChip: { display: "inline-flex", alignItems: "center", gap: 7, border: `1px solid ${C.line}`, background: C.card, color: C.ink, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit", padding: "6px 12px", borderRadius: 999, textAlign: "left" },
   diffChipLabel: { color: C.muted },
   dialogBackdrop: { position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
