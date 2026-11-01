@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   computeTotals, normalize, migrateFig, monthlyContributionAt, projectSubAccountSeries,
   subAccountContribution, valueAt, transferTargetKey, setTransferAmountAt, FROM_START,
-  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal,
+  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd,
 } from "./finance.js";
 
 const fig = (over = {}) => migrateFig({
@@ -126,4 +126,28 @@ test("interest tip: only above the buffer and when a better rate exists", () => 
   close(tip.gainPerYear, 50);
   assert.equal(interestTip(2500, goal), null);
   assert.equal(interestTip(8000, { ...goal, mainInterestRate: "3" }), null);
+});
+
+test("a deposit: one-off amount from its start month, simple interest only during the term, no transfers", () => {
+  const months = { "2026-11": fig() };
+  const dep = { id: "d", kind: "deposit", depositAmount: "10000", termStart: "2026-11", termMonths: "12", interestRate: "3", checkpoints: {} };
+  assert.equal(depositEnd(dep), "2027-11");
+  assert.equal(subAccountContribution(dep, 600, "2026-12"), 0);
+  close(balanceAt(months, "s1", dep, "2026-11").balance, 10000);
+  close(balanceAt(months, "s1", dep, "2027-05").balance, 10150);
+  close(balanceAt(months, "s1", dep, "2027-11").balance, 10300);
+  close(balanceAt(months, "s1", dep, "2028-06").balance, 10300, "no more interest after the term");
+  assert.equal(balanceAt(months, "s1", dep, "2026-10"), null, "nothing before the start");
+});
+
+test("a deposit next to a savings account leaves the joint remainder untouched", () => {
+  const subs = [{ id: "d", kind: "deposit", depositAmount: "5000", termStart: "2026-11", termMonths: "6" }, raisin("r1", "Coen", { [FROM_START]: "200" })];
+  const [main] = goalAccounts({ id: "s1" }, { forwarded: true, checkpoints: {}, subAccounts: subs }, "2026-11", "Main");
+  close(subAccountContribution(main, 600, "2026-12"), 400);
+});
+
+test("a goal without its own balance keeps it empty — sub-account balances are not copied onto it", () => {
+  const g = migrateGoal({ entryId: "s1", forwarded: true, checkpoints: {}, subAccounts: [{ id: "r", checkpoints: { "2026-11": "6000" } }] });
+  assert.deepEqual(g.checkpoints, {});
+  assert.deepEqual(g.subAccounts[0].checkpoints, { "2026-11": "6000" });
 });

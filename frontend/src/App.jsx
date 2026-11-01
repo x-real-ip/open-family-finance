@@ -40,7 +40,7 @@ import {
   allSavingsOf, flip, pctOf, uid, clone, monthKey, keyToDate, shiftMonth,
   figuresFor, computeTotals, migrateFig, SORT_MODES, DEFAULT_LIST_SORT, listSortOf, migrateCheckpoints, migrateSubAccount,
   migrateGoal, freshData, normalize, monthlyContributionAt, subAccountContribution, projectSubAccountSeries,
-  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals,
+  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd,
 } from "./finance";
 
 /* ----------------------------------------------------------------
@@ -511,10 +511,17 @@ export default function App() {
       ...cur.savings.map((s) => ({ ...s, label: s.label || TXT.unnamed })),
       // Personal entries too — an own subscription running out matters just as much.
       ...cur.partners.flatMap((p, i) => PERSONAL_KINDS.flatMap((kind) => listAt(cur, kind, p.id).map((e) => ({ ...e, label: `${p.name || t(LANG, "personName", { n: i + 1 })} · ${e.label || TXT.unnamed}` })))),
+      // Deposits whose term ends (on the 1st of their end month) — the money
+      // needs a new destination then. Only shown up to a month after the end,
+      // after that it's no news anymore.
+      ...(data.savingsGoals || []).flatMap((g) => (g.subAccounts || []).filter((x) => depositEnd(x)).map((x) => ({
+        id: x.id, label: accountName(x), endDate: `${depositEnd(x)}-01`, recentOnly: true,
+      }))),
     ];
     return entries.map((entry) => {
       const left = daysUntil(entry.endDate);
       if (left == null) return null;
+      if (entry.recentOnly && left < -CONTRACT_WARNING_DAYS) return null;
       const warningDays = entry.warningDays ? num(entry.warningDays) : CONTRACT_WARNING_DAYS;
       const expired = left < 0;
       const endingSoon = left >= 0 && left <= warningDays;
@@ -522,7 +529,7 @@ export default function App() {
       const status = expired ? t(LANG, "contractExpired", { days: Math.abs(left) }) : t(LANG, "contractEndingSoon", { days: left });
       return { id: entry.id, label: entry.label, status, expired };
     }).filter(Boolean).sort((a, b) => (a.expired === b.expired ? 0 : a.expired ? -1 : 1));
-  }, [cur]);
+  }, [cur, data.savingsGoals]);
 
   // Drag-and-drop reordering — only available while a section's sort mode is "manual".
   // Reordering changes the entry order for the selected month only; it does not
@@ -968,7 +975,7 @@ export default function App() {
     return [...goals, fn({ entryId, targetAmount: "", mainBank: "", forwarded: false, checkpoints: {}, subAccounts: [] })];
   };
   const updateGoal = (entryId, patch) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, ...patch })) }));
-  const addSubAccount = (entryId, id = uid()) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id, holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", transferMode: "amount", transferAmounts: {}, transferDay: "", ownerId: "", checkpoints: {} }] })) }));
+  const addSubAccount = (entryId, id = uid(), kind = "savings") => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id, kind, holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", transferMode: "amount", transferAmounts: {}, transferDay: "", ownerId: "", depositAmount: "", termStart: kind === "deposit" ? d.selectedMonth : "", termMonths: kind === "deposit" ? "12" : "", checkpoints: {} }] })) }));
   const removeSubAccount = (entryId, subId) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
   const updateSubAccount = (entryId, subId, patch) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
   // Reset the selected month: take over the figures of the nearest earlier
@@ -2409,7 +2416,7 @@ function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, cu
     const groupPersonId = group.id === "joint" ? null : group.id;
     return goalAccounts(entry, goal, sel, goal.forwarded ? TXT.mainAccountLabel : TXT.unnamed).map((acc) => ({
       acc, entry, goal, groupPersonId,
-      name: acc.isMain ? (goal.mainBank || TXT.mainAccountLabel) : acc.isOwn ? TXT.ownAccountLabel : [acc.bank, acc.holder].filter(Boolean).join(" · ") || TXT.unnamed,
+      name: acc.isMain ? (goal.mainBank || TXT.mainAccountLabel) : acc.isOwn ? TXT.ownAccountLabel : accountName(acc),
       balance: acc.virtual ? null : balanceAt(months, entry.id, acc, sel, target)?.balance ?? null,
       expected: balanceAt(months, entry.id, acc, sel, target, { without: true })?.balance ?? null,
     }));
@@ -2453,7 +2460,7 @@ function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, cu
             open={openGoalId === entry.id}
             onToggleOpen={() => setOpenGoalId((cur) => cur === entry.id ? null : entry.id)}
             onUpdate={(patch) => onUpdateGoal(entry.id, patch)}
-            onAddSubAccount={() => { const id = uid(); onAddSubAccount(entry.id, id); setPanel({ entryId: entry.id, accountId: id }); }}
+            onAddSubAccount={(kind) => { const id = uid(); onAddSubAccount(entry.id, id, kind); setPanel({ entryId: entry.id, accountId: id }); }}
             selectedAccountId={panel?.entryId === entry.id ? panel.accountId : null}
             onOpenAccount={(accountId) => setPanel((cur) => (cur?.entryId === entry.id && cur.accountId === accountId ? null : { entryId: entry.id, accountId }))}
           />
@@ -2797,15 +2804,21 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
         {/* Read-only here on purpose — this is the same monthly entry shown
             in the monthly view, and it should only be editable there. */}
         <span style={St.savingsGoalAmount} title={TXT.savingsGoalAmountInfo}>{eur(entryDisplayAmount)} {entryPeriodSuffix}</span>
-        <label style={St.goalForwardedToggle} title={TXT.goalForwardedInfo} onClick={(e) => e.stopPropagation()}>
-          <input type="checkbox" checked={forwarded} onChange={(e) => onUpdate({ forwarded: e.target.checked })} />
-          {TXT.goalForwardedLabel}
-        </label>
+        {forwarded && <span style={St.goalForwardedTag}>{t(LANG, "goalAccountsCount", { count: subAccounts.length + 1 })}</span>}
         <ChevronDown size={18} style={{ color: C.muted, transform: open ? "rotate(180deg)" : "none", transition: "transform .2s", flexShrink: 0 }} />
       </div>
 
       {open && (
       <>
+      {/* Lives inside the opened card rather than in its header, so it
+          can't be hit by accident when you mean to click the arrow. */}
+      <div style={{ ...St.goalForwardedRow }}>
+        <label style={St.goalForwardedToggle}>
+          <input type="checkbox" checked={forwarded} onChange={(e) => onUpdate({ forwarded: e.target.checked })} />
+          {TXT.goalForwardedLabel}
+        </label>
+        <InfoDot text={TXT.goalForwardedInfo} />
+      </div>
       {/* The target applies to the goal as a whole either way. The recorded
           balance here is the goal's own account — once forwarded, that's
           specifically the main/shared account, tracked alongside (not
@@ -2835,7 +2848,7 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
           <AccountRow name={goal.mainBank || TXT.mainAccountLabel} selected={selectedAccountId === "main"} onOpen={() => onOpenAccount("main")}
             lines={[
               t(LANG, "mainAccountFlow", { incoming: eur(entryMonthlyAmount), forwarded: eur(forwardedTotal), remainder: eur(mainRemainder) }),
-              [seriesBySub[mainId]?.[sel] ? t(LANG, "subBalanceNow", { amount: eur(seriesBySub[mainId][sel].balance) }) : TXT.subNoBalance,
+              [seriesBySub[mainId]?.[sel] ? t(LANG, "subBalanceNow", { amount: eur(seriesBySub[mainId][sel].balance) }) : null,
                 num(goal.mainInterestRate) > 0 ? t(LANG, "subInterest", { rate: String(goal.mainInterestRate).replace(".", ",") }) : null,
                 num(goal.bufferAmount) > 0 ? t(LANG, "bufferShort", { amount: eur0(num(goal.bufferAmount)) }) : null].filter(Boolean).join(" · "),
             ]}
@@ -2843,12 +2856,15 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
             {tip && <InterestTip tip={tip} mainName={goal.mainBank || TXT.mainAccountLabel} buffer={num(goal.bufferAmount)} />}
           </AccountRow>
           {subAccounts.map((sub) => (
-            <AccountRow key={sub.id} name={[sub.bank, sub.holder].filter(Boolean).join(" · ") || TXT.unnamed} dotKey={sub.holder || sub.id}
+            <AccountRow key={sub.id} name={accountName(sub)} dotKey={sub.holder || sub.id}
               selected={selectedAccountId === sub.id} onOpen={() => onOpenAccount(sub.id)}
               lines={[subAccountSummary(sub, entryMonthlyAmount, sel, seriesBySub[sub.id]?.[sel]?.balance)]} />
           ))}
           {subAccounts.length === 0 && <div style={St.copyEmpty}>{TXT.noSubAccounts}</div>}
-          <button type="button" onClick={onAddSubAccount} style={St.addBtn}><Plus size={16} /> {TXT.addSubAccount}</button>
+          <div style={St.addRow}>
+            <button type="button" onClick={() => onAddSubAccount("savings")} style={St.addBtn} title={TXT.addSavingsAccountInfo}><Plus size={16} /> {TXT.addSavingsAccount}</button>
+            <button type="button" onClick={() => onAddSubAccount("deposit")} style={St.addBtn} title={TXT.addDepositInfo}><Plus size={16} /> {TXT.addDeposit}</button>
+          </div>
         </>
       )}
 
@@ -2948,14 +2964,26 @@ function InterestTip({ tip, mainName, buffer }) {
   );
 }
 
+const accountName = (sub) => `${[sub.bank, sub.holder].filter(Boolean).join(" · ") || TXT.unnamed}${isDeposit(sub) ? ` (${TXT.depositLabel.toLowerCase()})` : ""}`;
+
 // One line with an account's transfer, balance and interest.
 function subAccountSummary(sub, entryMonthlyAmount, sel, balance) {
+  if (isDeposit(sub)) {
+    const end = depositEnd(sub);
+    return [
+      TXT.depositLabel,
+      sub.depositAmount ? eur(num(sub.depositAmount)) : null,
+      num(sub.interestRate) > 0 ? t(LANG, "depositRate", { rate: String(sub.interestRate).replace(".", ",") }) : null,
+      end ? (sel > end ? t(LANG, "depositEnded", { month: monthShortWithYear(end) }) : t(LANG, "depositRuns", { from: monthShortWithYear(sub.termStart), to: monthShortWithYear(end), months: Math.round(num(sub.termMonths)) })) : null,
+      balance != null && sel >= sub.termStart ? t(LANG, "subBalanceNow", { amount: eur(balance) }) : null,
+    ].filter(Boolean).join(" · ");
+  }
   const amount = subAccountContribution(sub, entryMonthlyAmount, sel);
   return [
     sub.transferMode === "amount"
       ? (sub.transferDay ? t(LANG, "subTransferOnDay", { amount: eur(amount), day: sub.transferDay }) : t(LANG, "subTransferMonthly", { amount: eur(amount) }))
       : t(LANG, "subTransferShare", { pct: `${num(sub.sharePercent ?? 100)}%`, amount: eur(amount) }),
-    balance != null ? t(LANG, "subBalanceNow", { amount: eur(balance) }) : TXT.subNoBalance,
+    balance != null ? t(LANG, "subBalanceNow", { amount: eur(balance) }) : null,
     num(sub.interestRate) > 0 ? t(LANG, "subInterest", { rate: String(sub.interestRate).replace(".", ",") }) : null,
   ].filter(Boolean).join(" · ");
 }
@@ -3028,7 +3056,10 @@ function AccountPanel({ entry, goal, sub, months, currentMonthData, sel, partner
   const byAmount = sub?.transferMode === "amount";
   const amountKey = useRef(null);
   const amountHistory = Object.entries(sub?.transferAmounts || {}).sort(([a], [b]) => a.localeCompare(b));
-  const title = isMain ? (goal.mainBank || TXT.mainAccountLabel) : ([sub.bank, sub.holder].filter(Boolean).join(" · ") || TXT.unnamed);
+  const title = isMain ? (goal.mainBank || TXT.mainAccountLabel) : accountName(sub);
+  const dep = !isMain && isDeposit(sub);
+  const end = dep ? depositEnd(sub) : null;
+  const atEnd = end ? balanceAt(months, entry.id, account, end, null) : null;
   const section = (label, body) => <section style={St.drawerSection}><div style={St.drawerLabel}>{label}</div>{body}</section>;
   const remainder = entryMonthly - (goal.subAccounts || []).reduce((sum, s) => sum + subAccountContribution(s, entryMonthly, sel), 0);
 
@@ -3048,6 +3079,12 @@ function AccountPanel({ entry, goal, sub, months, currentMonthData, sel, partner
           </PanelField>
         ) : (
           <>
+            <PanelField label={TXT.accountKind} info={TXT.infoAccountKind}>
+              <div style={{ ...St.toggle, alignSelf: "flex-start" }} role="group" aria-label={TXT.accountKind}>
+                <button type="button" onClick={() => onUpdateSub({ kind: "savings" })} style={{ ...St.toggleBtn, ...(!dep ? St.toggleOn : {}) }}>{TXT.kindSavings}</button>
+                <button type="button" onClick={() => onUpdateSub({ kind: "deposit", termStart: sub.termStart || sel, termMonths: sub.termMonths || "12" })} style={{ ...St.toggleBtn, ...(dep ? St.toggleOn : {}) }}>{TXT.depositLabel}</button>
+              </div>
+            </PanelField>
             <div style={St.drawerPair}>
               <PanelField label={TXT.subAccountBank} info={TXT.infoSubBank}>
                 <input list="banks" value={sub.bank} placeholder={TXT.subAccountBankPlaceholder} onChange={(e) => onUpdateSub({ bank: e.target.value })} style={St.drawerInput} />
@@ -3067,7 +3104,35 @@ function AccountPanel({ entry, goal, sub, months, currentMonthData, sel, partner
           </>
         ))}
 
-        {section(TXT.panelMoney, isMain ? (
+        {dep && section(TXT.depositLabel, (
+          <>
+            <div style={St.drawerPair}>
+              <PanelField label={TXT.depositAmount} info={TXT.infoDepositAmount}>
+                <input inputMode="decimal" placeholder="0,00" value={sub.depositAmount || ""} onChange={(e) => onUpdateSub({ depositAmount: decimal(e.target.value) })} style={St.drawerInput} />
+              </PanelField>
+              <PanelField label={TXT.depositRateLabel} info={TXT.infoDepositRate} align="right">
+                <input inputMode="decimal" placeholder="0" value={sub.interestRate || ""} onChange={(e) => onUpdateSub({ interestRate: decimal(e.target.value) })} style={St.drawerInput} />
+              </PanelField>
+            </div>
+            <div style={St.drawerPair}>
+              <PanelField label={TXT.depositStart} info={TXT.infoDepositStart}>
+                <input type="month" value={sub.termStart || ""} onChange={(e) => onUpdateSub({ termStart: e.target.value })} style={St.drawerInput} />
+              </PanelField>
+              <PanelField label={TXT.depositTerm} info={TXT.infoDepositTerm} align="right">
+                <input inputMode="numeric" list="depositTerms" placeholder="12" value={sub.termMonths || ""} onChange={(e) => onUpdateSub({ termMonths: e.target.value.replace(/[^0-9]/g, "").slice(0, 3) })} style={St.drawerInput} />
+                <datalist id="depositTerms">{[3, 6, 9, 12, 18, 24, 36, 48, 60, 84, 120].map((n) => <option key={n} value={n}>{horizonLabel(n)}</option>)}</datalist>
+              </PanelField>
+            </div>
+            {end ? (
+              <div style={{ ...St.drawerMuted, marginTop: 8 }}>
+                {t(LANG, sel > end ? "depositEndedOn" : "depositEndsOn", { month: monthLong(end) })}
+                {atEnd && <> · {t(LANG, "depositAtEnd", { amount: eur(atEnd.balance), interest: eur(atEnd.interest) })}</>}
+              </div>
+            ) : <div style={{ ...St.drawerMuted, marginTop: 8 }}>{TXT.depositIncomplete}</div>}
+          </>
+        ))}
+
+        {!dep && section(TXT.panelMoney, isMain ? (
           <>
             <div style={St.drawerMuted}>{t(LANG, "mainAccountFlow", { incoming: eur(entryMonthly), forwarded: eur(entryMonthly - remainder), remainder: eur(remainder) })}</div>
             {remainder < -0.005 && <div style={{ ...St.drawerMuted, color: C.exp, marginTop: 4 }}>{t(LANG, "mainAccountShrinks", { amount: eur(-remainder) })}</div>}
@@ -3113,7 +3178,7 @@ function AccountPanel({ entry, goal, sub, months, currentMonthData, sel, partner
           </>
         ))}
 
-        {section(TXT.panelBalance, (
+        {!dep && section(TXT.panelBalance, (
           <>
             <div style={St.drawerPair}>
               <PanelField label={t(LANG, "checkpointBalanceIn", { month: monthShortWithYear(sel) })} info={TXT.checkpointInfo}>
@@ -3689,7 +3754,10 @@ const St = {
   savingsHorizon: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.muted, fontWeight: 600 },
   savingsGoalName: { fontWeight: 700, fontSize: 15, padding: "8px 2px" },
   savingsGoalAmount: { fontSize: 15, fontWeight: 600, color: C.ink, fontVariantNumeric: "tabular-nums", padding: "8px 4px", cursor: "default" },
-  goalForwardedToggle: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.muted, fontWeight: 600, cursor: "pointer", marginLeft: 14, whiteSpace: "nowrap" },
+  goalForwardedToggle: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: C.ink, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
+  goalForwardedRow: { display: "flex", alignItems: "center", gap: 6, marginTop: 10 },
+  goalForwardedTag: { fontSize: 12, color: C.muted, fontWeight: 600, marginLeft: 12, whiteSpace: "nowrap" },
+  addRow: { display: "flex", gap: 8, flexWrap: "wrap" },
   savingsTableWrap: { overflowX: "auto", marginTop: 14 },
   savingsTable: { width: "100%", borderCollapse: "collapse", fontSize: 13, whiteSpace: "nowrap" },
   savingsTh: { textAlign: "right", padding: "6px 10px", color: C.muted, fontWeight: 600, borderBottom: `1px solid ${C.line}`, position: "sticky", top: 0, background: C.card },

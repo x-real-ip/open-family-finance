@@ -328,6 +328,11 @@ export function migrateSubAccount(s) {
     // "shared/unknown" — then the holder name is matched against the
     // people, and failing that it counts as shared (see accountOwnerShares).
     ownerId: s.ownerId ?? "",
+    // "savings" (no fixed term, may get monthly transfers) or "deposit": a
+    // one-off amount put away from termStart ("YYYY-MM") for termMonths at a
+    // fixed rate — no monthly transfers, interest only during the term.
+    kind: s.kind === "deposit" ? "deposit" : "savings",
+    depositAmount: s.depositAmount ?? "", termStart: s.termStart ?? "", termMonths: s.termMonths ?? "",
     // Each sub-account's own recorded balance, independent of the others and
     // of the goal's main-account balance — the combined total is the sum of
     // all of them, not a proportional split of one shared number.
@@ -342,12 +347,12 @@ export function migrateSubAccount(s) {
 // anything in the current model and are dropped in normalize() below.
 export function migrateGoal(g) {
   const entryId = g.entryId || (g.subAccounts || []).find((s) => s.entryId)?.entryId || null;
-  // The recorded balance briefly lived per sub-account instead of once per
-  // goal — recover it from whichever sub-account had one so a balance
-  // entered there isn't silently lost.
-  const ownCheckpoints = migrateCheckpoints(g);
-  const fallbackSub = (g.subAccounts || []).find((s) => s.checkpointMonth || (s.checkpoints && Object.keys(s.checkpoints).length));
-  const checkpoints = Object.keys(ownCheckpoints).length ? ownCheckpoints : (fallbackSub ? migrateCheckpoints(fallbackSub) : {});
+  // (An earlier version copied a sub-account's balance onto the goal when
+  // the goal had none, to recover balances from a short-lived July 2026
+  // format. Those blobs have long been re-saved in the current shape, and
+  // today a joint account without a balance — everything sits on the
+  // sub-accounts — is perfectly valid, so that copy double-counted money.)
+  const checkpoints = migrateCheckpoints(g);
 
   // For a while, a sub-account's balance wasn't recorded at all — it was
   // derived as a % split of the goal's one recorded total. Any sub-account
@@ -426,7 +431,16 @@ export function monthlyContributionAt(months, entryId, key) {
 // transfer; the goal's main account (the joint account the money arrives
 // on first) keeps whatever the sub-accounts don't take — negative when more
 // is transferred on than comes in, so its projected balance shrinks.
+export const isDeposit = (sub) => sub?.kind === "deposit";
+// The month a deposit's term ends, or null when start or term is missing.
+export const depositEnd = (sub) => (isDeposit(sub) && sub.termStart && num(sub.termMonths) > 0 ? shiftMonth(sub.termStart, Math.round(num(sub.termMonths))) : null);
+// A deposit's recorded balances: the deposited amount counts as the balance
+// in its start month (a later correction you enter still wins from then on).
+const accountCheckpoints = (sub) => (isDeposit(sub) && sub.termStart && sub.depositAmount !== ""
+  ? { [sub.termStart]: sub.depositAmount, ...(sub.checkpoints || {}) }
+  : (sub.checkpoints || {}));
 export function subAccountContribution(sub, monthly, key) {
+  if (isDeposit(sub)) return 0;
   if (sub.isMain) return monthly - (sub.siblings || []).reduce((sum, s) => sum + subAccountContribution(s, monthly, key), 0);
   if (sub.transferMode === "amount") return transferAmountAt(sub, key);
   const share = sub.sharePercent === "" || sub.sharePercent == null ? 1 : num(sub.sharePercent) / 100;
@@ -448,7 +462,12 @@ export function subAccountContribution(sub, monthly, key) {
 // savings accounts quote and apply a rate.
 export function projectSubAccountSeries(months, entryId, subAccount, keys, target) {
   const out = {};
-  const checkpoints = subAccount.checkpoints || {};
+  const checkpoints = accountCheckpoints(subAccount);
+  // Deposits earn simple interest on the deposited amount, only during the
+  // term (paid out at the end, as deposits usually do); after the end the
+  // balance stays as it is until you record what happened to it.
+  const deposit = isDeposit(subAccount);
+  const end = depositEnd(subAccount);
   const checkpointKeys = Object.keys(checkpoints).filter((k) => checkpoints[k] !== "" && checkpoints[k] != null).sort();
   if (!checkpointKeys.length) return out;
   // A goal's monthly contribution can be split across several sub-accounts
@@ -473,6 +492,8 @@ export function projectSubAccountSeries(months, entryId, subAccount, keys, targe
         principal = num(checkpoints[k]);
         interest = 0;
         capped = target != null && principal >= target;
+      } else if (deposit) {
+        if (!end || k <= end) interest += principal * monthlyRate;
       } else if (!capped) {
         interest += (principal + interest) * monthlyRate;
         principal = Math.max(0, principal + subAccountContribution(subAccount, monthlyContributionAt(months, entryId, k), k));
