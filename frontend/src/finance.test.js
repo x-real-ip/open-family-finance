@@ -2,10 +2,11 @@
 // (Node's built-in test runner — no extra dependencies).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   computeTotals, normalize, migrateFig, monthlyContributionAt, projectSubAccountSeries,
   subAccountContribution, valueAt, transferTargetKey, setTransferAmountAt, FROM_START,
-  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd, isMonthKey, plannedTransfers, lastRecorded, contributionRoute,
+  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd, isMonthKey, plannedTransfers, lastRecorded, contributionRoute, transferChanges, transferAccountName, migrateNotifications,
 } from "./finance.js";
 
 const fig = (over = {}) => migrateFig({
@@ -237,4 +238,37 @@ test("contribution route: straight to the sub-accounts when the main account kee
   assert.equal(contributionRoute(half, 300, "2026-11"), "via");
   list = plannedTransfers(months, "2026-11", [{ ...half, route: "direct" }]).filter((x) => x.entryId === "vs");
   assert.deepEqual(list.map((x) => [x.type, x.from.type, Math.round(x.amount)]), [["savings", "person", 150], ["forward", "person", 150]]);
+});
+
+test("transfer changes between two months: added, removed, changed amount/day/IBAN/description", () => {
+  const nov = fig({ personalSavings: { a: [{ id: "old", label: "Oud", amount: "50" }] } });
+  const dec = fig({ savings: [{ id: "s1", label: "Sparen", amount: "700" }], personalSavings: { b: [{ id: "new", label: "Nieuw", amount: "25" }] } });
+  const goals = [{ entryId: "s1", forwarded: true, mainBank: "KNAB", checkpoints: {},
+    subAccounts: [raisin("r1", "Coen", { [FROM_START]: "200", "2026-12": "250" }, { transferDay: "25", referenceId: "PLAN1" })] }];
+  const months = { "2026-11": nov, "2026-12": dec };
+  const changes = transferChanges(months, "2026-11", "2026-12", goals);
+  const by = (kind) => changes.filter((c) => c.kind === kind);
+  assert.deepEqual(by("added").map((c) => c.after.entryId), ["new"]);
+  assert.deepEqual(by("removed").map((c) => c.before.entryId), ["old"]);
+  const fwd = by("changed").find((c) => c.after.type === "forward");
+  assert.deepEqual(fwd.fields, ["amount"]); close(fwd.before.amount, 200); close(fwd.after.amount, 250);
+  assert.ok(by("changed").some((c) => c.after.type === "savings" && c.after.entryId === "s1"), "joint → KNAB went from 600 to 700");
+  assert.equal(transferChanges(months, "2026-12", "2027-01", goals).length, 0, "an unvisited month inherits the latest figures: nothing changes");
+});
+
+test("transfer account names and notification settings", () => {
+  const T = { personName: "Persoon {n}", transferOwnAccount: "Eigen rekening {name}", transferJointAccount: "Gezamenlijke rekening", unnamed: "naamloos", transferPotAccount: "Spaarpot {label}", depositLabel: "Deposito" };
+  const ctx = { partners: [{ id: "a", name: "Coen" }], jointAccountName: "KNAB Inkomen" };
+  assert.equal(transferAccountName({ type: "person", personId: "a" }, ctx, T), "Eigen rekening Coen");
+  assert.equal(transferAccountName({ type: "joint" }, ctx, T), "KNAB Inkomen");
+  assert.equal(transferAccountName({ type: "sub", sub: { bank: "Raisin", holder: "Coen", kind: "deposit" } }, ctx, T), "Raisin · Coen (deposito)");
+  assert.deepEqual(migrateNotifications({ day: "31" }), { day: "28", emailEnabled: false, email: "" });
+  assert.equal(migrateNotifications().day, "20");
+});
+
+test("the API's copy of the calculations and texts is up to date (run scripts/sync-shared.sh)", () => {
+  const here = (f) => new URL(f, import.meta.url);
+  for (const [original, copy] of [["./finance.js", "../../backend/shared/finance.js"], ["./locales/nl.js", "../../backend/shared/locales/nl.js"], ["./locales/en.js", "../../backend/shared/locales/en.js"]]) {
+    assert.equal(readFileSync(here(copy), "utf8"), readFileSync(here(original), "utf8"), `${copy} differs from ${original}`);
+  }
 });

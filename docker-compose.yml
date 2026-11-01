@@ -26,6 +26,16 @@ services:
       PAPERLESS_PUBLIC_URL: ${PAPERLESS_PUBLIC_URL:-}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN:-}
       PAPERLESS_DOCUMENT_TYPE_PRIORITY: ${PAPERLESS_DOCUMENT_TYPE_PRIORITY:-}
+      # Transfer-change notifications (optional; e-mail is off without SMTP_HOST/SMTP_FROM)
+      LANGUAGE: ${LANGUAGE:-nl}
+      TIMEZONE: ${TIMEZONE:-Europe/Amsterdam}
+      APP_URL: ${APP_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     depends_on:
       db:
         condition: service_healthy

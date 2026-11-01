@@ -17,6 +17,10 @@
  *   GET  /api/paperless/documents?correspondentId=&query=         -> [{ id, title, created, documentType, url }] | 404 when disabled
  *   GET  /api/paperless/documents/:id                             -> { id, title, created, documentType, url } | null | 404 when disabled
  *
+ * Transfer-change notifications (see notifications.js):
+ *   GET  /api/notifications/transfers   -> { month, nextMonth, notifyDay, due, count, changes, title, summary }
+ *   POST /api/notifications/test-email  -> { sent: true } | { error }   (mails the current report now)
+ *
  * Optional bearer auth: set API_TOKEN and send "Authorization: Bearer <token>".
  * Startup retries the database connection, so boot order does not matter.
  */
@@ -26,6 +30,7 @@ import {
   paperlessEnabled, listCorrespondents, ensureCorrespondent, listDocumentTypes, listTags,
   latestDocumentForCorrespondent, searchDocuments, getDocument,
 } from "./paperless.js";
+import { transferReport, sendTransferMail, smtpConfigured, startScheduler } from "./notifications.js";
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
@@ -163,6 +168,37 @@ app.get("/api/paperless/documents/:id", async (req, res) => {
   }
 });
 
+// What changes in the standing orders for next month — for Home Assistant
+// (REST sensor: state = count, the rest as attributes).
+app.get("/api/notifications/transfers", async (_req, res) => {
+  try {
+    res.json(await transferReport());
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// Send the current report by e-mail right away, to the address in the body
+// (the one typed in the app), to check that mail actually arrives.
+app.post("/api/notifications/test-email", async (req, res) => {
+  const to = String(req.body?.to || "").trim();
+  if (!smtpConfigured()) return res.status(400).json({ error: "smtp-not-configured" });
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return res.status(400).json({ error: "invalid-address" });
+  try {
+    await sendTransferMail(await transferReport(), to);
+    res.json({ sent: true });
+  } catch (e) {
+    console.error("notifications: test mail failed", e.message);
+    res.status(502).json({ error: "send-failed", detail: e.message });
+  }
+});
+
+// Whether e-mail can be sent at all, so the app can say so.
+app.get("/api/notifications/status", (_req, res) => {
+  res.json({ email: smtpConfigured() });
+});
+
 // Try to initialize the database, retrying while it is still starting up.
 // This makes the API resilient to startup ordering (Compose, Kubernetes, ...).
 async function start() {
@@ -171,6 +207,7 @@ async function start() {
     try {
       await initDb();
       app.listen(PORT, () => console.log(`Open Family Finance API listening on port ${PORT}`));
+      startScheduler();
       return;
     } catch (e) {
       console.error(`Database not ready (attempt ${attempt}/${maxAttempts}): ${e.message}`);
@@ -179,6 +216,16 @@ async function start() {
   }
   console.error("Database still unavailable after retries, exiting.");
   process.exit(1);
+}
+
+// Exit promptly on SIGTERM/SIGINT: as PID 1 in a container Node doesn't do
+// that by default, so every restart waited for the kill timeout.
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.on(signal, () => {
+    console.log(`${signal} received, shutting down`);
+    pool.end().finally(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000).unref();
+  });
 }
 
 start();

@@ -405,7 +405,7 @@ export function migrateGoal(g) {
     subAccounts,
   };
 }
-export function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [], transferAccounts: [], jointAccountName: "" }; }
+export function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [], transferAccounts: [], jointAccountName: "", notifications: migrateNotifications() }; }
 // Accounts that fixed costs get transferred to (e.g. "KNAB Vaste lasten"),
 // defined once for the household and picked per fixed-cost entry.
 export const migrateTransferAccount = (a) => ({ id: a.id || uid(), name: a.name || "", iban: a.iban || "", day: a.day || "", reference: a.reference || "" });
@@ -420,6 +420,7 @@ export function normalize(raw) {
       transferAccounts: (raw.transferAccounts || []).map(migrateTransferAccount),
       // What the household calls its joint account (e.g. "KNAB Inkomen"); "" = the generic name.
       jointAccountName: raw.jointAccountName || "",
+      notifications: migrateNotifications(raw.notifications),
     };
   }
   if (raw.partners) { const mk = monthKey(new Date()); return { ...freshData(), selectedMonth: mk, months: { [mk]: migrateFig(raw) } }; }
@@ -682,3 +683,47 @@ export function lastRecorded(account, sel) {
   const keys = Object.keys(accountCheckpoints(account)).filter((k) => k <= sel && accountCheckpoints(account)[k] !== "");
   return keys.sort().pop() || null;
 }
+
+// ── Transfer changes (for notifications) ──
+// A stable identity for a planned transfer across months: what kind of
+// transfer it is, between which two accounts, for which pot.
+const accountKey = (a) => a.type === "person" ? `person:${a.personId}` : a.type === "joint" ? "joint"
+  : a.type === "pot" ? `pot:${a.entryId}` : a.type === "sub" ? `sub:${a.sub.id}` : `account:${a.account?.id}`;
+export const transferKey = (tr) => `${tr.type}|${accountKey(tr.from)}|${accountKey(tr.to)}|${tr.entryId || ""}`;
+// What changes between the transfers of month `fromKey` and month `toKey`
+// (normally this month and the next): transfers that are new, gone, or
+// differ in amount, day, IBAN or description. One-off deposit transfers are
+// left out — they aren't standing orders to adjust.
+export function transferChanges(months, fromKey, toKey, goals, transferAccounts = []) {
+  const standing = (list) => list.filter((tr) => tr.type !== "depositStart" && tr.type !== "depositEnd");
+  const before = new Map(standing(plannedTransfers(months, fromKey, goals, transferAccounts)).map((tr) => [transferKey(tr), tr]));
+  const after = new Map(standing(plannedTransfers(months, toKey, goals, transferAccounts)).map((tr) => [transferKey(tr), tr]));
+  const out = [];
+  for (const [key, tr] of after) {
+    const old = before.get(key);
+    if (!old) { out.push({ kind: "added", key, after: tr }); continue; }
+    const fields = [];
+    if (Math.abs(old.amount - tr.amount) >= 0.005) fields.push("amount");
+    for (const f of ["day", "iban", "reference"]) if ((old[f] || "") !== (tr[f] || "")) fields.push(f);
+    if (fields.length) out.push({ kind: "changed", key, before: old, after: tr, fields });
+  }
+  for (const [key, tr] of before) if (!after.has(key)) out.push({ kind: "removed", key, before: tr });
+  return out;
+}
+// Human-readable account names for transfers, shared by the app and the
+// server's notifications. `T` is the locale's text table, `ctx` holds the
+// people and the joint account's own name.
+export function transferAccountName(acc, ctx, T) {
+  const person = (id) => { const i = ctx.partners.findIndex((p) => p.id === id); return i < 0 ? "?" : (ctx.partners[i].name || T.personName.replace("{n}", i + 1)); };
+  if (acc.type === "person") return T.transferOwnAccount.replace("{name}", person(acc.personId));
+  if (acc.type === "joint") return ctx.jointAccountName || T.transferJointAccount;
+  if (acc.type === "account") return acc.account.name || T.unnamed;
+  if (acc.type === "pot") return acc.bank || T.transferPotAccount.replace("{label}", acc.label || T.unnamed);
+  const sub = acc.sub;
+  return `${[sub.bank, sub.holder].filter(Boolean).join(" · ") || T.unnamed}${isDeposit(sub) ? ` (${T.depositLabel.toLowerCase()})` : ""}`;
+}
+// Notification settings (stored with the rest of the household data).
+export const migrateNotifications = (n = {}) => ({
+  day: String(Math.min(28, Math.max(1, Math.round(num(n.day) || 20)))),
+  emailEnabled: Boolean(n.emailEnabled), email: n.email || "",
+});

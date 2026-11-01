@@ -107,3 +107,21 @@ export const paperless = {
     }
   },
 };
+
+// Transfer-change notifications. Failures resolve to { error } rather than
+// throwing, so the settings form can simply show what went wrong.
+export const notifications = {
+  async status() {
+    try { return (await req("GET", "/api/notifications/status")) || { email: false }; } catch { return { email: false }; }
+  },
+  async testEmail(to) {
+    const headers = { "Content-Type": "application/json" };
+    if (TOKEN) headers["Authorization"] = `Bearer ${TOKEN}`;
+    try {
+      const res = await fetch("/api/notifications/test-email", { method: "POST", headers, body: JSON.stringify({ to }) });
+      return await res.json();
+    } catch (e) {
+      return { error: e.message };
+    }
+  },
+};

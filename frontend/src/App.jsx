@@ -32,7 +32,7 @@ import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, Sankey, Rectangle, Layer,
 } from "recharts";
-import { storage, paperless, PAPERLESS_ENABLED } from "./api";
+import { storage, paperless, notifications, PAPERLESS_ENABLED } from "./api";
 import { LANG, TXT, t, getRuntimeCurrencyLocale, getRuntimeDateLocale, getRuntimeAppTitle } from "./i18n";
 import {
   DEFAULT_PERSON, DEFAULT_FIGURES, num, round2, clamp01, toMonthly, monthlyOf, monthlyInc,
@@ -40,7 +40,7 @@ import {
   allSavingsOf, flip, pctOf, uid, clone, monthKey, keyToDate, shiftMonth,
   figuresFor, computeTotals, migrateFig, SORT_MODES, DEFAULT_LIST_SORT, listSortOf, migrateCheckpoints, migrateSubAccount,
   migrateGoal, freshData, normalize, monthlyContributionAt, subAccountContribution, projectSubAccountSeries,
-  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey, plannedTransfers, lastRecorded, migrateTransferAccount, contributionRoute,
+  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey, plannedTransfers, lastRecorded, migrateTransferAccount, contributionRoute, transferChanges, transferAccountName, migrateNotifications,
 } from "./finance";
 
 /* ----------------------------------------------------------------
@@ -1406,7 +1406,9 @@ export default function App() {
           <TransfersPage months={data.months} sel={sel} goals={data.savingsGoals || []} partners={cur.partners}
             transferAccounts={data.transferAccounts || []} jointAccountName={data.jointAccountName || ""}
             onJointAccountName={setJointAccountName} onAddAccount={() => addTransferAccount("")}
-            onUpdateAccount={updateTransferAccount} onRemoveAccount={removeTransferAccount} />
+            onUpdateAccount={updateTransferAccount} onRemoveAccount={removeTransferAccount}
+            notificationSettings={data.notifications || migrateNotifications()}
+            onNotificationSettings={(patch) => setData((d) => ({ ...d, notifications: { ...(d.notifications || migrateNotifications()), ...patch } }))} />
         ) : view === "cashflow" ? (
           <CashflowPage cur={cur} calc={calc} />
         ) : view === "history" ? (
@@ -2525,7 +2527,7 @@ function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, cu
 // viewing — grouped by the account the money leaves, so it reads as a
 // to-do list for setting up (or checking) standing orders: from KNAB to
 // Raisin · Coen, € 200 on the 25th, IBAN …, description PLAN… (both copyable).
-function TransfersPage({ months, sel, goals, partners, transferAccounts, jointAccountName, onJointAccountName, onAddAccount, onUpdateAccount, onRemoveAccount }) {
+function TransfersPage({ months, sel, goals, partners, transferAccounts, jointAccountName, onJointAccountName, onAddAccount, onUpdateAccount, onRemoveAccount, notificationSettings, onNotificationSettings }) {
   const list = useMemo(() => plannedTransfers(months, sel, goals, transferAccounts), [months, sel, goals, transferAccounts]);
   const personName = (id) => { const i = partners.findIndex((p) => p.id === id); return i < 0 ? "?" : (partners[i].name || t(LANG, "personName", { n: i + 1 })); };
   const nameOf = (acc) => acc.type === "person" ? t(LANG, "transferOwnAccount", { name: personName(acc.personId) })
@@ -2605,6 +2607,9 @@ function TransfersPage({ months, sel, goals, partners, transferAccounts, jointAc
         );
       })}
 
+      <NotificationSettings months={months} sel={sel} goals={goals} transferAccounts={transferAccounts}
+        ctx={{ partners, jointAccountName }} settings={notificationSettings} onChange={onNotificationSettings} />
+
       {/* The accounts this page talks about that aren't savings accounts:
           the joint account's name, and accounts fixed costs go to. */}
       <section style={{ ...St.section, marginTop: 18 }} className="fade">
@@ -2627,6 +2632,72 @@ function TransfersPage({ months, sel, goals, partners, transferAccounts, jointAc
         <button type="button" onClick={onAddAccount} style={{ ...St.addBtn, marginTop: 8 }}><Plus size={16} /> {TXT.addTransferAccount}</button>
       </section>
     </div>
+  );
+}
+
+// Notification settings for changing transfers, plus a preview of exactly
+// what would be reported now: next month compared with the viewed month,
+// computed with the same transferChanges the server uses for the mail and
+// the Home Assistant endpoint.
+function NotificationSettings({ months, sel, goals, transferAccounts, ctx, settings, onChange }) {
+  const [smtp, setSmtp] = useState(null);
+  const [test, setTest] = useState(null);
+  useEffect(() => { notifications.status().then((s) => setSmtp(Boolean(s.email))); }, []);
+  const next = shiftMonth(sel, 1);
+  const changes = useMemo(() => transferChanges(months, sel, next, goals, transferAccounts), [months, sel, next, goals, transferAccounts]);
+  const name = (acc) => transferAccountName(acc, ctx, TXT);
+  const field = (f, c) => f === "amount" ? t(LANG, "notifyFieldAmount", { from: eur(c.before.amount), to: eur(c.after.amount) })
+    : f === "day" ? t(LANG, "notifyFieldDay", { from: c.before.day || "–", to: c.after.day || "–" })
+    : f === "iban" ? t(LANG, "notifyFieldIban", { to: c.after.iban || "–" }) : t(LANG, "notifyFieldReference", { to: c.after.reference || "–" });
+  const line = (c) => {
+    const tr = c.after || c.before;
+    const route = `${name(tr.from)} → ${name(tr.to)}`;
+    return c.kind === "added" ? t(LANG, "notifyAdded", { route, amount: eur(tr.amount) })
+      : c.kind === "removed" ? t(LANG, "notifyRemoved", { route, amount: eur(tr.amount) })
+      : t(LANG, "notifyChanged", { route, what: c.fields.map((f) => field(f, c)).join(", ") });
+  };
+  const endpoint = `${window.location.origin}/api/notifications/transfers`;
+  return (
+    <section style={{ ...St.section, marginTop: 18 }} className="fade">
+      <div style={St.transferHead}><span style={St.savingsGoalName}>{TXT.notificationsTitle}</span></div>
+      <div style={{ ...St.correspondentDocMuted, marginTop: 8 }}>{TXT.notificationsHint}</div>
+      <PanelField label={TXT.notifyDayLabel} info={TXT.notifyDayInfo}>
+        <input inputMode="numeric" value={settings.day} style={{ ...St.drawerInput, maxWidth: 120 }}
+          onChange={(e) => onChange({ day: e.target.value.replace(/[^0-9]/g, "").slice(0, 2) })}
+          onBlur={() => onChange({ day: migrateNotifications({ day: settings.day }).day })} />
+      </PanelField>
+
+      <div style={{ ...St.panelFieldLabel, marginTop: 14 }}>
+        <label style={{ ...St.goalForwardedToggle }}>
+          <input type="checkbox" checked={settings.emailEnabled} onChange={(e) => onChange({ emailEnabled: e.target.checked })} />
+          {TXT.notifyEmailLabel}
+        </label>
+        <InfoDot text={TXT.notifyEmailInfo} />
+      </div>
+      {settings.emailEnabled && (
+        <>
+          <div style={St.transferAccountRow}>
+            <input type="email" value={settings.email} placeholder={TXT.notifyEmailAddress} aria-label={TXT.notifyEmailAddress}
+              onChange={(e) => onChange({ email: e.target.value.trim() })} style={{ ...St.drawerInput, flex: "1 1 240px", maxWidth: 360 }} />
+            <button type="button" style={St.historyBannerBtn} disabled={!settings.email || smtp === false}
+              onClick={async () => { setTest({ busy: true }); const r = await notifications.testEmail(settings.email); setTest(r.sent ? { ok: t(LANG, "notifyTestSent", { to: settings.email }) } : { error: t(LANG, "notifyTestFailed", { error: r.detail || r.error || "?" }) }); }}>
+              {TXT.notifyTestMail}
+            </button>
+          </div>
+          {smtp === false && <div style={{ ...St.drawerMuted, color: C.warn, marginTop: 6 }}>{TXT.notifySmtpMissing}</div>}
+          {test?.ok && <div style={{ ...St.drawerMuted, color: C.save, marginTop: 6 }}>{test.ok}</div>}
+          {test?.error && <div style={{ ...St.drawerMuted, color: C.exp, marginTop: 6 }}>{test.error}</div>}
+        </>
+      )}
+
+      <div style={{ ...St.panelFieldLabel, marginTop: 14 }}>{TXT.notifyHaLabel} <InfoDot text={TXT.notifyHaInfo} /></div>
+      <TransferDetail label={TXT.notifyEndpoint} value={endpoint} />
+
+      <div style={{ ...St.drawerLabel, marginTop: 16 }}>{t(LANG, "notifyPreview", { month: monthLong(next) })}</div>
+      {changes.length === 0
+        ? <div style={St.drawerMuted}>{t(LANG, "notifyPreviewNone", { month: monthLong(next) })}</div>
+        : <ul style={St.notifyList}>{changes.map((c) => <li key={c.key + c.kind}>{line(c)}</li>)}</ul>}
+    </section>
   );
 }
 
@@ -3749,10 +3820,11 @@ const St = {
   subSummary: { fontSize: 12.5, color: C.muted, marginTop: 4, paddingLeft: 2, fontVariantNumeric: "tabular-nums" },
   mainAccountHead: { display: "flex", alignItems: "center", gap: 10 },
   accountRowHead: { display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" },
-  panelFieldLabel: { display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, color: C.muted },
+  panelFieldLabel: { display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, color: C.muted, fontSize: 12.5 },
   panelInputRow: { display: "flex", alignItems: "center", gap: 4 },
   mainAccountFields: { display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10 },
   accountPots: { color: C.muted, fontSize: 12 },
+  notifyList: { margin: "4px 0 0", paddingLeft: 18, fontSize: 13.5, lineHeight: 1.6 },
   transferAccountRow: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 },
   transferHead: { display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", paddingBottom: 6, borderBottom: `1px solid ${C.line}` },
   transferFromLabel: { fontSize: 11.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: C.muted },
