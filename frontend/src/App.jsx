@@ -25,7 +25,7 @@ import {
   Plus, Trash2, RotateCcw, Check, Loader2, ChevronLeft, ChevronRight,
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, History, Link2,
   Copy, Sun, Moon,
-  Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Percent, Printer,
+  Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Printer,
   MoreHorizontal, CalendarDays, Waypoints, Search, X, Users, StickyNote,
 } from "lucide-react";
 import {
@@ -968,7 +968,7 @@ export default function App() {
     return [...goals, fn({ entryId, targetAmount: "", mainBank: "", forwarded: false, checkpoints: {}, subAccounts: [] })];
   };
   const updateGoal = (entryId, patch) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, ...patch })) }));
-  const addSubAccount = (entryId) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", transferMode: "amount", transferAmount: "", transferDay: "", checkpoints: {} }] })) }));
+  const addSubAccount = (entryId, id = uid()) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id, holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", transferMode: "amount", transferAmounts: {}, transferDay: "", ownerId: "", checkpoints: {} }] })) }));
   const removeSubAccount = (entryId, subId) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
   const updateSubAccount = (entryId, subId, patch) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
   // Reset the selected month: take over the figures of the nearest earlier
@@ -2397,6 +2397,9 @@ function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, cu
   // Accordion: opening one goal collapses whichever other one was open, so
   // the page doesn't turn into a wall of charts once there are several.
   const [openGoalId, setOpenGoalId] = useState(null);
+  // The account whose details are open in the side panel: { entryId, accountId }
+  // — accountId "main" is the joint account a forwarded pot arrives on.
+  const [panel, setPanel] = useState(null);
   const goalOf = (entry) => savingsGoals.find((g) => g.entryId === entry.id) || { entryId: entry.id, targetAmount: "", mainBank: "", mainInterestRate: "", bufferAmount: "", forwarded: false, checkpoints: {}, subAccounts: [] };
   // Every account of every pot, with its balance this month — shared by the
   // summary and the "update balances" form.
@@ -2447,18 +2450,33 @@ function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, cu
         const goal = goalOf(entry);
         return (
           <SavingsGoalCard key={entry.id} entry={entry} goal={goal} months={months} currentMonthData={currentMonthData} sel={sel} horizon={horizon}
-            partners={partners} groupPersonId={group.id === "joint" ? null : group.id}
             open={openGoalId === entry.id}
             onToggleOpen={() => setOpenGoalId((cur) => cur === entry.id ? null : entry.id)}
             onUpdate={(patch) => onUpdateGoal(entry.id, patch)}
-            onAddSubAccount={() => onAddSubAccount(entry.id)}
-            onRemoveSubAccount={(subId) => onRemoveSubAccount(entry.id, subId)}
-            onUpdateSubAccount={(subId, patch) => onUpdateSubAccount(entry.id, subId, patch)}
+            onAddSubAccount={() => { const id = uid(); onAddSubAccount(entry.id, id); setPanel({ entryId: entry.id, accountId: id }); }}
+            selectedAccountId={panel?.entryId === entry.id ? panel.accountId : null}
+            onOpenAccount={(accountId) => setPanel((cur) => (cur?.entryId === entry.id && cur.accountId === accountId ? null : { entryId: entry.id, accountId }))}
           />
         );
       })}
       </React.Fragment>
       ))}
+      {panel && (() => {
+        const group = savingsGroups.find((g) => g.entries.some((e) => e.id === panel.entryId));
+        const entry = group?.entries.find((e) => e.id === panel.entryId);
+        if (!entry) return null;
+        const goal = goalOf(entry);
+        const sub = panel.accountId === "main" ? null : goal.subAccounts.find((x) => x.id === panel.accountId);
+        if (panel.accountId !== "main" && !sub) return null;
+        return (
+          <AccountPanel key={`${panel.entryId}-${panel.accountId}`} entry={entry} goal={goal} sub={sub} months={months} currentMonthData={currentMonthData} sel={sel}
+            partners={group.id === "joint" ? partners : null}
+            onClose={() => setPanel(null)}
+            onUpdateGoal={(patch) => onUpdateGoal(entry.id, patch)}
+            onUpdateSub={(patch) => onUpdateSubAccount(entry.id, sub.id, patch)}
+            onRemoveSub={() => { onRemoveSubAccount(entry.id, sub.id); setPanel(null); }} />
+        );
+      })()}
     </div>
   );
 }
@@ -2693,7 +2711,7 @@ function CashflowPage({ cur, calc }) {
   );
 }
 
-function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, partners, groupPersonId, open, onToggleOpen, onUpdate, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, open, onToggleOpen, onUpdate, onAddSubAccount, selectedAccountId, onOpenAccount }) {
   const forwarded = Boolean(goal.forwarded);
   const subAccounts = goal.subAccounts;
   // The target applies to the goal as a whole, regardless of whether it's
@@ -2794,7 +2812,7 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
           combined into) each sub-account's own balance below. */}
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 10 }}>
         {!forwarded && (<label style={St.copyRow}>
-          <span style={St.copyLbl}>{TXT.checkpointBalance}</span>
+          <span style={St.copyLbl}>{TXT.checkpointBalance} <InfoDot text={TXT.checkpointInfo} /></span>
           <input inputMode="decimal" value={goal.checkpoints?.[sel] ?? ""} placeholder="0,00"
             onChange={(e) => {
               const v = e.target.value.replace(/[^0-9.,]/g, "");
@@ -2804,7 +2822,7 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
             }} style={{ ...St.copySel, width: 90 }} />
         </label>)}
         <label style={St.copyRow}>
-          <span style={St.copyLbl}>{TXT.targetAmount}</span>
+          <span style={St.copyLbl}>{TXT.targetAmount} <InfoDot text={TXT.infoTargetAmount} /></span>
           <input inputMode="decimal" value={goal.targetAmount} placeholder={TXT.targetAmountPlaceholder}
             onChange={(e) => onUpdate({ targetAmount: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 100 }} />
         </label>
@@ -2812,45 +2830,22 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
 
       {forwarded && (
         <>
-          <div style={St.subRow} className="subWrap">
-            <div style={St.mainAccountHead}>
-              <span style={{ ...St.catDot, background: categoryColor(goal.mainBank || TXT.mainAccountLabel) }} />
-              <input list="banks" aria-label={TXT.mainAccountBank} value={goal.mainBank || ""} placeholder={TXT.mainAccountBankPlaceholder}
-                onChange={(e) => onUpdate({ mainBank: e.target.value })} style={{ ...St.nameInput, fontWeight: 700 }} />
-            </div>
-            <div style={St.subSummary}>
-              {t(LANG, "mainAccountFlow", { incoming: eur(entryMonthlyAmount), forwarded: eur(forwardedTotal), remainder: eur(mainRemainder) })}
-            </div>
-            {mainRemainder < -0.005 && <div style={{ ...St.subSummary, color: C.exp }}>{t(LANG, "mainAccountShrinks", { amount: eur(-mainRemainder) })}</div>}
-            <div style={St.mainAccountFields}>
-              <label style={St.copyRow}>
-                <span style={St.copyLbl}>{t(LANG, "checkpointBalanceIn", { month: monthShortWithYear(sel) })}</span>
-                <input inputMode="decimal" value={goal.checkpoints?.[sel] ?? ""} placeholder={seriesBySub[mainId]?.[sel] ? String(round2(seriesBySub[mainId][sel].balance)).replace(".", ",") : "0,00"}
-                  onChange={(e) => {
-                    const v = e.target.value.replace(/[^0-9.,]/g, "");
-                    const next = { ...(goal.checkpoints || {}) };
-                    if (v) next[sel] = v; else delete next[sel];
-                    onUpdate({ checkpoints: next });
-                  }} style={{ ...St.copySel, width: 90 }} />
-              </label>
-              <label style={St.copyRow}>
-                <span style={St.copyLbl}>{TXT.subAccountInterestRate}</span>
-                <input inputMode="decimal" value={goal.mainInterestRate || ""} placeholder="0"
-                  onChange={(e) => onUpdate({ mainInterestRate: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 60 }} />
-              </label>
-              <label style={St.copyRow} title={TXT.bufferAmountInfo}>
-                <span style={St.copyLbl}>{TXT.bufferAmount}</span>
-                <input inputMode="decimal" value={goal.bufferAmount || ""} placeholder="0"
-                  onChange={(e) => onUpdate({ bufferAmount: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 80 }} />
-              </label>
-            </div>
+          {/* The joint account and each sub-account are read-only rows here;
+              clicking one opens all its fields in the side panel. */}
+          <AccountRow name={goal.mainBank || TXT.mainAccountLabel} selected={selectedAccountId === "main"} onOpen={() => onOpenAccount("main")}
+            lines={[
+              t(LANG, "mainAccountFlow", { incoming: eur(entryMonthlyAmount), forwarded: eur(forwardedTotal), remainder: eur(mainRemainder) }),
+              [seriesBySub[mainId]?.[sel] ? t(LANG, "subBalanceNow", { amount: eur(seriesBySub[mainId][sel].balance) }) : TXT.subNoBalance,
+                num(goal.mainInterestRate) > 0 ? t(LANG, "subInterest", { rate: String(goal.mainInterestRate).replace(".", ",") }) : null,
+                num(goal.bufferAmount) > 0 ? t(LANG, "bufferShort", { amount: eur0(num(goal.bufferAmount)) }) : null].filter(Boolean).join(" · "),
+            ]}
+            warning={mainRemainder < -0.005 ? t(LANG, "mainAccountShrinks", { amount: eur(-mainRemainder) }) : null}>
             {tip && <InterestTip tip={tip} mainName={goal.mainBank || TXT.mainAccountLabel} buffer={num(goal.bufferAmount)} />}
-          </div>
+          </AccountRow>
           {subAccounts.map((sub) => (
-            <SubAccountRow key={sub.id} sub={sub} entryMonthlyAmount={entryMonthlyAmount} sel={sel} balance={seriesBySub[sub.id]?.[sel]?.balance}
-              partners={groupPersonId ? null : partners}
-              onChange={(patch) => onUpdateSubAccount(sub.id, patch)}
-              onRemove={() => onRemoveSubAccount(sub.id)} />
+            <AccountRow key={sub.id} name={[sub.bank, sub.holder].filter(Boolean).join(" · ") || TXT.unnamed} dotKey={sub.holder || sub.id}
+              selected={selectedAccountId === sub.id} onOpen={() => onOpenAccount(sub.id)}
+              lines={[subAccountSummary(sub, entryMonthlyAmount, sel, seriesBySub[sub.id]?.[sel]?.balance)]} />
           ))}
           {subAccounts.length === 0 && <div style={St.copyEmpty}>{TXT.noSubAccounts}</div>}
           <button type="button" onClick={onAddSubAccount} style={St.addBtn}><Plus size={16} /> {TXT.addSubAccount}</button>
@@ -2939,37 +2934,6 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
   );
 }
 
-// Shared by the sub-account icon fields below: the same hover/click popover
-// mechanics as Note/Link/Correspondent/Duration elsewhere, including the
-// "only close on outside click, never on blur" fix from DurationField (a
-// native date input inside one of these can blur the input while its own
-// calendar overlay is open, which used to auto-close the whole popover).
-function IconPopoverField({ icon: Icon, ariaLabel, active, popStyle, children }) {
-  const [open, setOpen] = useState(false);
-  const editingRef = useRef(false);
-  const timer = useRef(null);
-  const rootRef = useRef(null);
-  const closeNow = () => { clearTimeout(timer.current); editingRef.current = false; setOpen(false); };
-  useClickOutside(rootRef, open, closeNow);
-  const openNow = () => { clearTimeout(timer.current); setOpen(true); };
-  const closeSoon = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { if (!editingRef.current) setOpen(false); }, 200); };
-  const markEditing = () => { editingRef.current = true; };
-  return (
-    <span ref={rootRef} style={{ position: "relative", display: "inline-flex" }} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }}>
-      <button type="button" aria-label={ariaLabel}
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => { if (o) editingRef.current = false; return !o; }); }}
-        style={{ ...St.iconBtn, color: active ? C.b : C.muted }}>
-        <Icon size={16} />
-      </button>
-      {open && (
-        <span style={mobilePopupStyle({ ...St.notePop, ...popStyle })} onPointerEnter={(e) => { if (e.pointerType === "mouse") openNow(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") closeSoon(); }} onClick={(e) => e.stopPropagation()}>
-          {typeof children === "function" ? children(markEditing) : children}
-        </span>
-      )}
-    </span>
-  );
-}
-
 // "Move more to the better rate" — see interestTip in finance.js.
 function InterestTip({ tip, mainName, buffer }) {
   const target = [tip.account.bank, tip.account.holder].filter(Boolean).join(" ") || TXT.unnamed;
@@ -2984,137 +2948,222 @@ function InterestTip({ tip, mainName, buffer }) {
   );
 }
 
-function SubAccountRow({ sub, entryMonthlyAmount, sel, balance, partners, onChange, onRemove }) {
-  const preview = subAccountContribution(sub, entryMonthlyAmount, sel);
-  // Which month the amount being typed is stored under, fixed on focus (see transferTargetKey).
-  const amountKey = useRef(null);
-  const amountHistory = Object.entries(sub.transferAmounts || {}).sort(([a], [b]) => a.localeCompare(b));
-  const byAmount = sub.transferMode === "amount";
-  // One line with what you'd otherwise have to open three popovers for.
-  const summary = [
-    byAmount
-      ? (sub.transferDay ? t(LANG, "subTransferOnDay", { amount: eur(preview), day: sub.transferDay }) : t(LANG, "subTransferMonthly", { amount: eur(preview) }))
-      : t(LANG, "subTransferShare", { pct: `${num(sub.sharePercent ?? 100)}%`, amount: eur(preview) }),
+// One line with an account's transfer, balance and interest.
+function subAccountSummary(sub, entryMonthlyAmount, sel, balance) {
+  const amount = subAccountContribution(sub, entryMonthlyAmount, sel);
+  return [
+    sub.transferMode === "amount"
+      ? (sub.transferDay ? t(LANG, "subTransferOnDay", { amount: eur(amount), day: sub.transferDay }) : t(LANG, "subTransferMonthly", { amount: eur(amount) }))
+      : t(LANG, "subTransferShare", { pct: `${num(sub.sharePercent ?? 100)}%`, amount: eur(amount) }),
     balance != null ? t(LANG, "subBalanceNow", { amount: eur(balance) }) : TXT.subNoBalance,
     num(sub.interestRate) > 0 ? t(LANG, "subInterest", { rate: String(sub.interestRate).replace(".", ",") }) : null,
   ].filter(Boolean).join(" · ");
-  const checkpointValue = sub.checkpoints?.[sel] ?? "";
-  const hasCheckpoints = Boolean(sub.checkpoints && Object.keys(sub.checkpoints).length);
+}
+
+// A read-only account row in a savings pot; the whole row opens the side panel.
+function AccountRow({ name, dotKey, lines, warning, selected, onOpen, children }) {
+  return (
+    <div style={{ ...St.subRow, ...(selected ? { borderColor: C.b, boxShadow: `0 0 0 1px ${C.b}` } : {}) }} className="subWrap accountRow">
+      <div role="button" tabIndex={0} aria-expanded={selected} onClick={onOpen}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }} style={St.accountRowHead}>
+        <span style={{ ...St.catDot, background: categoryColor(dotKey || name) }} />
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontWeight: 700 }}>{name}</span>
+          {lines.filter(Boolean).map((l, i) => <span key={i} style={{ ...St.subSummary, display: "block" }}>{l}</span>)}
+          {warning && <span style={{ ...St.subSummary, display: "block", color: C.exp }}>{warning}</span>}
+        </span>
+        <ChevronRight size={18} style={{ color: selected ? C.b : C.muted, flexShrink: 0 }} />
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// A labelled field in the side panel, with an (i) that explains what it's for.
+// `align="right"` for a field in the right-hand column, so its explanation
+// opens toward the panel instead of past its edge.
+function PanelField({ label, info, children, wide = true, align = "left" }) {
+  return (
+    <div style={{ ...St.drawerSub, marginTop: 10, ...(wide ? {} : { flex: 1 }) }}>
+      <span style={St.panelFieldLabel}>{label}{info && <InfoDot text={info} align={align} />}</span>
+      {children}
+    </div>
+  );
+}
+
+// Copy a value (IBAN, transfer description) for pasting into your bank's app.
+function CopyButton({ value }) {
+  const [done, setDone] = useState(false);
+  if (!value) return null;
+  return (
+    <button type="button" aria-label={TXT.copyValue} title={TXT.copyValue} style={St.iconBtn}
+      onClick={() => { navigator.clipboard?.writeText(value).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }); }}>
+      {done ? <Check size={16} style={{ color: C.save }} /> : <Copy size={16} />}
+    </button>
+  );
+}
+
+// Side panel with every field of one account of a savings pot — the joint
+// account a forwarded pot arrives on ("main", sub == null) or one of its
+// sub-accounts. Same panel/bottom-sheet as the month page's entry details.
+function AccountPanel({ entry, goal, sub, months, currentMonthData, sel, partners, onClose, onUpdateGoal, onUpdateSub, onRemoveSub }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const isMain = !sub;
+  const entryMonthly = monthlyOf(entry, currentMonthData);
+  const accounts = goalAccounts(entry, goal, sel, TXT.mainAccountLabel);
+  const account = isMain ? accounts[0] : accounts.find((a) => a.id === sub.id);
+  const target = goal.targetAmount ? num(goal.targetAmount) : null;
+  const expected = balanceAt(months, entry.id, account, sel, target, { without: true })?.balance ?? null;
+  const checkpoints = (isMain ? goal.checkpoints : sub.checkpoints) || {};
+  const setCheckpoint = (v) => {
+    const next = { ...checkpoints };
+    if (v) next[sel] = v; else delete next[sel];
+    if (isMain) onUpdateGoal({ checkpoints: next }); else onUpdateSub({ checkpoints: next });
+  };
+  const decimal = (v) => v.replace(/[^0-9.,]/g, "");
+  const byAmount = sub?.transferMode === "amount";
+  const amountKey = useRef(null);
+  const amountHistory = Object.entries(sub?.transferAmounts || {}).sort(([a], [b]) => a.localeCompare(b));
+  const title = isMain ? (goal.mainBank || TXT.mainAccountLabel) : ([sub.bank, sub.holder].filter(Boolean).join(" · ") || TXT.unnamed);
+  const section = (label, body) => <section style={St.drawerSection}><div style={St.drawerLabel}>{label}</div>{body}</section>;
+  const remainder = entryMonthly - (goal.subAccounts || []).reduce((sum, s) => sum + subAccountContribution(s, entryMonthly, sel), 0);
 
   return (
-    <div style={St.subRow} className="subWrap">
-      <div className="entry sub">
-        <span className="e-lead">
-          <span style={{ ...St.catDot, background: categoryColor(sub.holder || sub.id) }} />
-          <input list="banks" aria-label={TXT.subAccountBank} value={sub.bank} placeholder={TXT.subAccountBankPlaceholder}
-            onChange={(e) => onChange({ bank: e.target.value })} style={St.catInput} />
-        </span>
-        <input className="e-desc" aria-label={TXT.subAccountHolder} value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder}
-          onChange={(e) => onChange({ holder: e.target.value })} style={St.nameInput} />
-        <EntryActions>
-          <IconPopoverField icon={Percent} ariaLabel={TXT.subAccountTransfer} active>
-            {(markEditing) => (
+    <>
+      <div className="drawerBackdrop" onClick={onClose} />
+      <aside className="drawer" role="dialog" aria-label={title} style={St.drawer}>
+        <div style={St.drawerHead}>
+          <span style={St.drawerCrumb}>{entry.label || TXT.unnamed} · {isMain ? TXT.panelMainCrumb : TXT.panelSubCrumb} · {monthLong(sel)}</span>
+          <button type="button" onClick={onClose} style={St.iconBtn} aria-label={TXT.close}><X size={18} /></button>
+        </div>
+        <div style={{ ...St.drawerTitle, borderBottom: "none" }}>{title}</div>
+
+        {section(TXT.panelAccount, isMain ? (
+          <PanelField label={TXT.subAccountBank} info={TXT.infoMainBank}>
+            <input list="banks" value={goal.mainBank || ""} placeholder={TXT.mainAccountBankPlaceholder} onChange={(e) => onUpdateGoal({ mainBank: e.target.value })} style={St.drawerInput} />
+          </PanelField>
+        ) : (
+          <>
+            <div style={St.drawerPair}>
+              <PanelField label={TXT.subAccountBank} info={TXT.infoSubBank}>
+                <input list="banks" value={sub.bank} placeholder={TXT.subAccountBankPlaceholder} onChange={(e) => onUpdateSub({ bank: e.target.value })} style={St.drawerInput} />
+              </PanelField>
+              <PanelField label={TXT.subAccountHolder} info={TXT.infoHolder} align="right">
+                <input value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder} onChange={(e) => onUpdateSub({ holder: e.target.value })} style={St.drawerInput} />
+              </PanelField>
+            </div>
+            {partners && (
+              <PanelField label={TXT.subAccountOwner} info={TXT.subAccountOwnerInfo}>
+                <select value={sub.ownerId || ""} onChange={(e) => onUpdateSub({ ownerId: e.target.value })} style={St.drawerInput}>
+                  <option value="">{TXT.subAccountOwnerAuto}</option>
+                  {partners.map((p, i) => <option key={p.id} value={p.id}>{p.name || t(LANG, "personName", { n: i + 1 })}</option>)}
+                </select>
+              </PanelField>
+            )}
+          </>
+        ))}
+
+        {section(TXT.panelMoney, isMain ? (
+          <>
+            <div style={St.drawerMuted}>{t(LANG, "mainAccountFlow", { incoming: eur(entryMonthly), forwarded: eur(entryMonthly - remainder), remainder: eur(remainder) })}</div>
+            {remainder < -0.005 && <div style={{ ...St.drawerMuted, color: C.exp, marginTop: 4 }}>{t(LANG, "mainAccountShrinks", { amount: eur(-remainder) })}</div>}
+          </>
+        ) : (
+          <>
+            <PanelField label={TXT.subAccountTransfer} info={TXT.infoTransferMode}>
+              <div style={{ ...St.toggle, alignSelf: "flex-start" }} role="group" aria-label={TXT.subAccountTransfer}>
+                <button type="button" onClick={() => onUpdateSub({ transferMode: "amount" })} style={{ ...St.toggleBtn, ...(byAmount ? St.toggleOn : {}) }}>{TXT.subTransferModeAmount}</button>
+                <button type="button" onClick={() => onUpdateSub({ transferMode: "percent" })} style={{ ...St.toggleBtn, ...(!byAmount ? St.toggleOn : {}) }}>{TXT.subTransferModePercent}</button>
+              </div>
+            </PanelField>
+            {byAmount ? (
               <>
-                <div style={St.copyTitle}>{TXT.subAccountTransfer}</div>
-                <div style={{ ...St.toggle, margin: "6px 0 4px" }} role="group" aria-label={TXT.subAccountTransfer}>
-                  <button type="button" onClick={() => onChange({ transferMode: "amount" })} style={{ ...St.toggleBtn, ...(byAmount ? St.toggleOn : {}) }}>{TXT.subTransferModeAmount}</button>
-                  <button type="button" onClick={() => onChange({ transferMode: "percent" })} style={{ ...St.toggleBtn, ...(!byAmount ? St.toggleOn : {}) }}>{TXT.subTransferModePercent}</button>
+                <div style={St.drawerPair}>
+                  <PanelField label={TXT.subTransferAmount} info={TXT.infoTransferAmount}>
+                    <input inputMode="decimal" placeholder="0,00" style={St.drawerInput}
+                      value={(amountKey.current ? sub.transferAmounts?.[amountKey.current] : valueAt(sub.transferAmounts, sel)) ?? ""}
+                      onFocus={() => { amountKey.current = transferTargetKey(sub.transferAmounts, sel); }}
+                      onBlur={() => { amountKey.current = null; }}
+                      onChange={(e) => {
+                        const key = amountKey.current || transferTargetKey(sub.transferAmounts, sel);
+                        amountKey.current = key;
+                        onUpdateSub({ transferAmounts: setTransferAmountAt(sub.transferAmounts, key, decimal(e.target.value)) });
+                      }} />
+                  </PanelField>
+                  <PanelField label={TXT.subTransferDay} info={TXT.infoTransferDay} align="right">
+                    <input inputMode="numeric" placeholder="25" value={sub.transferDay ?? ""} style={St.drawerInput}
+                      onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2); onUpdateSub({ transferDay: v && Number(v) > 31 ? "31" : v }); }} />
+                  </PanelField>
                 </div>
-                <div style={St.correspondentDocMuted}>{byAmount ? TXT.subTransferAmountInfo : TXT.subAccountShareInfo}</div>
-                {byAmount ? (
-                  <>
-                    <label style={{ ...St.copyRow, marginTop: 8 }}>
-                      <span style={St.copyLbl}>{TXT.subTransferAmount}</span>
-                      <input inputMode="decimal" value={(amountKey.current ? sub.transferAmounts?.[amountKey.current] : valueAt(sub.transferAmounts, sel)) ?? ""} placeholder="0,00"
-                        onFocus={() => { markEditing(); amountKey.current = transferTargetKey(sub.transferAmounts, sel); }}
-                        onBlur={() => { amountKey.current = null; }}
-                        onChange={(e) => {
-                          const key = amountKey.current || transferTargetKey(sub.transferAmounts, sel);
-                          amountKey.current = key;
-                          onChange({ transferAmounts: setTransferAmountAt(sub.transferAmounts, key, e.target.value.replace(/[^0-9.,]/g, "")) });
-                        }} style={{ ...St.copySel, width: 80 }} />
-                    </label>
-                    <div style={St.correspondentDocMuted}>
-                      {amountHistory.length ? amountHistory.map(([k, v]) => t(LANG, k === FROM_START ? "transferFromStart" : "transferFromMonth", { amount: eur(num(v)), month: monthShortWithYear(k) })).join(" · ") : TXT.transferNoneYet}
-                      {amountHistory.length > 0 && <> · {t(LANG, "transferEditHint", { month: monthShortWithYear(sel) })}</>}
-                    </div>
-                    <label style={{ ...St.copyRow, marginTop: 8 }}>
-                      <span style={St.copyLbl}>{TXT.subTransferDay}</span>
-                      <input inputMode="numeric" value={sub.transferDay ?? ""} placeholder="25" onFocus={markEditing}
-                        onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2); onChange({ transferDay: v && Number(v) > 31 ? "31" : v }); }} style={{ ...St.copySel, width: 50 }} />
-                    </label>
-                  </>
-                ) : (
-                  <label style={{ ...St.copyRow, marginTop: 8 }}>
-                    <span style={St.copyLbl}>{TXT.subAccountShare}</span>
-                    <input inputMode="numeric" value={sub.sharePercent ?? "100"} placeholder="100" onFocus={markEditing}
-                      onChange={(e) => onChange({ sharePercent: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 60 }} />
-                  </label>
-                )}
-                {!byAmount && <div style={St.correspondentDocMuted}>{TXT.subAccountPreview} {eur(preview)} {TXT.perMonth}</div>}
-                <label style={{ ...St.copyRow, marginTop: 8 }}>
-                  <span style={St.copyLbl}>{TXT.subAccountInterestRate}</span>
-                  <input inputMode="decimal" value={sub.interestRate} placeholder="0" onFocus={markEditing}
-                    onChange={(e) => onChange({ interestRate: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 70 }} />
-                </label>
-                <div style={St.correspondentDocMuted}>{TXT.subAccountInterestRateInfo}</div>
+                <div style={{ ...St.drawerMuted, marginTop: 6 }}>
+                  {amountHistory.length ? amountHistory.map(([k, v]) => t(LANG, k === FROM_START ? "transferFromStart" : "transferFromMonth", { amount: eur(num(v)), month: monthShortWithYear(k) })).join(" · ") : TXT.transferNoneYet}
+                  {amountHistory.length > 0 && <> · {t(LANG, "transferEditHint", { month: monthShortWithYear(sel) })}</>}
+                </div>
               </>
+            ) : (
+              <PanelField label={TXT.subAccountShare} info={TXT.subAccountShareInfo}>
+                <input inputMode="decimal" placeholder="100" value={sub.sharePercent ?? "100"} onChange={(e) => onUpdateSub({ sharePercent: decimal(e.target.value) })} style={St.drawerInput} />
+                <span style={St.drawerMuted}>= {eur(subAccountContribution(sub, entryMonthly, sel))} {TXT.perMonth}</span>
+              </PanelField>
             )}
-          </IconPopoverField>
-          <IconPopoverField icon={CalendarClock} ariaLabel={TXT.checkpointBalance} active={hasCheckpoints}>
-            {(markEditing) => (
-              <>
-                <div style={St.copyTitle}>{TXT.checkpointBalance}</div>
-                <div style={St.correspondentDocMuted}>{TXT.checkpointInfo}</div>
-                <label style={{ ...St.copyRow, marginTop: 8 }}>
-                  <span style={St.copyLbl}>{TXT.checkpointBalance}</span>
-                  <input inputMode="decimal" value={checkpointValue} placeholder="0,00" onFocus={markEditing}
-                    onChange={(e) => {
-                      const v = e.target.value.replace(/[^0-9.,]/g, "");
-                      const next = { ...(sub.checkpoints || {}) };
-                      if (v) next[sel] = v; else delete next[sel];
-                      onChange({ checkpoints: next });
-                    }} style={{ ...St.copySel, width: 90 }} />
-                </label>
-              </>
+          </>
+        ))}
+
+        {section(TXT.panelBalance, (
+          <>
+            <div style={St.drawerPair}>
+              <PanelField label={t(LANG, "checkpointBalanceIn", { month: monthShortWithYear(sel) })} info={TXT.checkpointInfo}>
+                <input inputMode="decimal" value={checkpoints[sel] ?? ""} placeholder={expected != null ? String(round2(expected)).replace(".", ",") : "0,00"}
+                  onChange={(e) => setCheckpoint(decimal(e.target.value))} style={St.drawerInput} />
+              </PanelField>
+              <PanelField label={TXT.subAccountInterestRate} info={TXT.subAccountInterestRateInfo} align="right">
+                <input inputMode="decimal" placeholder="0" value={(isMain ? goal.mainInterestRate : sub.interestRate) || ""} style={St.drawerInput}
+                  onChange={(e) => (isMain ? onUpdateGoal({ mainInterestRate: decimal(e.target.value) }) : onUpdateSub({ interestRate: decimal(e.target.value) }))} />
+              </PanelField>
+            </div>
+            <div style={{ ...St.drawerMuted, marginTop: 6 }}>{expected != null ? t(LANG, "balanceExpected", { amount: eur(expected) }) : TXT.balanceNoExpectation}</div>
+            {isMain && (
+              <PanelField label={TXT.bufferAmount} info={TXT.bufferAmountInfo}>
+                <input inputMode="decimal" placeholder="0" value={goal.bufferAmount || ""} onChange={(e) => onUpdateGoal({ bufferAmount: decimal(e.target.value) })} style={St.drawerInput} />
+              </PanelField>
             )}
-          </IconPopoverField>
-          <IconPopoverField icon={Building2} ariaLabel={TXT.subAccountBankDetails} active={Boolean(sub.iban || sub.planId || sub.referenceId)}>
-            {(markEditing) => (
-              <>
-                <div style={St.copyTitle}>{TXT.subAccountBankDetails}</div>
-                {partners && (
-                  <label style={St.copyRow} title={TXT.subAccountOwnerInfo}>
-                    <span style={St.copyLbl}>{TXT.subAccountOwner}</span>
-                    <select value={sub.ownerId || ""} onFocus={markEditing} onChange={(e) => onChange({ ownerId: e.target.value })} style={St.copySel}>
-                      <option value="">{TXT.subAccountOwnerAuto}</option>
-                      {partners.map((p, i) => <option key={p.id} value={p.id}>{p.name || t(LANG, "personName", { n: i + 1 })}</option>)}
-                    </select>
-                  </label>
-                )}
-                <label style={St.copyRow}>
-                  <span style={St.copyLbl}>{TXT.subAccountIban}</span>
-                  <input value={sub.iban} placeholder={TXT.subAccountIbanPlaceholder} onFocus={markEditing}
-                    onChange={(e) => onChange({ iban: e.target.value })} style={St.copySel} />
-                </label>
-                <label style={St.copyRow}>
-                  <span style={St.copyLbl}>{TXT.subAccountPlanId}</span>
-                  <input value={sub.planId} placeholder={TXT.subAccountPlanIdPlaceholder} onFocus={markEditing}
-                    onChange={(e) => onChange({ planId: e.target.value })} style={St.copySel} />
-                </label>
-                <label style={St.copyRow}>
-                  <span style={St.copyLbl}>{TXT.subAccountReference}</span>
-                  <input value={sub.referenceId} placeholder={TXT.subAccountReferencePlaceholder} onFocus={markEditing}
-                    onChange={(e) => onChange({ referenceId: e.target.value })} style={St.copySel} />
-                </label>
-              </>
-            )}
-          </IconPopoverField>
-          <button type="button" aria-label={TXT.delete} onClick={onRemove} style={St.iconBtn}><Trash2 size={16} /></button>
-        </EntryActions>
-      </div>
-      <div style={St.subSummary}>{summary}</div>
-    </div>
+          </>
+        ))}
+
+        {!isMain && section(TXT.subAccountBankDetails, (
+          <>
+            <PanelField label={TXT.subAccountIban} info={TXT.infoIban}>
+              <span style={St.panelInputRow}>
+                <input value={sub.iban} placeholder={TXT.subAccountIbanPlaceholder} onChange={(e) => onUpdateSub({ iban: e.target.value })} style={St.drawerInput} />
+                <CopyButton value={sub.iban} />
+              </span>
+            </PanelField>
+            <PanelField label={TXT.subAccountReference} info={TXT.infoReference}>
+              <span style={St.panelInputRow}>
+                <input value={sub.referenceId} placeholder={TXT.subAccountReferencePlaceholder} onChange={(e) => onUpdateSub({ referenceId: e.target.value })} style={St.drawerInput} />
+                <CopyButton value={sub.referenceId} />
+              </span>
+            </PanelField>
+            <PanelField label={TXT.subAccountPlanId} info={TXT.infoPlanId}>
+              <span style={St.panelInputRow}>
+                <input value={sub.planId} placeholder={TXT.subAccountPlanIdPlaceholder} onChange={(e) => onUpdateSub({ planId: e.target.value })} style={St.drawerInput} />
+                <CopyButton value={sub.planId} />
+              </span>
+            </PanelField>
+          </>
+        ))}
+
+        {!isMain && (
+          <button type="button" onClick={() => { if (window.confirm(t(LANG, "confirmRemoveAccount", { name: title }))) onRemoveSub(); }} style={St.drawerDelete}>
+            <Trash2 size={15} /> {TXT.removeAccount}
+          </button>
+        )}
+      </aside>
+    </>
   );
 }
 
@@ -3479,6 +3528,9 @@ const St = {
   subRow: { marginBottom: 12 },
   subSummary: { fontSize: 12.5, color: C.muted, marginTop: 4, paddingLeft: 2, fontVariantNumeric: "tabular-nums" },
   mainAccountHead: { display: "flex", alignItems: "center", gap: 10 },
+  accountRowHead: { display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" },
+  panelFieldLabel: { display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600, color: C.muted },
+  panelInputRow: { display: "flex", alignItems: "center", gap: 4 },
   mainAccountFields: { display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10 },
   accountPots: { color: C.muted, fontSize: 12 },
   balanceRow: { display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${C.line}` },
