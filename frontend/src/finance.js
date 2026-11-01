@@ -578,3 +578,51 @@ export function personalTotals(fig, calc, personId) {
   const savTotal = sumM(listAt(fig, "personalSavings", personId), fig);
   return { income, transfer, leftover, expTotal, savTotal, free: leftover - expTotal - savTotal };
 }
+
+// ── Planned transfers ──
+// Every transfer that follows from the figures for month `sel`, in the
+// order money flows: each person → the joint account (their share of the
+// split), the joint account (or a person, for their own pots) → each
+// savings pot's account, and a forwarded pot's account → each sub-account
+// (with day, IBAN and description to put on the standing order). Deposits
+// show up once: as a one-off transfer in their start month and as a
+// "comes back" notice in their end month.
+// Accounts are plain descriptors ({ type: "person" | "joint" | "pot" | "sub", … });
+// naming them is left to the UI.
+export function plannedTransfers(months, sel, goals) {
+  const fig = figuresFor(months, sel);
+  const calc = computeTotals(fig);
+  const out = [];
+  const goalOf = (id) => (goals || []).find((g) => g.entryId === id);
+  for (const p of fig.partners) {
+    const amount = calc.transfers[p.id] || 0;
+    if (amount > 0.005) out.push({ type: "contribution", from: { type: "person", personId: p.id }, to: { type: "joint" }, amount });
+  }
+  for (const { e, personId } of allSavingsOf(fig)) {
+    const amount = monthlyOf(e, fig);
+    const goal = goalOf(e.id);
+    const pot = { type: "pot", entryId: e.id, label: e.label || "", bank: goal?.mainBank || "" };
+    if (amount > 0.005) out.push({ type: "savings", from: personId ? { type: "person", personId } : { type: "joint" }, to: pot, amount, entryId: e.id, personId });
+    if (!goal?.forwarded) continue;
+    for (const sub of goal.subAccounts || []) {
+      const to = { type: "sub", sub };
+      const details = { iban: sub.iban || "", reference: sub.referenceId || "", planId: sub.planId || "", entryId: e.id, personId };
+      if (isDeposit(sub)) {
+        if (sub.termStart === sel && num(sub.depositAmount) > 0) out.push({ type: "depositStart", from: pot, to, amount: num(sub.depositAmount), ...details });
+        const end = depositEnd(sub);
+        if (end === sel) out.push({ type: "depositEnd", from: to, to: pot, amount: balanceAt(months, e.id, sub, end)?.balance ?? num(sub.depositAmount), ...details });
+        continue;
+      }
+      const c = subAccountContribution(sub, amount, sel);
+      if (c > 0.005) out.push({ type: "forward", from: pot, to, amount: c, day: sub.transferMode === "amount" ? (sub.transferDay || "") : "", ...details });
+    }
+  }
+  return out;
+}
+// The most recent month (at or before `sel`) an account has a recorded
+// balance for — a deposit's start counts — or null: tells a balance you
+// entered apart from a projected one.
+export function lastRecorded(account, sel) {
+  const keys = Object.keys(accountCheckpoints(account)).filter((k) => k <= sel && accountCheckpoints(account)[k] !== "");
+  return keys.sort().pop() || null;
+}

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   computeTotals, normalize, migrateFig, monthlyContributionAt, projectSubAccountSeries,
   subAccountContribution, valueAt, transferTargetKey, setTransferAmountAt, FROM_START,
-  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd, isMonthKey,
+  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd, isMonthKey, plannedTransfers, lastRecorded,
 } from "./finance.js";
 
 const fig = (over = {}) => migrateFig({
@@ -160,4 +160,36 @@ test("half-typed months never reach date math", () => {
   assert.deepEqual(balanceAt({ "2026-11": fig() }, "s1", dep, "2026-11"), null);
   const g = migrateGoal({ entryId: "s1", subAccounts: [{ id: "d", kind: "deposit", termStart: "2025-", checkpoints: {} }] });
   assert.equal(g.subAccounts[0].termStart, "");
+});
+
+test("planned transfers follow the money: people → joint → pot → sub-accounts", () => {
+  const months = { "2026-11": fig({ personalSavings: { a: [{ id: "ps", label: "Pensioen", amount: "150" }] } }) };
+  const subs = [
+    raisin("r1", "Coen", { [FROM_START]: "200" }, { transferDay: "25", iban: "DE17", referenceId: "PLAN1" }),
+    { id: "d", kind: "deposit", depositAmount: "5000", termStart: "2026-11", termMonths: "12", interestRate: "3", checkpoints: {} },
+  ];
+  const goals = [{ entryId: "s1", forwarded: true, mainBank: "KNAB", checkpoints: {}, subAccounts: subs }];
+  const list = plannedTransfers(months, "2026-11", goals);
+  const of = (type) => list.filter((x) => x.type === type);
+  assert.equal(of("contribution").length, 2);
+  close(of("contribution")[0].amount, 960);
+  const sav = of("savings");
+  assert.equal(sav.length, 2);
+  assert.equal(sav[0].from.type, "joint"); assert.equal(sav[0].to.bank, "KNAB"); close(sav[0].amount, 600);
+  assert.equal(sav[1].from.type, "person"); assert.equal(sav[1].from.personId, "a"); close(sav[1].amount, 150);
+  const fwd = of("forward");
+  assert.equal(fwd.length, 1);
+  close(fwd[0].amount, 200); assert.equal(fwd[0].day, "25"); assert.equal(fwd[0].reference, "PLAN1"); assert.equal(fwd[0].iban, "DE17");
+  assert.equal(of("depositStart").length, 1); close(of("depositStart")[0].amount, 5000);
+  assert.equal(of("depositEnd").length, 0);
+  const atEnd = plannedTransfers(months, "2027-11", goals).filter((x) => x.type === "depositEnd");
+  assert.equal(atEnd.length, 1); close(atEnd[0].amount, 5150);
+});
+
+test("lastRecorded tells entered balances from projected ones", () => {
+  const acc = { checkpoints: { "2026-09": "100", "2026-12": "300" } };
+  assert.equal(lastRecorded(acc, "2026-11"), "2026-09");
+  assert.equal(lastRecorded(acc, "2026-12"), "2026-12");
+  assert.equal(lastRecorded(acc, "2026-08"), null);
+  assert.equal(lastRecorded({ kind: "deposit", termStart: "2026-10", depositAmount: "5", checkpoints: {} }, "2026-11"), "2026-10");
 });
