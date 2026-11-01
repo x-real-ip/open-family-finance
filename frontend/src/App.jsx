@@ -40,7 +40,7 @@ import {
   allSavingsOf, flip, pctOf, uid, clone, monthKey, keyToDate, shiftMonth,
   figuresFor, computeTotals, migrateFig, SORT_MODES, DEFAULT_LIST_SORT, listSortOf, migrateCheckpoints, migrateSubAccount,
   migrateGoal, freshData, normalize, monthlyContributionAt, subAccountContribution, projectSubAccountSeries,
-  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey, plannedTransfers, lastRecorded, migrateTransferAccount,
+  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey, plannedTransfers, lastRecorded, migrateTransferAccount, contributionRoute,
 } from "./finance";
 
 /* ----------------------------------------------------------------
@@ -3270,6 +3270,13 @@ function AccountPanel({ entry, goal, sub, months, currentMonthData, sel, partner
           <>
             <div style={St.drawerMuted}>{t(LANG, "mainAccountFlow", { incoming: eur(entryMonthly), forwarded: eur(entryMonthly - remainder), remainder: eur(remainder) })}</div>
             {remainder < -0.005 && <div style={{ ...St.drawerMuted, color: C.exp, marginTop: 4 }}>{t(LANG, "mainAccountShrinks", { amount: eur(-remainder) })}</div>}
+            <PanelField label={TXT.routeLabel} info={TXT.routeInfo}>
+              <select value={goal.route || "auto"} onChange={(e) => onUpdateGoal({ route: e.target.value })} style={St.drawerInput}>
+                <option value="auto">{t(LANG, "routeAuto", { route: contributionRoute({ ...goal, route: "auto" }, entryMonthly, sel) === "direct" ? TXT.routeDirectShort : t(LANG, "routeViaShort", { bank: title }) })}</option>
+                <option value="via">{t(LANG, "routeVia", { bank: title })}</option>
+                <option value="direct">{TXT.routeDirect}</option>
+              </select>
+            </PanelField>
           </>
         ) : (
           <>

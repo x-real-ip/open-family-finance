@@ -393,6 +393,10 @@ export function migrateGoal(g) {
     // The joint account's own interest rate and the buffer you want to keep
     // on it — together they drive the "move more to the better rate" tip.
     mainInterestRate: g.mainInterestRate ?? "", bufferAmount: g.bufferAmount ?? "",
+    // How the monthly contribution reaches the sub-accounts: "via" the main
+    // account first, "direct" from whoever pays, or "auto" — direct when the
+    // main account keeps none of it (see contributionRoute).
+    route: g.route === "via" || g.route === "direct" ? g.route : "auto",
     forwarded: g.forwarded ?? Boolean(rawSubAccounts.length),
     // The goal's own account — once forwarded, this is specifically the
     // main/shared account, tracked alongside (not combined into) each
@@ -591,6 +595,16 @@ export function personalTotals(fig, calc, personId) {
   return { income, transfer, leftover, expTotal, savTotal, free: leftover - expTotal - savTotal };
 }
 
+// Whether a forwarded pot's monthly contribution goes straight from the
+// payer to the sub-accounts ("direct") or lands on the main account first
+// ("via"). "auto": direct when the main account keeps nothing of it — e.g.
+// 100% to Raisin while the old SNS account only holds an earlier balance.
+export function contributionRoute(goal, monthly, sel) {
+  if (goal.route === "via" || goal.route === "direct") return goal.route;
+  const forwarded = (goal.subAccounts || []).reduce((sum, s) => sum + subAccountContribution(s, monthly, sel), 0);
+  return monthly - forwarded > 0.005 ? "via" : "direct";
+}
+
 // ── Planned transfers ──
 // Every transfer that follows from the figures for month `sel`, in the
 // order money flows: each person → the joint account (their share of the
@@ -636,8 +650,16 @@ export function plannedTransfers(months, sel, goals, transferAccounts = []) {
     const amount = monthlyOf(e, fig);
     const goal = goalOf(e.id);
     const pot = { type: "pot", entryId: e.id, label: e.label || "", bank: goal?.mainBank || "" };
-    if (amount > 0.005) out.push({ type: "savings", from: personId ? { type: "person", personId } : { type: "joint" }, to: pot, amount, entryId: e.id, personId });
-    if (!goal?.forwarded) continue;
+    const payer = personId ? { type: "person", personId } : { type: "joint" };
+    if (!goal?.forwarded) {
+      if (amount > 0.005) out.push({ type: "savings", from: payer, to: pot, amount, entryId: e.id, personId });
+      continue;
+    }
+    const direct = contributionRoute(goal, amount, sel) === "direct";
+    const forwardedTotal = (goal.subAccounts || []).reduce((sum, s) => sum + subAccountContribution(s, amount, sel), 0);
+    // Direct: the payer only sends the main account what stays there.
+    const toMain = direct ? amount - forwardedTotal : amount;
+    if (toMain > 0.005) out.push({ type: "savings", from: payer, to: pot, amount: toMain, entryId: e.id, personId });
     for (const sub of goal.subAccounts || []) {
       const to = { type: "sub", sub };
       const details = { iban: sub.iban || "", reference: sub.referenceId || "", planId: sub.planId || "", entryId: e.id, personId };
@@ -648,7 +670,7 @@ export function plannedTransfers(months, sel, goals, transferAccounts = []) {
         continue;
       }
       const c = subAccountContribution(sub, amount, sel);
-      if (c > 0.005) out.push({ type: "forward", from: pot, to, amount: c, day: sub.transferMode === "amount" ? (sub.transferDay || "") : "", ...details });
+      if (c > 0.005) out.push({ type: "forward", from: direct ? payer : pot, to, amount: c, day: sub.transferMode === "amount" ? (sub.transferDay || "") : "", ...details });
     }
   }
   return out;

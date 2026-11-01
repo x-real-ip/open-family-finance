@@ -430,5 +430,12 @@ export default {
     addTransferAccount: "Add account",
     confirmRemoveTransferAccount: "Remove account \"{name}\"? Fixed costs linked to it will no longer be transferred separately.",
     transferPurposeFixedCosts: "Fixed costs: {items}",
+    routeLabel: "Contribution route",
+    routeInfo: "How the monthly contribution reaches the sub-accounts. Via this account: the money arrives here first and is passed on afterwards (like KNAB → Raisin). Direct: you transfer straight from your own or the joint account to the sub-accounts; only what stays here is sent here. Automatic picks direct when none of the contribution stays on this account. This only affects what the transfers page shows.",
+    routeAuto: "Automatic (now: {route})",
+    routeVia: "Via {bank}",
+    routeViaShort: "via {bank}",
+    routeDirect: "Directly to the sub-accounts",
+    routeDirectShort: "direct",
   },
 };

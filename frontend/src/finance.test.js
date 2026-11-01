@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   computeTotals, normalize, migrateFig, monthlyContributionAt, projectSubAccountSeries,
   subAccountContribution, valueAt, transferTargetKey, setTransferAmountAt, FROM_START,
-  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd, isMonthKey, plannedTransfers, lastRecorded,
+  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd, isMonthKey, plannedTransfers, lastRecorded, contributionRoute,
 } from "./finance.js";
 
 const fig = (over = {}) => migrateFig({
@@ -217,4 +217,24 @@ test("normalize keeps transfer accounts, the joint account name and an entry's t
   assert.equal(data.jointAccountName, "KNAB Inkomen");
   assert.equal(data.transferAccounts[0].name, "KNAB Vaste lasten");
   assert.equal(data.months["2026-11"].expenses[0].transferAccountId, "vl");
+});
+
+test("contribution route: straight to the sub-accounts when the main account keeps nothing", () => {
+  const months = { "2026-11": fig({ personalSavings: { a: [{ id: "vs", label: "Vrij spaargeld", amount: "300" }] } }) };
+  const all = { entryId: "vs", forwarded: true, mainBank: "SNS Sparen", checkpoints: { "2026-11": "500" },
+    subAccounts: [{ id: "d", bank: "Distingo Bank", transferMode: "percent", sharePercent: "100", checkpoints: {} }] };
+  assert.equal(contributionRoute(all, 300, "2026-11"), "direct");
+  let list = plannedTransfers(months, "2026-11", [all]).filter((x) => x.entryId === "vs");
+  assert.equal(list.length, 1);
+  assert.equal(list[0].type, "forward"); assert.equal(list[0].from.type, "person"); assert.equal(list[0].from.personId, "a"); close(list[0].amount, 300);
+
+  // forced via the main account: payer → SNS (all of it), SNS → Distingo
+  list = plannedTransfers(months, "2026-11", [{ ...all, route: "via" }]).filter((x) => x.entryId === "vs");
+  assert.deepEqual(list.map((x) => [x.type, x.from.type]), [["savings", "person"], ["forward", "pot"]]);
+
+  // part stays behind → auto goes via; forced direct sends only the rest to the main account
+  const half = { ...all, subAccounts: [{ ...all.subAccounts[0], sharePercent: "50" }] };
+  assert.equal(contributionRoute(half, 300, "2026-11"), "via");
+  list = plannedTransfers(months, "2026-11", [{ ...half, route: "direct" }]).filter((x) => x.entryId === "vs");
+  assert.deepEqual(list.map((x) => [x.type, x.from.type, Math.round(x.amount)]), [["savings", "person", 150], ["forward", "person", 150]]);
 });

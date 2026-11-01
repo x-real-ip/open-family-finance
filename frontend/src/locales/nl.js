@@ -430,5 +430,12 @@ export default {
     addTransferAccount: "Rekening toevoegen",
     confirmRemoveTransferAccount: "Rekening \"{name}\" verwijderen? Vaste lasten die eraan gekoppeld zijn, worden dan niet meer apart overgeboekt.",
     transferPurposeFixedCosts: "Vaste lasten: {items}",
+    routeLabel: "Route van de inleg",
+    routeInfo: "Hoe de maandelijkse inleg bij de subrekeningen komt. Via deze rekening: het geld komt eerst hier binnen en wordt daarna doorgeboekt (zoals KNAB → Raisin). Rechtstreeks: je boekt direct van je eigen of de gezamenlijke rekening naar de subrekeningen; alleen wat hier blijft staan, maak je hierheen over. Automatisch kiest rechtstreeks als er van de inleg niets op deze rekening blijft staan. Dit bepaalt alleen wat de pagina Overboekingen toont.",
+    routeAuto: "Automatisch (nu: {route})",
+    routeVia: "Via {bank}",
+    routeViaShort: "via {bank}",
+    routeDirect: "Rechtstreeks naar de subrekeningen",
+    routeDirectShort: "rechtstreeks",
   },
 };
