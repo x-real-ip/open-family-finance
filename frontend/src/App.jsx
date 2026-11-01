@@ -2803,8 +2803,8 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
         <span style={{ flex: 1 }} />
         {/* Read-only here on purpose — this is the same monthly entry shown
             in the monthly view, and it should only be editable there. */}
-        <span style={St.savingsGoalAmount} title={TXT.savingsGoalAmountInfo}>{eur(entryDisplayAmount)} {entryPeriodSuffix}</span>
         {forwarded && <span style={St.goalForwardedTag}>{t(LANG, "goalAccountsCount", { count: subAccounts.length + 1 })}</span>}
+        <span style={St.savingsGoalAmount} title={TXT.savingsGoalAmountInfo}>{eur(entryDisplayAmount)} {entryPeriodSuffix}</span>
         <ChevronDown size={18} style={{ color: C.muted, transform: open ? "rotate(180deg)" : "none", transition: "transform .2s", flexShrink: 0 }} />
       </div>
 
@@ -3756,7 +3756,7 @@ const St = {
   savingsGoalAmount: { fontSize: 15, fontWeight: 600, color: C.ink, fontVariantNumeric: "tabular-nums", padding: "8px 4px", cursor: "default" },
   goalForwardedToggle: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: C.ink, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" },
   goalForwardedRow: { display: "flex", alignItems: "center", gap: 6, marginTop: 10 },
-  goalForwardedTag: { fontSize: 12, color: C.muted, fontWeight: 600, marginLeft: 12, whiteSpace: "nowrap" },
+  goalForwardedTag: { fontSize: 12, color: C.muted, fontWeight: 600, marginRight: 14, whiteSpace: "nowrap" },
   addRow: { display: "flex", gap: 8, flexWrap: "wrap" },
   savingsTableWrap: { overflowX: "auto", marginTop: 14 },
   savingsTable: { width: "100%", borderCollapse: "collapse", fontSize: 13, whiteSpace: "nowrap" },
