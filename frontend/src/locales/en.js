@@ -417,7 +417,7 @@ export default {
     transferNone: "No separate transfer",
     transferNewAccount: "+ New account…",
     newTransferAccountPrompt: "Name of the account (e.g. KNAB Fixed costs):",
-    transferAccountPickerHint: "IBAN and transfer day are set on the transfers page.",
+    transferAccountPickerHint: "IBAN and transfer day are set on the transfers page. A choice here applies to this month and every month after it.",
     transferAccountsTitle: "Accounts",
     jointAccountNameLabel: "Joint account name",
     jointAccountNameInfo: "What you call the account everyone's contribution arrives on, e.g. KNAB Income. This name is used in the transfers above.",

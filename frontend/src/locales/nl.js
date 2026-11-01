@@ -417,7 +417,7 @@ export default {
     transferNone: "Niet apart overboeken",
     transferNewAccount: "+ Nieuwe rekening…",
     newTransferAccountPrompt: "Naam van de rekening (bijv. KNAB Vaste lasten):",
-    transferAccountPickerHint: "IBAN en dag van de overboeking stel je in op de pagina Overboekingen.",
+    transferAccountPickerHint: "IBAN en dag van de overboeking stel je in op de pagina Overboekingen. Een keuze hier geldt voor deze maand en alle maanden erna.",
     transferAccountsTitle: "Rekeningen",
     jointAccountNameLabel: "Naam gezamenlijke rekening",
     jointAccountNameInfo: "Hoe jullie de rekening noemen waar ieders inleg binnenkomt, bijvoorbeeld KNAB Inkomen. Deze naam staat op de overboekingen hierboven.",

@@ -846,6 +846,20 @@ export default function App() {
   // Not cloned: patch is always a fresh object from the caller, and JSON-cloning would
   // silently drop keys explicitly set to `undefined` (e.g. clearing a formula), since
   // JSON.stringify omits undefined values instead of preserving them.
+  // Settings of an entry rather than its monthly value (which account it's
+  // transferred from) apply to the selected month and every later month
+  // that has the entry — also months where its amount was changed by hand,
+  // which the override rule of editForward would otherwise skip.
+  const setEntrySettingForward = (kind, id, patch, personId = null) => setData((d) => {
+    const months = { ...d.months };
+    for (const k of Object.keys(months)) {
+      if (k < d.selectedMonth) continue;
+      const list = listAt(months[k], kind, personId);
+      if (!list.some((x) => x.id === id)) continue;
+      months[k] = withList(months[k], kind, personId, list.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+    }
+    return { ...d, months };
+  });
   const setListItem = (k, id, patch) => editForward((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, ...patch } : x) }), id);
   const toggleItemPeriod = (k, id) => editForward((f) => ({ ...f, [k]: f[k].map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x) }), id);
   const addListItem = (kind, item) => editForward((f) => (
@@ -1188,8 +1202,8 @@ export default function App() {
             {section(TXT.duration, <DurationEditor entry={e} onChange={(patch) => ops.set(e.id, patch)} />)}
             {hasCategory(kind) && section(<>{TXT.transferToAccount} <InfoDot text={TXT.transferToAccountInfo} /></>, (
               <TransferAccountPicker value={e.transferAccountId || ""} accounts={data.transferAccounts || []}
-                onChange={(id) => ops.set(e.id, { transferAccountId: id })}
-                onCreate={() => { const name = window.prompt(TXT.newTransferAccountPrompt); if (name && name.trim()) ops.set(e.id, { transferAccountId: addTransferAccount(name.trim()) }); }} />
+                onChange={(id) => setEntrySettingForward(kind, e.id, { transferAccountId: id }, personId)}
+                onCreate={() => { const name = window.prompt(TXT.newTransferAccountPrompt); if (name && name.trim()) setEntrySettingForward(kind, e.id, { transferAccountId: addTransferAccount(name.trim()) }, personId); }} />
             ))}
             {section(TXT.note, <NoteEditor value={e.note || ""} onChange={(v) => ops.set(e.id, { note: v })} />)}
             {section(TXT.link, <LinkEditor value={e.url || ""} onChange={(v) => ops.set(e.id, { url: v })} />)}
