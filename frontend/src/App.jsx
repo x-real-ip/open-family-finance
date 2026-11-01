@@ -102,6 +102,10 @@ const DEFAULT_FIGURES = {
   // from the shared `expenses` list so one person filling theirs in doesn't
   // affect anyone else's or the joint total.
   personalExpenses: {},
+  // Each person's own savings pots, keyed by person id — same shape and
+  // reasoning as personalExpenses: paid from their own leftover, never part
+  // of the joint pot or the split.
+  personalSavings: {},
   overrides: {},
 };
 
@@ -128,6 +132,12 @@ const findEntryById = (monthData, id) => {
   for (const kind of entryKinds) {
     const item = (monthData[kind] || []).find((x) => x.id === id);
     if (item) return item;
+  }
+  for (const kind of PERSONAL_KINDS) {
+    for (const list of Object.values(monthData[kind] || {})) {
+      const item = list.find((x) => x.id === id);
+      if (item) return item;
+    }
   }
   return null;
 };
@@ -158,6 +168,21 @@ const entryAmount = (entry, monthData) => {
   return formulaAmount != null ? formulaAmount : num(entry.amount);
 };
 const sumM = (arr, monthData) => arr.reduce((s, x) => s + monthlyOf(x, monthData), 0);
+// The per-person lists (keyed by person id, one level deeper than the flat
+// joint lists). Anything addressing an entry by (kind, personId) goes
+// through listAt/withList so both behave the same everywhere.
+const PERSONAL_KINDS = ["personalExpenses", "personalSavings"];
+const listAt = (fig, kind, personId) => (personId ? (fig?.[kind]?.[personId] || []) : ((fig && fig[kind]) || []));
+const withList = (fig, kind, personId, list) => (personId
+  ? { ...fig, [kind]: { ...(fig[kind] || {}), [personId]: list } }
+  : { ...fig, [kind]: list });
+// Every savings entry of a month, joint and personal, with who it belongs to
+// (personId null = joint). The savings overview and its projections work
+// from this, so a personal pot behaves exactly like a joint one there.
+const allSavingsOf = (fig) => [
+  ...(fig?.savings || []).map((e) => ({ e, personId: null })),
+  ...Object.entries(fig?.personalSavings || {}).flatMap(([personId, list]) => list.map((e) => ({ e, personId }))),
+];
 const flip = (amountStr, fromPeriod) => String(round2(fromPeriod === "year" ? num(amountStr) / 12 : num(amountStr) * 12));
 const pctOf = (part, whole) => (whole > 0 ? part / whole : null);
 
@@ -388,6 +413,15 @@ function buildCashflow(cur, calc, detail) {
         addNode(catKey, cat, categoryColor(cat));
         addLink(leftoverKey, catKey, amount);
       }
+      for (const s of cur.personalSavings?.[p.id] || []) {
+        const amount = monthlyOf(s, cur);
+        if (!(amount > 0)) continue;
+        personalSum += amount;
+        const label = s.label || TXT.unnamed;
+        const saveKey = `personal-save-${p.id}-${s.id}`;
+        addNode(saveKey, `${label} (${TXT.savingsShort})`, C.save);
+        addLink(leftoverKey, saveKey, amount);
+      }
       const unallocated = Math.max(0, leftover - personalSum);
       if (unallocated > 0) {
         const unallocatedKey = `unallocated-${p.id}`;
@@ -487,6 +521,9 @@ function migrateFig(f) {
     });
   }
 
+  const personalSavings = {};
+  for (const p of partners) personalSavings[p.id] = ((f.personalSavings && f.personalSavings[p.id]) || []).map(migrateEntry);
+
   return {
     method: f.method || "income", margePct: f.margePct ?? "0.5",
     customPct, partners,
@@ -495,14 +532,15 @@ function migrateFig(f) {
     savings: f.savings ? f.savings.map((s) => ({ id: s.id || uid(), label: s.label || "", amount: s.amount ?? "", period: per(s.period), note: s.note || "", url: s.url || "", correspondent: s.correspondent || "", documentMode: s.documentMode || "auto", documentLabel: s.documentLabel || null, documentId: s.documentId ?? null, startDate: s.startDate || "", endDate: s.endDate || "", warningDays: s.warningDays || "", formula: s.formula || undefined }))
       : (f.jointSavings != null ? [{ id: uid(), label: "Sparen", amount: f.jointSavings, period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" }] : []),
     personalExpenses,
+    personalSavings,
     overrides: (f.overrides && typeof f.overrides === "object") ? { ...f.overrides } : {},
   };
 }
 // "manual" = the stored entry order (drag handles reorder it); the other modes derive an order on the fly.
 // Everyone's personal expenses share one sort-mode preference (personalExpenses),
 // rather than one per person — a deliberate simplification.
-const SORT_MODES = { govIncome: ["manual", "name"], expenses: ["manual", "category", "name"], savings: ["manual", "name"], personalExpenses: ["manual", "category", "name"] };
-const DEFAULT_LIST_SORT = { govIncome: "manual", expenses: "manual", savings: "manual", personalExpenses: "manual" };
+const SORT_MODES = { govIncome: ["manual", "name"], expenses: ["manual", "category", "name"], savings: ["manual", "name"], personalExpenses: ["manual", "category", "name"], personalSavings: ["manual", "name"] };
+const DEFAULT_LIST_SORT = { govIncome: "manual", expenses: "manual", savings: "manual", personalExpenses: "manual", personalSavings: "manual" };
 function listSortOf(raw) {
   const out = { ...DEFAULT_LIST_SORT };
   for (const kind of Object.keys(DEFAULT_LIST_SORT)) {
@@ -531,6 +569,12 @@ function migrateSubAccount(s) {
     id: s.id || uid(), holder: s.holder || "", bank: s.bank || "", iban: s.iban || "",
     planId: s.planId || "", referenceId: s.referenceId || "",
     sharePercent: s.sharePercent ?? "100", interestRate: s.interestRate ?? "",
+    // How this account is fed from the goal's monthly contribution: a share
+    // of it ("percent", the original behaviour) or a fixed standing transfer
+    // ("amount", e.g. €150 on the 25th from the joint account to Raisin).
+    // transferDay is informational only — projections work per month.
+    transferMode: s.transferMode === "amount" ? "amount" : "percent",
+    transferAmount: s.transferAmount ?? "", transferDay: s.transferDay ?? "",
     // Each sub-account's own recorded balance, independent of the others and
     // of the goal's main-account balance — the combined total is the sum of
     // all of them, not a proportional split of one shared number.
@@ -580,7 +624,7 @@ function migrateGoal(g) {
   }
 
   return {
-    entryId, targetAmount: g.targetAmount ?? "",
+    entryId, targetAmount: g.targetAmount ?? "", mainBank: g.mainBank ?? "",
     forwarded: g.forwarded ?? Boolean(rawSubAccounts.length),
     // The goal's own account — once forwarded, this is specifically the
     // main/shared account, tracked alongside (not combined into) each
@@ -608,7 +652,7 @@ function normalize(raw) {
 // propagation would eventually produce once the user navigates there).
 function monthlyContributionAt(months, entryId, key) {
   if (!entryId) return 0;
-  const findIn = (fig) => fig?.savings?.find((x) => x.id === entryId);
+  const findIn = (fig) => fig && allSavingsOf(fig).find((x) => x.e.id === entryId)?.e;
   if (months[key]) { const e = findIn(months[key]); return e ? monthlyOf(e, months[key]) : 0; }
   const sorted = Object.keys(months).sort();
   const earlier = sorted.filter((k) => k < key);
@@ -620,6 +664,17 @@ function monthlyContributionAt(months, entryId, key) {
   if (!refKey) return 0;
   const e = findIn(months[refKey]);
   return e ? monthlyOf(e, months[refKey]) : 0;
+}
+// What one account receives per month out of the goal's monthly
+// contribution. Sub-accounts take either a % share or a fixed standing
+// transfer; the goal's main account (the joint account the money arrives
+// on first) keeps whatever the sub-accounts don't take — negative when more
+// is transferred on than comes in, so its projected balance shrinks.
+function subAccountContribution(sub, monthly) {
+  if (sub.isMain) return monthly - (sub.siblings || []).reduce((sum, s) => sum + subAccountContribution(s, monthly), 0);
+  if (sub.transferMode === "amount") return num(sub.transferAmount);
+  const share = sub.sharePercent === "" || sub.sharePercent == null ? 1 : num(sub.sharePercent) / 100;
+  return monthly * share;
 }
 // Projects a sub-account's balance across `keys` (sorted, ascending month
 // keys), starting from its earliest recorded checkpoint. Never recomputes a
@@ -644,7 +699,6 @@ function projectSubAccountSeries(months, entryId, subAccount, keys, target) {
   // (e.g. different banks) by percentage, rather than each needing its own
   // dedicated savings entry — all sub-accounts under one goal share the same
   // (goal-level) entryId.
-  const share = subAccount.sharePercent === "" || subAccount.sharePercent == null ? 1 : num(subAccount.sharePercent) / 100;
   const monthlyRate = subAccount.interestRate ? num(subAccount.interestRate) / 100 / 12 : 0;
   const firstCheckpoint = checkpointKeys[0];
   let principal = num(checkpoints[firstCheckpoint]);
@@ -665,7 +719,7 @@ function projectSubAccountSeries(months, entryId, subAccount, keys, target) {
         capped = target != null && principal >= target;
       } else if (!capped) {
         interest += (principal + interest) * monthlyRate;
-        principal += monthlyContributionAt(months, entryId, k) * share;
+        principal = Math.max(0, principal + subAccountContribution(subAccount, monthlyContributionAt(months, entryId, k)));
         if (target != null && principal + interest >= target) capped = true;
       }
     }
@@ -900,19 +954,16 @@ export default function App() {
   // forward-propagate like value edits do, since order isn't a per-entry field.
   const [dragItem, setDragItem] = useState(null);
   // `personId` scopes reordering/dragging to one person's personal-expense
-  // list (kind === "personalExpenses"); null for every other (flat) list.
+  // list (kind in PERSONAL_KINDS); null for every other (flat) list.
   const reorderListItem = (kind, dragId, dropId, personId = null) => setData((d) => {
     const s = d.selectedMonth;
-    const list = personId ? (d.months[s].personalExpenses[personId] || []) : d.months[s][kind];
+    const list = listAt(d.months[s], kind, personId);
     const from = list.findIndex((x) => x.id === dragId), to = list.findIndex((x) => x.id === dropId);
     if (from === -1 || to === -1 || from === to) return d;
     const next = list.slice();
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
-    const fig = personId
-      ? { ...d.months[s], personalExpenses: { ...d.months[s].personalExpenses, [personId]: next } }
-      : { ...d.months[s], [kind]: next };
-    return { ...d, months: { ...d.months, [s]: fig } };
+    return { ...d, months: { ...d.months, [s]: withList(d.months[s], kind, personId, next) } };
   });
   const dragHandleProps = (kind, id, personId = null) => ({
     draggable: true,
@@ -978,9 +1029,8 @@ export default function App() {
     return () => { active = false; };
   }, []);
 
-  // `personId` scopes lookup to one person's personal-expense list
-  // (kind === "personalExpenses"); null for every other (flat) list.
-  const listAt = (fig, kind, personId) => (personId ? (fig?.personalExpenses?.[personId] || []) : ((fig && fig[kind]) || []));
+  // `personId` scopes a lookup to one person's own list (kind in
+  // PERSONAL_KINDS, see listAt); null for every other (flat) list.
   // History of one entry (matched by id) across all months, for the sparkline.
   const entryHistory = (kind, id, personId = null) => {
     const out = [];
@@ -1019,14 +1069,15 @@ export default function App() {
   // ones included): which entries are only here, only there, or differ.
   const monthDiff = useMemo(() => {
     const sectionOf = (kind, personId, fig) => {
-      if (kind !== "personalExpenses") return { partners: TXT.salarySection, govIncome: TXT.government, expenses: TXT.fixedCosts, savings: TXT.savingsSection }[kind];
+      if (!PERSONAL_KINDS.includes(kind)) return { partners: TXT.salarySection, govIncome: TXT.government, expenses: TXT.fixedCosts, savings: TXT.savingsSection }[kind];
       const i = fig.partners.findIndex((p) => p.id === personId);
-      return (i >= 0 && fig.partners[i].name) || t(LANG, "personName", { n: i + 1 });
+      const who = (i >= 0 && fig.partners[i].name) || t(LANG, "personName", { n: i + 1 });
+      return kind === "personalSavings" ? `${who} · ${TXT.savingsSection}` : who;
     };
     const entriesOf = (fig) => [
       ...fig.partners.map((e) => ({ kind: "partners", personId: null, e })),
       ...entryKinds.flatMap((kind) => (fig[kind] || []).map((e) => ({ kind, personId: null, e }))),
-      ...Object.entries(fig.personalExpenses || {}).flatMap(([personId, list]) => list.map((e) => ({ kind: "personalExpenses", personId, e }))),
+      ...PERSONAL_KINDS.flatMap((kind) => Object.entries(fig[kind] || {}).flatMap(([personId, list]) => list.map((e) => ({ kind, personId, e })))),
     ].map((x) => ({ ...x, label: x.e.label || x.e.name || TXT.unnamed, section: sectionOf(x.kind, x.personId, fig), value: valueOf(x.kind, x.e, fig) }));
     const diff = (key) => {
       if (!key) return null;
@@ -1118,6 +1169,7 @@ export default function App() {
           partners: [...m.partners, { ...DEFAULT_PERSON, id }],
           customPct: { ...m.customPct, [id]: "" },
           personalExpenses: { ...m.personalExpenses, [id]: [] },
+          personalSavings: { ...(m.personalSavings || {}), [id]: [] },
         };
       }
       return { ...d, months };
@@ -1133,7 +1185,8 @@ export default function App() {
       for (const [k, m] of Object.entries(d.months)) {
         const { [id]: _p1, ...restPersonal } = m.personalExpenses;
         const { [id]: _p2, ...restCustomPct } = m.customPct;
-        months[k] = { ...m, partners: m.partners.filter((p) => p.id !== id), personalExpenses: restPersonal, customPct: restCustomPct };
+        const { [id]: _p3, ...restSavings } = m.personalSavings || {};
+        months[k] = { ...m, partners: m.partners.filter((p) => p.id !== id), personalExpenses: restPersonal, personalSavings: restSavings, customPct: restCustomPct };
       }
       return { ...d, months };
     });
@@ -1219,11 +1272,11 @@ export default function App() {
   const addGov = () => addListItem("govIncome", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   const addExpense = () => addListItem("expenses", { id: uid(), category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
   const addSaving = () => addListItem("savings", { id: uid(), label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" });
-  // personalExpenses is one level deeper (keyed by person id) than the flat
+  // The personal lists are one level deeper (keyed by person id) than the flat
   // lists above, so it gets its own small set of mutators rather than
   // threading an extra key through the generic ones.
-  const setPersonalExpenseItem = (personId, id, patch) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: (f.personalExpenses[personId] || []).map((x) => x.id === id ? { ...x, ...patch } : x) } }), id);
-  const togglePersonalExpenseItemPeriod = (personId, id) => editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: (f.personalExpenses[personId] || []).map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x) } }), id);
+  const setPersonalItem = (kind, personId, id, patch) => editForward((f) => withList(f, kind, personId, listAt(f, kind, personId).map((x) => x.id === id ? { ...x, ...patch } : x)), id);
+  const togglePersonalItemPeriod = (kind, personId, id) => editForward((f) => withList(f, kind, personId, listAt(f, kind, personId).map((x) => x.id === id ? { ...x, period: x.period === "year" ? "month" : "year", amount: flip(x.amount, x.period) } : x)), id);
   // Removing an entry is scoped explicitly instead of following
   // editForward's override rules: an entry that still exists in later
   // months asks whether to remove it only here or here and onwards
@@ -1234,9 +1287,7 @@ export default function App() {
     for (const k of keys) {
       const fig = months[k];
       if (!fig) continue;
-      months[k] = personId
-        ? { ...fig, personalExpenses: { ...fig.personalExpenses, [personId]: (fig.personalExpenses[personId] || []).filter((x) => x.id !== id) } }
-        : { ...fig, [kind]: (fig[kind] || []).filter((x) => x.id !== id) };
+      months[k] = withList(fig, kind, personId, listAt(fig, kind, personId).filter((x) => x.id !== id));
     }
     return { ...d, months };
   });
@@ -1259,7 +1310,7 @@ export default function App() {
   const setAmountHere = (kind, id, value, personId = null) => setData((d) => {
     const s = d.selectedMonth, fig = d.months[s], field = amountField(kind);
     const list = listAt(fig, kind, personId).map((x) => x.id === id ? { ...x, [field]: value } : x);
-    const next = personId ? { ...fig, personalExpenses: { ...fig.personalExpenses, [personId]: list } } : { ...fig, [kind]: list };
+    const next = withList(fig, kind, personId, list);
     return { ...d, months: { ...d.months, [s]: markOverride(next, id) } };
   });
   const [pendingAmount, setPendingAmount] = useState(null);
@@ -1281,7 +1332,7 @@ export default function App() {
       for (const k of later) {
         const fig = months[k];
         const list = listAt(fig, kind, personId).map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x);
-        months[k] = personId ? { ...fig, personalExpenses: { ...fig.personalExpenses, [personId]: list } } : { ...fig, [kind]: list };
+        months[k] = withList(fig, kind, personId, list);
       }
       return { ...d, months };
     });
@@ -1291,25 +1342,27 @@ export default function App() {
   const restoreEntry = (kind, entry, personId = null) => setData((d) => {
     const s = d.selectedMonth, fig = d.months[s];
     if (listAt(fig, kind, personId).some((x) => x.id === entry.id)) return d;
-    const next = personId
-      ? { ...fig, personalExpenses: { ...fig.personalExpenses, [personId]: [...(fig.personalExpenses[personId] || []), clone(entry)] } }
-      : { ...fig, [kind]: [...(fig[kind] || []), clone(entry)] };
+    const next = withList(fig, kind, personId, [...listAt(fig, kind, personId), clone(entry)]);
     return { ...d, months: { ...d.months, [s]: markOverride(next, entry.id) } };
   });
   // One id for both the entry and its override key (they used to be two separate uid() calls).
   const addPersonalExpense = (personId) => {
     const id = uid();
-    editForward((f) => ({ ...f, personalExpenses: { ...f.personalExpenses, [personId]: [...(f.personalExpenses[personId] || []), { id, category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" }] } }), id);
+    editForward((f) => withList(f, "personalExpenses", personId, [...listAt(f, "personalExpenses", personId), { id, category: "", label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" }]), id);
   };
-  const copyPersonalExpenseEntryRange = (personId, id, pastKeys, futureKeys) => setData((d) => {
+  const addPersonalSaving = (personId) => {
+    const id = uid();
+    editForward((f) => withList(f, "personalSavings", personId, [...listAt(f, "personalSavings", personId), { id, label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" }]), id);
+  };
+  const copyPersonalEntryRange = (kind, personId, id, pastKeys, futureKeys) => setData((d) => {
     const s = d.selectedMonth;
-    const item = (d.months[s].personalExpenses[personId] || []).find((x) => x.id === id);
+    const item = listAt(d.months[s], kind, personId).find((x) => x.id === id);
     if (!item) return d;
     const targets = new Set([...(pastKeys || []), ...(futureKeys || [])]);
     const months = { ...d.months };
     for (const k of targets) {
       if (k === s || !months[k]) continue;
-      const list = months[k].personalExpenses[personId] || [];
+      const list = listAt(months[k], kind, personId);
       const exists = list.some((x) => x.id === id);
       let nextList;
       if (item.formula) {
@@ -1322,7 +1375,7 @@ export default function App() {
         const bare = { ...clone(item), note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" };
         nextList = [...list, bare];
       }
-      months[k] = { ...months[k], personalExpenses: { ...months[k].personalExpenses, [personId]: nextList } };
+      months[k] = withList(months[k], kind, personId, nextList);
     }
     return { ...d, months };
   });
@@ -1337,10 +1390,10 @@ export default function App() {
   const mapGoals = (d, entryId, fn) => {
     const goals = d.savingsGoals || [];
     if (goals.some((g) => g.entryId === entryId)) return goals.map((g) => g.entryId === entryId ? fn(g) : g);
-    return [...goals, fn({ entryId, targetAmount: "", forwarded: false, checkpoints: {}, subAccounts: [] })];
+    return [...goals, fn({ entryId, targetAmount: "", mainBank: "", forwarded: false, checkpoints: {}, subAccounts: [] })];
   };
   const updateGoal = (entryId, patch) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, ...patch })) }));
-  const addSubAccount = (entryId) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", checkpoints: {} }] })) }));
+  const addSubAccount = (entryId) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id: uid(), holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", transferMode: "amount", transferAmount: "", transferDay: "", checkpoints: {} }] })) }));
   const removeSubAccount = (entryId, subId) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
   const updateSubAccount = (entryId, subId, patch) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
   // Reset the selected month: take over the figures of the nearest earlier
@@ -1377,7 +1430,8 @@ export default function App() {
   }, [personView, cur.partners]);
   const activePersonIndex = personView ? cur.partners.findIndex((p) => p.id === personView) : -1;
   const activePerson = activePersonIndex >= 0 ? cur.partners[activePersonIndex] : null;
-  const activePersonExpenses = activePerson ? (cur.personalExpenses[activePerson.id] || []) : [];
+  const activePersonExpenses = activePerson ? listAt(cur, "personalExpenses", activePerson.id) : [];
+  const activePersonSavings = activePerson ? listAt(cur, "personalSavings", activePerson.id) : [];
 
   // Entries that exist in a neighbour month but not in this one, shown
   // faded under their list with one-tap fixes for the usual causes: removed
@@ -1436,21 +1490,21 @@ export default function App() {
   }, [detail]);
 
   const sectionLabel = (kind, personId) => personId
-    ? personName(cur.partners.find((p) => p.id === personId) || {}, cur.partners.findIndex((p) => p.id === personId))
+    ? `${personName(cur.partners.find((p) => p.id === personId) || {}, cur.partners.findIndex((p) => p.id === personId))}${kind === "personalSavings" ? ` · ${TXT.savingsSection}` : ""}`
     : { partners: TXT.salarySection, govIncome: TXT.government, expenses: TXT.expensesSection, savings: TXT.savingsSection }[kind];
   // Personal expenses are one level deeper (keyed by person id) and people
   // have their own mutators, so the right set is picked once per kind here.
   const entryOps = (kind, personId) => {
     const set = kind === "partners" ? (id, patch) => setPartner(id, patch)
-      : personId ? (id, patch) => setPersonalExpenseItem(personId, id, patch)
+      : personId ? (id, patch) => setPersonalItem(kind, personId, id, patch)
       : (id, patch) => setListItem(kind, id, patch);
     return {
       set,
       setName: kind === "partners" ? (id, v) => setPartnerName(id, v) : (id, v) => set(id, { label: v }),
       togglePeriod: kind === "partners" ? (id) => togglePartnerPeriod(id)
-        : personId ? (id) => togglePersonalExpenseItemPeriod(personId, id)
+        : personId ? (id) => togglePersonalItemPeriod(kind, personId, id)
         : (id) => toggleItemPeriod(kind, id),
-      copyRange: personId ? (id, pk, fk) => copyPersonalExpenseEntryRange(personId, id, pk, fk) : (id, pk, fk) => copyEntryRange(kind, id, pk, fk),
+      copyRange: personId ? (id, pk, fk) => copyPersonalEntryRange(kind, personId, id, pk, fk) : (id, pk, fk) => copyEntryRange(kind, id, pk, fk),
     };
   };
   const hasCategory = (kind) => kind === "expenses" || kind === "personalExpenses";
@@ -1474,7 +1528,7 @@ export default function App() {
     const draggable = !isPerson && manual;
     const selected = detail?.kind === kind && detail?.id === e.id && detail?.personId === personId;
     const dragging = draggable && dragItem?.kind === kind && dragItem?.personId === personId && dragItem.id === e.id;
-    const dot = isPerson ? personColor(e, index).main : kind === "govIncome" ? C.gov : kind === "savings" ? categoryColor(e.label) : categoryColor(e.category);
+    const dot = isPerson ? personColor(e, index).main : kind === "govIncome" ? C.gov : (kind === "savings" || kind === "personalSavings") ? categoryColor(e.label) : categoryColor(e.category);
     const monthly = valueOf(kind, e, cur);
     const onRowClick = (ev) => { if (!ev.target.closest("input, button, select, textarea, a, [draggable]")) openDetail(kind, e.id, personId); };
     return (
@@ -1600,7 +1654,7 @@ export default function App() {
   const chipCategories = [...new Set((activePerson ? activePersonExpenses : cur.expenses).map((e) => e.category || TXT.otherCategory))].sort((a, b) => a.localeCompare(b));
   const searchable = view === "month" || Boolean(activePerson);
   const noMatches = filtering && (activePerson
-    ? !activePersonExpenses.some(matchesFilter)
+    ? !(activePersonExpenses.some(matchesFilter) || activePersonSavings.some(matchesFilter) || matchesFilter(activePerson))
     : !(visiblePartners.length || visibleGov.length || visibleExpenses.length || visibleSavings.length));
   const noMatchesBlock = (
     <div style={St.emptyHist}>
@@ -1721,7 +1775,10 @@ export default function App() {
           <SavingsOverviewPage
             savingsGoals={data.savingsGoals || []}
             months={data.months}
-            savingsEntries={cur.savings}
+            savingsGroups={[
+              { id: "joint", title: TXT.household, color: C.ink, entries: cur.savings },
+              ...cur.partners.map((p, i) => ({ id: p.id, title: personName(p, i), color: personColor(p, i).main, entries: listAt(cur, "personalSavings", p.id) })),
+            ]}
             currentMonthData={cur}
             sel={sel}
             onUpdateGoal={updateGoal}
@@ -1823,20 +1880,97 @@ export default function App() {
           )}
         </Collapsible>
           </div>
-        ) : activePerson ? (
+        ) : activePerson ? (() => {
+          // The personal page mirrors the household one: income on the left,
+          // the result ("where does my salary go") on the right, and the
+          // person's own fixed costs and savings pots underneath — only
+          // scoped to this one person and their own leftover.
+          const pid = activePerson.id, pi = activePersonIndex;
+          const color = personColor(activePerson, pi);
+          const income = monthlyInc(activePerson);
+          const transfer = calc.transfers[pid] || 0;
+          const leftover = calc.leftovers[pid] || 0;
+          const expTotal = sumM(activePersonExpenses, cur);
+          const savTotal = sumM(activePersonSavings, cur);
+          const free = leftover - expTotal - savTotal;
+          const visibleOwnSavings = sortItems("personalSavings", activePersonSavings).filter(matchesFilter);
+          const showIncome = !filtering || matchesFilter(activePerson);
+          const showExp = !filtering || activePersonExpenses.some(matchesFilter);
+          const showSav = !filtering || visibleOwnSavings.length > 0;
+          return (
           <div className="fade">
-            <ColTitle>{personName(activePerson, activePersonIndex)}</ColTitle>
-            <div style={St.correspondentDocMuted}>{TXT.personalPageHint}</div>
-            {noMatches ? noMatchesBlock : (
-            <Collapsible id={`person-${activePerson.id}`} title={TXT.fixedCosts}
-              icon={<Receipt size={16} style={{ color: personColor(activePerson, activePersonIndex).main }} />} info={TXT.exp}
-              total={eur(sumM(activePersonExpenses, cur))} open={filtering || (open[`person-${activePerson.id}`] ?? true)} onToggle={toggleSec}
-              style={sectionPersonalStyle(personColor(activePerson, activePersonIndex).main)}>
-              {renderExpensesList("personalExpenses", sortItems("personalExpenses", activePersonExpenses), sumM(activePersonExpenses, cur), byCategoryOf(activePersonExpenses), () => addPersonalExpense(activePerson.id), activePerson.id)}
+            {!filtering && <PersonTiles color={color.main} transfer={transfer} income={income} expTotal={expTotal} savTotal={savTotal} free={free} />}
+            {noMatches && noMatchesBlock}
+            <div className={`monthGrid${filtering ? " single" : ""}`}>
+            <div className="mg-inc">
+            {showIncome && <ColTitle>{TXT.incomes}</ColTitle>}
+            {showIncome && (
+            <Collapsible id={`person-inc-${pid}`} title={TXT.salarySection} icon={<Wallet size={16} style={{ color: C.inc }} />} info={TXT.salary}
+              total={eur(income)} open={filtering || (open[`person-inc-${pid}`] ?? true)} onToggle={toggleSec} style={St.sectionIncome}>
+              {renderRow("partners", activePerson, { index: pi, total: income })}
+              <SubTotal monthly={income} />
             </Collapsible>
             )}
+            </div>
+
+            {!filtering && (<div className="mg-res">
+            <ColTitle>{TXT.personalResultSection}</ColTitle>
+            <section style={St.hero} className="fade">
+              <Bd label={TXT.salarySection} value={income} strong />
+              <Bd label={t(LANG, "personalToJoint", { pct: pct(income > 0 ? transfer / income : 0) })} value={transfer} sign="− " color={color.main} />
+              <div style={St.detailSubtotal}>
+                <span style={St.detailSubtotalLabel}>{TXT.keepsLeft}</span>
+                <span style={St.detailSubtotalValue}>{eur(leftover)}</span>
+              </div>
+              <Bd label={TXT.fixedCosts} value={expTotal} sign="− " color={C.exp} />
+              <Bd label={TXT.savingsSection} value={savTotal} sign="− " color={C.save} />
+              <div style={St.detailResult}>
+                <span>{TXT.personalFree}</span>
+                <span style={{ color: free < 0 ? C.exp : C.ink }}>{eur(free)}</span>
+              </div>
+              {income > 0 && (
+                <SplitBar label={TXT.personalSplitLabel} segments={[
+                  { id: "joint", name: TXT.personalSplitJoint, color: color.main, frac: transfer / income },
+                  { id: "exp", name: TXT.fixedCosts, color: C.exp, frac: expTotal / income },
+                  { id: "sav", name: TXT.savingsSection, color: C.save, frac: savTotal / income },
+                  { id: "free", name: TXT.personalFree, color: C.line, frac: Math.max(0, free) / income },
+                ]} />
+              )}
+              <div style={St.personalLegend}>
+                {[[color.main, TXT.personalSplitJoint], [C.exp, TXT.fixedCosts], [C.save, TXT.savingsSection], [C.line, TXT.personalFree]].map(([c, l]) => (
+                  <span key={l} style={St.personalLegendItem}><span style={{ ...St.catDot, background: c }} />{l}</span>
+                ))}
+              </div>
+              {free < 0 && <div style={{ ...St.correspondentDocMuted, color: C.exp, marginTop: 8 }}>{TXT.personalOverspent}</div>}
+              <div style={{ ...St.correspondentDocMuted, marginTop: 10 }}>{TXT.personalPageHint}</div>
+            </section>
+            </div>)}
+
+            <div className="mg-exp">
+            {(showExp || showSav) && <ColTitle>{TXT.expensesSection}</ColTitle>}
+            {showExp && (
+            <Collapsible id={`person-${pid}`} title={TXT.fixedCosts}
+              icon={<Receipt size={16} style={{ color: C.exp }} />} info={TXT.exp}
+              total={eur(expTotal)} open={filtering || (open[`person-${pid}`] ?? true)} onToggle={toggleSec} style={St.sectionExpenses}>
+              {renderExpensesList("personalExpenses", sortItems("personalExpenses", activePersonExpenses), expTotal, byCategoryOf(activePersonExpenses), () => addPersonalExpense(pid), pid)}
+            </Collapsible>
+            )}
+            {showSav && (
+            <Collapsible id={`person-sav-${pid}`} title={TXT.savingsSection} icon={<PiggyBank size={16} style={{ color: C.save }} />} info={TXT.personalSav}
+              total={eur(savTotal)} open={filtering || (open[`person-sav-${pid}`] ?? true)} onToggle={toggleSec} style={St.sectionExpenses}>
+              {activePersonSavings.length > 1 && <SortToggle kind="personalSavings" mode={listSort.personalSavings} onChange={(m) => setListSort("personalSavings", m)} />}
+              {visibleOwnSavings.map((e) => renderRow("personalSavings", e, { personId: pid, total: savTotal, manual: listSort.personalSavings === "manual" }))}
+              {renderGhosts("personalSavings", pid)}
+              {!filtering && <button type="button" onClick={() => addPersonalSaving(pid)} style={St.addBtn}><Plus size={16} /> {TXT.addSaving}</button>}
+              {filtering && <FilterSum count={visibleOwnSavings.length} total={activePersonSavings.length} monthly={sumM(visibleOwnSavings, cur)} />}
+              <SubTotal monthly={savTotal} />
+            </Collapsible>
+            )}
+            </div>
+            </div>
           </div>
-        ) : (
+          );
+        })() : (
         <>
         {noMatches && noMatchesBlock}
         <div className={`monthGrid${filtering ? " single" : ""}`}>
@@ -2258,6 +2392,27 @@ function ResultTiles({ partners, calc, names }) {
   );
 }
 
+// The personal page's counterpart of ResultTiles: what this person sends
+// to the joint account, what their own costs and savings take, and what's
+// left to spend freely.
+function PersonTiles({ color, transfer, income, expTotal, savTotal, free }) {
+  const tile = (label, value, sub, valueColor) => (
+    <div style={St.tile}>
+      <div style={{ ...St.tileLabel, ...(valueColor === "person" ? { color } : {}) }}>{label}</div>
+      <div style={{ ...St.tileValue, ...(valueColor && valueColor !== "person" ? { color: valueColor } : {}) }}>{eur0(value)}</div>
+      <div style={St.tileSub}>{sub}</div>
+    </div>
+  );
+  return (
+    <div style={St.tiles} className="fade tiles">
+      {tile(TXT.kpiPersonTransfer, transfer, t(LANG, "kpiPersonTransferSub", { pct: pct(income > 0 ? transfer / income : 0) }), "person")}
+      {tile(TXT.fixedCosts, expTotal, TXT.kpiPersonOwn)}
+      {tile(TXT.kpiPersonSaves, savTotal, TXT.kpiPersonOwn)}
+      {tile(TXT.personalFree, free, TXT.kpiPersonFreeSub, free < 0 ? C.exp : undefined)}
+    </div>
+  );
+}
+
 // Everything you do with a whole month, in one menu next to it instead of
 // a row of buttons at the bottom of the page. Copying swaps the menu for a
 // month picker in the same popover. Both drop down from the bar, also on
@@ -2617,7 +2772,7 @@ function DurationEditor({ entry, onChange }) {
 const HORIZON_OPTIONS = [3, 6, 12, 24, 36, 48, 60, 72, 84, 96, 108, 120];
 const horizonLabel = (n) => n < 12 ? t(LANG, "months", { count: n }) : t(LANG, "yearsShort", { count: n / 12 });
 
-function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMonthData, sel, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
+function SavingsOverviewPage({ savingsGoals, months, savingsGroups, currentMonthData, sel, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
   const [horizon, setHorizon] = useState(24);
   // Accordion: opening one goal collapses whichever other one was open, so
   // the page doesn't turn into a wall of charts once there are several.
@@ -2633,9 +2788,20 @@ function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMont
           </select>
         </label>
       </div>
-      {savingsEntries.length === 0 && <div style={St.copyEmpty}>{TXT.noSavingsGoals}</div>}
-      {savingsEntries.map((entry) => {
-        const goal = savingsGoals.find((g) => g.entryId === entry.id) || { entryId: entry.id, targetAmount: "", forwarded: false, checkpoints: {}, subAccounts: [] };
+      {savingsGroups.every((g) => g.entries.length === 0) && <div style={St.copyEmpty}>{TXT.noSavingsGoals}</div>}
+      {/* Joint pots first, then each person's own — a group only shows up
+          once it has at least one pot, and its heading only when there's
+          more than one group to tell apart. */}
+      {savingsGroups.filter((g) => g.entries.length > 0).map((group, _gi, shown) => (
+      <React.Fragment key={group.id}>
+      {shown.length > 1 && (
+        <div style={St.savingsGroupHead}>
+          <span style={{ ...St.catDot, background: group.color }} />
+          {group.id === "joint" ? TXT.savingsGroupJoint : t(LANG, "savingsGroupPerson", { name: group.title })}
+        </div>
+      )}
+      {group.entries.map((entry) => {
+        const goal = savingsGoals.find((g) => g.entryId === entry.id) || { entryId: entry.id, targetAmount: "", mainBank: "", forwarded: false, checkpoints: {}, subAccounts: [] };
         return (
           <SavingsGoalCard key={entry.id} entry={entry} goal={goal} months={months} currentMonthData={currentMonthData} sel={sel} horizon={horizon}
             open={openGoalId === entry.id}
@@ -2647,6 +2813,8 @@ function SavingsOverviewPage({ savingsGoals, months, savingsEntries, currentMont
           />
         );
       })}
+      </React.Fragment>
+      ))}
     </div>
   );
 }
@@ -2795,9 +2963,14 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
       const checkpoints = Object.keys(goal.checkpoints || {}).length ? goal.checkpoints : { [sel]: "0" };
       return [{ id: `self-${entry.id}`, holder: entry.label || TXT.unnamed, sharePercent: "100", interestRate: "", checkpoints }];
     }
-    const mainAccount = { id: `self-${entry.id}`, holder: TXT.mainAccountLabel, sharePercent: "0", interestRate: "", checkpoints: goal.checkpoints || {} };
+    const mainAccount = { id: `self-${entry.id}`, holder: goal.mainBank || TXT.mainAccountLabel, isMain: true, siblings: subAccounts, interestRate: "", checkpoints: goal.checkpoints || {} };
     return [mainAccount, ...subAccounts];
-  }, [forwarded, subAccounts, entry.id, entry.label, goal.checkpoints, sel]);
+  }, [forwarded, subAccounts, entry.id, entry.label, goal.checkpoints, goal.mainBank, sel]);
+  // This month's flow: what goes on to the sub-accounts and what stays behind
+  // on the main account — shown so a fixed transfer that outgrows the
+  // contribution is visible right away rather than only in the projection.
+  const forwardedTotal = subAccounts.reduce((sum, s) => sum + subAccountContribution(s, entryMonthlyAmount), 0);
+  const mainRemainder = entryMonthlyAmount - forwardedTotal;
   // The table starts at the earliest checkpoint among this goal's
   // accounts — accounts opened later simply show "—" for months before
   // their own checkpoint.
@@ -2873,7 +3046,7 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
           combined into) each sub-account's own balance below. */}
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 10 }}>
         <label style={St.copyRow}>
-          <span style={St.copyLbl}>{forwarded ? TXT.checkpointBalanceMain : TXT.checkpointBalance}</span>
+          <span style={St.copyLbl}>{forwarded ? (goal.mainBank ? t(LANG, "checkpointBalanceOf", { bank: goal.mainBank }) : TXT.checkpointBalanceMain) : TXT.checkpointBalance}</span>
           <input inputMode="decimal" value={goal.checkpoints?.[sel] ?? ""} placeholder="0,00"
             onChange={(e) => {
               const v = e.target.value.replace(/[^0-9.,]/g, "");
@@ -2891,8 +3064,19 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
 
       {forwarded && (
         <>
+          <div style={St.subRow} className="subWrap">
+            <div style={St.mainAccountHead}>
+              <span style={{ ...St.catDot, background: categoryColor(goal.mainBank || TXT.mainAccountLabel) }} />
+              <input list="banks" aria-label={TXT.mainAccountBank} value={goal.mainBank || ""} placeholder={TXT.mainAccountBankPlaceholder}
+                onChange={(e) => onUpdate({ mainBank: e.target.value })} style={{ ...St.nameInput, fontWeight: 700 }} />
+            </div>
+            <div style={St.subSummary}>
+              {t(LANG, "mainAccountFlow", { incoming: eur(entryMonthlyAmount), forwarded: eur(forwardedTotal), remainder: eur(mainRemainder) })}
+            </div>
+            {mainRemainder < -0.005 && <div style={{ ...St.subSummary, color: C.exp }}>{t(LANG, "mainAccountShrinks", { amount: eur(-mainRemainder) })}</div>}
+          </div>
           {subAccounts.map((sub) => (
-            <SubAccountRow key={sub.id} sub={sub} entryMonthlyAmount={entryMonthlyAmount} sel={sel}
+            <SubAccountRow key={sub.id} sub={sub} entryMonthlyAmount={entryMonthlyAmount} sel={sel} balance={seriesBySub[sub.id]?.[sel]?.balance}
               onChange={(patch) => onUpdateSubAccount(sub.id, patch)}
               onRemove={() => onRemoveSubAccount(sub.id)} />
           ))}
@@ -3014,9 +3198,17 @@ function IconPopoverField({ icon: Icon, ariaLabel, active, popStyle, children })
   );
 }
 
-function SubAccountRow({ sub, entryMonthlyAmount, sel, onChange, onRemove }) {
-  const share = sub.sharePercent === "" || sub.sharePercent == null ? 1 : num(sub.sharePercent) / 100;
-  const preview = entryMonthlyAmount * share;
+function SubAccountRow({ sub, entryMonthlyAmount, sel, balance, onChange, onRemove }) {
+  const preview = subAccountContribution(sub, entryMonthlyAmount);
+  const byAmount = sub.transferMode === "amount";
+  // One line with what you'd otherwise have to open three popovers for.
+  const summary = [
+    byAmount
+      ? (sub.transferDay ? t(LANG, "subTransferOnDay", { amount: eur(preview), day: sub.transferDay }) : t(LANG, "subTransferMonthly", { amount: eur(preview) }))
+      : t(LANG, "subTransferShare", { pct: `${num(sub.sharePercent ?? 100)}%`, amount: eur(preview) }),
+    balance != null ? t(LANG, "subBalanceNow", { amount: eur(balance) }) : TXT.subNoBalance,
+    num(sub.interestRate) > 0 ? t(LANG, "subInterest", { rate: String(sub.interestRate).replace(".", ",") }) : null,
+  ].filter(Boolean).join(" · ");
   const checkpointValue = sub.checkpoints?.[sel] ?? "";
   const hasCheckpoints = Boolean(sub.checkpoints && Object.keys(sub.checkpoints).length);
 
@@ -3031,16 +3223,35 @@ function SubAccountRow({ sub, entryMonthlyAmount, sel, onChange, onRemove }) {
         <input className="e-desc" aria-label={TXT.subAccountHolder} value={sub.holder} placeholder={TXT.subAccountHolderPlaceholder}
           onChange={(e) => onChange({ holder: e.target.value })} style={St.nameInput} />
         <EntryActions>
-          <IconPopoverField icon={Percent} ariaLabel={TXT.subAccountShare} active={num(sub.sharePercent ?? 100) !== 100 || num(sub.interestRate) > 0}>
+          <IconPopoverField icon={Percent} ariaLabel={TXT.subAccountTransfer} active>
             {(markEditing) => (
               <>
-                <div style={St.copyTitle}>{TXT.subAccountShare}</div>
-                <div style={St.correspondentDocMuted}>{TXT.subAccountShareInfo}</div>
-                <label style={{ ...St.copyRow, marginTop: 8 }}>
-                  <span style={St.copyLbl}>{TXT.subAccountShare}</span>
-                  <input inputMode="numeric" value={sub.sharePercent ?? "100"} placeholder="100" onFocus={markEditing}
-                    onChange={(e) => onChange({ sharePercent: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 60 }} />
-                </label>
+                <div style={St.copyTitle}>{TXT.subAccountTransfer}</div>
+                <div style={{ ...St.toggle, margin: "6px 0 4px" }} role="group" aria-label={TXT.subAccountTransfer}>
+                  <button type="button" onClick={() => onChange({ transferMode: "amount" })} style={{ ...St.toggleBtn, ...(byAmount ? St.toggleOn : {}) }}>{TXT.subTransferModeAmount}</button>
+                  <button type="button" onClick={() => onChange({ transferMode: "percent" })} style={{ ...St.toggleBtn, ...(!byAmount ? St.toggleOn : {}) }}>{TXT.subTransferModePercent}</button>
+                </div>
+                <div style={St.correspondentDocMuted}>{byAmount ? TXT.subTransferAmountInfo : TXT.subAccountShareInfo}</div>
+                {byAmount ? (
+                  <>
+                    <label style={{ ...St.copyRow, marginTop: 8 }}>
+                      <span style={St.copyLbl}>{TXT.subTransferAmount}</span>
+                      <input inputMode="decimal" value={sub.transferAmount ?? ""} placeholder="0,00" onFocus={markEditing}
+                        onChange={(e) => onChange({ transferAmount: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 80 }} />
+                    </label>
+                    <label style={{ ...St.copyRow, marginTop: 8 }}>
+                      <span style={St.copyLbl}>{TXT.subTransferDay}</span>
+                      <input inputMode="numeric" value={sub.transferDay ?? ""} placeholder="25" onFocus={markEditing}
+                        onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2); onChange({ transferDay: v && Number(v) > 31 ? "31" : v }); }} style={{ ...St.copySel, width: 50 }} />
+                    </label>
+                  </>
+                ) : (
+                  <label style={{ ...St.copyRow, marginTop: 8 }}>
+                    <span style={St.copyLbl}>{TXT.subAccountShare}</span>
+                    <input inputMode="numeric" value={sub.sharePercent ?? "100"} placeholder="100" onFocus={markEditing}
+                      onChange={(e) => onChange({ sharePercent: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 60 }} />
+                  </label>
+                )}
                 <div style={St.correspondentDocMuted}>{TXT.subAccountPreview} {eur(preview)} {TXT.perMonth}</div>
                 <label style={{ ...St.copyRow, marginTop: 8 }}>
                   <span style={St.copyLbl}>{TXT.subAccountInterestRate}</span>
@@ -3094,6 +3305,7 @@ function SubAccountRow({ sub, entryMonthlyAmount, sel, onChange, onRemove }) {
           <button type="button" aria-label={TXT.delete} onClick={onRemove} style={St.iconBtn}><Trash2 size={16} /></button>
         </EntryActions>
       </div>
+      <div style={St.subSummary}>{summary}</div>
     </div>
   );
 }
@@ -3457,6 +3669,8 @@ const St = {
 
   itemWrap: { padding: "6px 8px", margin: "0 -8px 4px", borderRadius: 12 },
   subRow: { marginBottom: 12 },
+  subSummary: { fontSize: 12.5, color: C.muted, marginTop: 4, paddingLeft: 2, fontVariantNumeric: "tabular-nums" },
+  mainAccountHead: { display: "flex", alignItems: "center", gap: 10 },
   flags: { display: "inline-flex", alignItems: "center", gap: 6, color: C.muted, verticalAlign: "middle" },
   flagChip: { display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 600 },
   drawer: { background: C.card, color: C.ink, fontFamily: "'Inter', system-ui, sans-serif" },
@@ -3482,6 +3696,8 @@ const St = {
   tileLabel: { fontSize: 12.5, fontWeight: 600, color: C.muted },
   tileValue: { fontFamily: "'Bricolage Grotesque', sans-serif", fontSize: 23, fontWeight: 700, marginTop: 2, fontVariantNumeric: "tabular-nums" },
   tileSub: { fontSize: 12, color: C.muted },
+  personalLegend: { display: "flex", flexWrap: "wrap", gap: "4px 14px", marginTop: 8, fontSize: 12, color: C.muted },
+  personalLegendItem: { display: "inline-flex", alignItems: "center", gap: 6 },
   monthActionsBtn: { display: "inline-flex", alignItems: "center", gap: 8, border: "none", background: C.canvas, color: C.ink, fontFamily: "inherit", fontSize: 13, fontWeight: 600, height: 38, padding: "0 12px", borderRadius: 10, cursor: "pointer" },
   menuPop: { position: "absolute", top: "calc(100% + 8px)", right: 0, width: 260, background: C.card, border: `1px solid ${C.line}`, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,0.16)", padding: 6, zIndex: 50, display: "flex", flexDirection: "column" },
   menuItem: { display: "flex", alignItems: "center", gap: 10, border: "none", background: "transparent", color: C.ink, fontFamily: "inherit", fontSize: 13.5, textAlign: "left", padding: "9px 10px", borderRadius: 8, cursor: "pointer" },
@@ -3602,6 +3818,7 @@ const St = {
   copyApply: { width: "100%", border: "none", background: C.b, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "8px 10px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", marginTop: 2 },
   copyEmpty: { fontSize: 12.5, color: C.muted, lineHeight: 1.45 },
 
+  savingsGroupHead: { display: "flex", alignItems: "center", gap: 8, margin: "18px 2px 8px", fontSize: 13, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.4 },
   savingsPageHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 4 },
   savingsHorizon: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.muted, fontWeight: 600 },
   savingsGoalName: { fontWeight: 700, fontSize: 15, padding: "8px 2px" },
