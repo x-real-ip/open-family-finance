@@ -226,7 +226,11 @@ export function migrateFig(f) {
   for (const p of partners) cleanedCustomPct[p.id] = customPct[p.id] ?? "";
   customPct = cleanedCustomPct;
 
-  const migrateEntry = (e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", warningDays: e.warningDays || "", formula: e.formula || undefined });
+  const migrateEntry = (e) => ({ id: e.id || uid(), category: e.category || "", label: e.label || "", amount: e.amount ?? "", period: per(e.period), note: e.note || "", url: e.url || "", correspondent: e.correspondent || "", documentMode: e.documentMode || "auto", documentLabel: e.documentLabel || null, documentId: e.documentId ?? null, startDate: e.startDate || "", endDate: e.endDate || "", warningDays: e.warningDays || "", formula: e.formula || undefined,
+    // Optional: the household transfer account (see transferAccounts on the
+    // top-level data) this fixed cost is paid from, e.g. a separate KNAB
+    // account for fixed costs — shown as a transfer on the transfers page.
+    transferAccountId: e.transferAccountId || "" });
 
   // personalExpenses used to be two fixed sibling arrays (personalExpensesA/B).
   // Migrate those onto the first two people's ids; a blob that's already in
@@ -397,16 +401,24 @@ export function migrateGoal(g) {
     subAccounts,
   };
 }
-export function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [] }; }
+export function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [], transferAccounts: [], jointAccountName: "" }; }
+// Accounts that fixed costs get transferred to (e.g. "KNAB Vaste lasten"),
+// defined once for the household and picked per fixed-cost entry.
+export const migrateTransferAccount = (a) => ({ id: a.id || uid(), name: a.name || "", iban: a.iban || "", day: a.day || "", reference: a.reference || "" });
 export function normalize(raw) {
   if (!raw) return freshData();
   if (raw.months && raw.selectedMonth) {
     const months = {}; for (const [k, v] of Object.entries(raw.months)) months[k] = migrateFig(v);
     // expenseSort: kept for compatibility with blobs saved by an earlier version of this feature.
     const sortSource = raw.listSort || (raw.expenseSort ? { expenses: raw.expenseSort } : null);
-    return { selectedMonth: raw.selectedMonth, months, log: raw.log || [], listSort: listSortOf(sortSource), savingsGoals: (raw.savingsGoals || []).map(migrateGoal).filter((g) => g.entryId) };
+    return {
+      selectedMonth: raw.selectedMonth, months, log: raw.log || [], listSort: listSortOf(sortSource), savingsGoals: (raw.savingsGoals || []).map(migrateGoal).filter((g) => g.entryId),
+      transferAccounts: (raw.transferAccounts || []).map(migrateTransferAccount),
+      // What the household calls its joint account (e.g. "KNAB Inkomen"); "" = the generic name.
+      jointAccountName: raw.jointAccountName || "",
+    };
   }
-  if (raw.partners) { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: migrateFig(raw) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [] }; }
+  if (raw.partners) { const mk = monthKey(new Date()); return { ...freshData(), selectedMonth: mk, months: { [mk]: migrateFig(raw) } }; }
   return freshData();
 }
 // The monthly contribution a sub-account's linked savings entry has in a
@@ -589,7 +601,7 @@ export function personalTotals(fig, calc, personId) {
 // "comes back" notice in their end month.
 // Accounts are plain descriptors ({ type: "person" | "joint" | "pot" | "sub", … });
 // naming them is left to the UI.
-export function plannedTransfers(months, sel, goals) {
+export function plannedTransfers(months, sel, goals, transferAccounts = []) {
   const fig = figuresFor(months, sel);
   const calc = computeTotals(fig);
   const out = [];
@@ -597,6 +609,28 @@ export function plannedTransfers(months, sel, goals) {
   for (const p of fig.partners) {
     const amount = calc.transfers[p.id] || 0;
     if (amount > 0.005) out.push({ type: "contribution", from: { type: "person", personId: p.id }, to: { type: "joint" }, amount });
+  }
+  // Fixed costs paid from a separate account: one transfer per (payer,
+  // account) with the summed monthly amount and the entries it covers.
+  const expenseSources = [
+    { list: fig.expenses || [], personId: null },
+    ...Object.entries(fig.personalExpenses || {}).map(([personId, list]) => ({ list, personId })),
+  ];
+  for (const { list, personId } of expenseSources) {
+    const byAccount = new Map();
+    for (const e of list) {
+      const account = e.transferAccountId && transferAccounts.find((a) => a.id === e.transferAccountId);
+      if (!account) continue;
+      const row = byAccount.get(account.id) || { account, amount: 0, items: [] };
+      const amount = monthlyOf(e, fig);
+      row.amount += amount;
+      row.items.push({ label: e.label || "", category: e.category || "", amount });
+      byAccount.set(account.id, row);
+    }
+    for (const { account, amount, items } of byAccount.values()) {
+      if (amount > 0.005) out.push({ type: "fixedCosts", from: personId ? { type: "person", personId } : { type: "joint" }, to: { type: "account", account },
+        amount, items, day: account.day || "", iban: account.iban || "", reference: account.reference || "", personId });
+    }
   }
   for (const { e, personId } of allSavingsOf(fig)) {
     const amount = monthlyOf(e, fig);

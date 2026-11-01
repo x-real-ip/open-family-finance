@@ -40,7 +40,7 @@ import {
   allSavingsOf, flip, pctOf, uid, clone, monthKey, keyToDate, shiftMonth,
   figuresFor, computeTotals, migrateFig, SORT_MODES, DEFAULT_LIST_SORT, listSortOf, migrateCheckpoints, migrateSubAccount,
   migrateGoal, freshData, normalize, monthlyContributionAt, subAccountContribution, projectSubAccountSeries,
-  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey, plannedTransfers, lastRecorded,
+  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey, plannedTransfers, lastRecorded, migrateTransferAccount,
 } from "./finance";
 
 /* ----------------------------------------------------------------
@@ -977,6 +977,20 @@ export default function App() {
   const updateGoal = (entryId, patch) => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, ...patch })) }));
   const addSubAccount = (entryId, id = uid(), kind = "savings") => setData((d) => ({ ...d, savingsGoals: mapGoals(d, entryId, (g) => ({ ...g, forwarded: true, subAccounts: [...g.subAccounts, { id, kind, holder: "", bank: "", iban: "", planId: "", referenceId: "", sharePercent: "100", interestRate: "", transferMode: "amount", transferAmounts: {}, transferDay: "", ownerId: "", depositAmount: "", termStart: kind === "deposit" ? d.selectedMonth : "", termMonths: kind === "deposit" ? "12" : "", checkpoints: {} }] })) }));
   const removeSubAccount = (entryId, subId) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.filter((s) => s.id !== subId) } : g) }));
+  // Household-level accounts that fixed costs are transferred to, plus the
+  // joint account's own name — not month-scoped, like savings goals.
+  const setJointAccountName = (name) => setData((d) => ({ ...d, jointAccountName: name }));
+  const addTransferAccount = (name = "") => {
+    const account = migrateTransferAccount({ name });
+    setData((d) => ({ ...d, transferAccounts: [...(d.transferAccounts || []), account] }));
+    return account.id;
+  };
+  const updateTransferAccount = (id, patch) => setData((d) => ({ ...d, transferAccounts: (d.transferAccounts || []).map((a) => a.id === id ? { ...a, ...patch } : a) }));
+  const removeTransferAccount = (id) => {
+    const a = (data.transferAccounts || []).find((x) => x.id === id);
+    if (!window.confirm(t(LANG, "confirmRemoveTransferAccount", { name: a?.name || TXT.unnamed }))) return;
+    setData((d) => ({ ...d, transferAccounts: (d.transferAccounts || []).filter((x) => x.id !== id) }));
+  };
   const updateSubAccount = (entryId, subId, patch) => setData((d) => ({ ...d, savingsGoals: (d.savingsGoals || []).map((g) => g.entryId === entryId ? { ...g, subAccounts: g.subAccounts.map((s) => s.id === subId ? { ...s, ...patch } : s) } : g) }));
   // Reset the selected month: take over the figures of the nearest earlier
   // month and clear this month's overrides, so it follows the baseline again.
@@ -1172,6 +1186,11 @@ export default function App() {
             <div style={{ ...St.derived, marginTop: 6 }}><MonthRail {...neighbours(kind, e, personId)} /></div>
             {section(TXT.priceTrend, <Sparkline data={entryHistory(kind, e.id, personId)} />)}
             {section(TXT.duration, <DurationEditor entry={e} onChange={(patch) => ops.set(e.id, patch)} />)}
+            {hasCategory(kind) && section(<>{TXT.transferToAccount} <InfoDot text={TXT.transferToAccountInfo} /></>, (
+              <TransferAccountPicker value={e.transferAccountId || ""} accounts={data.transferAccounts || []}
+                onChange={(id) => ops.set(e.id, { transferAccountId: id })}
+                onCreate={() => { const name = window.prompt(TXT.newTransferAccountPrompt); if (name && name.trim()) ops.set(e.id, { transferAccountId: addTransferAccount(name.trim()) }); }} />
+            ))}
             {section(TXT.note, <NoteEditor value={e.note || ""} onChange={(v) => ops.set(e.id, { note: v })} />)}
             {section(TXT.link, <LinkEditor value={e.url || ""} onChange={(v) => ops.set(e.id, { url: v })} />)}
             {PAPERLESS_ENABLED && section(TXT.correspondent, <CorrespondentEditor entry={e} onChange={(patch) => ops.set(e.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />)}
@@ -1370,7 +1389,10 @@ export default function App() {
             onUpdateSubAccount={updateSubAccount}
           />
         ) : view === "transfers" ? (
-          <TransfersPage months={data.months} sel={sel} goals={data.savingsGoals || []} partners={cur.partners} />
+          <TransfersPage months={data.months} sel={sel} goals={data.savingsGoals || []} partners={cur.partners}
+            transferAccounts={data.transferAccounts || []} jointAccountName={data.jointAccountName || ""}
+            onJointAccountName={setJointAccountName} onAddAccount={() => addTransferAccount("")}
+            onUpdateAccount={updateTransferAccount} onRemoveAccount={removeTransferAccount} />
         ) : view === "cashflow" ? (
           <CashflowPage cur={cur} calc={calc} />
         ) : view === "history" ? (
@@ -2402,7 +2424,7 @@ const HORIZON_OPTIONS = [3, 6, 12, 24, 36, 48, 60, 72, 84, 96, 108, 120];
 const horizonLabel = (n) => n < 12 ? t(LANG, "months", { count: n }) : t(LANG, "yearsShort", { count: n / 12 });
 
 function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, currentMonthData, sel, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
-  const [horizon, setHorizon] = useState(24);
+  const [horizon, setHorizon] = useState(12);
   // Accordion: opening one goal collapses whichever other one was open, so
   // the page doesn't turn into a wall of charts once there are several.
   const [openGoalId, setOpenGoalId] = useState(null);
@@ -2489,11 +2511,12 @@ function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, cu
 // viewing — grouped by the account the money leaves, so it reads as a
 // to-do list for setting up (or checking) standing orders: from KNAB to
 // Raisin · Coen, € 200 on the 25th, IBAN …, description PLAN… (both copyable).
-function TransfersPage({ months, sel, goals, partners }) {
-  const list = useMemo(() => plannedTransfers(months, sel, goals), [months, sel, goals]);
+function TransfersPage({ months, sel, goals, partners, transferAccounts, jointAccountName, onJointAccountName, onAddAccount, onUpdateAccount, onRemoveAccount }) {
+  const list = useMemo(() => plannedTransfers(months, sel, goals, transferAccounts), [months, sel, goals, transferAccounts]);
   const personName = (id) => { const i = partners.findIndex((p) => p.id === id); return i < 0 ? "?" : (partners[i].name || t(LANG, "personName", { n: i + 1 })); };
   const nameOf = (acc) => acc.type === "person" ? t(LANG, "transferOwnAccount", { name: personName(acc.personId) })
-    : acc.type === "joint" ? TXT.transferJointAccount
+    : acc.type === "joint" ? (jointAccountName || TXT.transferJointAccount)
+    : acc.type === "account" ? (acc.account.name || TXT.unnamed)
     : acc.type === "pot" ? (acc.bank || t(LANG, "transferPotAccount", { label: acc.label || TXT.unnamed }))
     : accountName(acc.sub);
   // Pots on the same bank (e.g. several pots on KNAB) share one "from" group.
@@ -2512,6 +2535,7 @@ function TransfersPage({ months, sel, goals, partners }) {
   const purpose = (tr) => {
     const pot = potLabel(tr) || TXT.unnamed;
     if (tr.type === "contribution") return TXT.transferPurposeContribution;
+    if (tr.type === "fixedCosts") return [t(LANG, "transferPurposeFixedCosts", { items: tr.items.map((i) => `${i.label || TXT.unnamed} ${eur(i.amount)}`).join(", ") }), tr.day ? t(LANG, "transferOnDay", { day: tr.day }) : TXT.transferNoDay].join(" · ");
     // A pot without a bank is already named after itself — don't repeat it.
     if (tr.type === "savings") return tr.to.bank ? t(LANG, "transferPurposePot", { pot }) : null;
     if (tr.type === "forward") return [t(LANG, "transferPurposePot", { pot }), tr.day ? t(LANG, "transferOnDay", { day: tr.day }) : TXT.transferNoDay].join(" · ");
@@ -2542,6 +2566,12 @@ function TransfersPage({ months, sel, goals, partners }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{nameOf(tr.to)}</div>
                     {purpose(tr) && <div style={St.subSummary}>{purpose(tr)}</div>}
+                    {tr.type === "fixedCosts" && (
+                      <div style={St.transferDetails}>
+                        <TransferDetail label={TXT.subAccountIban} value={tr.iban} missing={TXT.transferMissingIban} />
+                        {tr.reference && <TransferDetail label={TXT.subAccountReference} value={tr.reference} />}
+                      </div>
+                    )}
                     {toSub && (
                       <div style={St.transferDetails}>
                         <TransferDetail label={TXT.subAccountIban} value={tr.iban} missing={TXT.transferMissingIban} />
@@ -2560,7 +2590,44 @@ function TransfersPage({ months, sel, goals, partners }) {
           </section>
         );
       })}
+
+      {/* The accounts this page talks about that aren't savings accounts:
+          the joint account's name, and accounts fixed costs go to. */}
+      <section style={{ ...St.section, marginTop: 18 }} className="fade">
+        <div style={St.transferHead}><span style={St.savingsGoalName}>{TXT.transferAccountsTitle}</span></div>
+        <PanelField label={TXT.jointAccountNameLabel} info={TXT.jointAccountNameInfo}>
+          <input value={jointAccountName} placeholder={TXT.transferJointAccount} onChange={(e) => onJointAccountName(e.target.value)} style={{ ...St.drawerInput, maxWidth: 360 }} />
+        </PanelField>
+        <div style={{ ...St.panelFieldLabel, marginTop: 16 }}>{TXT.fixedCostAccounts} <InfoDot text={TXT.fixedCostAccountsInfo} /></div>
+        {transferAccounts.length === 0 && <div style={{ ...St.copyEmpty, marginTop: 6 }}>{TXT.noTransferAccounts}</div>}
+        {transferAccounts.map((a) => (
+          <div key={a.id} style={St.transferAccountRow}>
+            <input value={a.name} placeholder={TXT.transferAccountNamePlaceholder} aria-label={TXT.transferAccountName} onChange={(e) => onUpdateAccount(a.id, { name: e.target.value })} style={{ ...St.drawerInput, flex: "2 1 180px" }} />
+            <input value={a.iban} placeholder={TXT.subAccountIban} aria-label={TXT.subAccountIban} onChange={(e) => onUpdateAccount(a.id, { iban: e.target.value })} style={{ ...St.drawerInput, flex: "2 1 200px" }} />
+            <input value={a.day} inputMode="numeric" placeholder={TXT.subTransferDay} aria-label={TXT.subTransferDay}
+              onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2); onUpdateAccount(a.id, { day: v && Number(v) > 31 ? "31" : v }); }} style={{ ...St.drawerInput, flex: "1 1 90px" }} />
+            <input value={a.reference} placeholder={TXT.transferAccountReferencePlaceholder} aria-label={TXT.subAccountReference} onChange={(e) => onUpdateAccount(a.id, { reference: e.target.value })} style={{ ...St.drawerInput, flex: "2 1 160px" }} />
+            <button type="button" onClick={() => onRemoveAccount(a.id)} style={St.iconBtn} aria-label={TXT.delete}><Trash2 size={16} /></button>
+          </div>
+        ))}
+        <button type="button" onClick={onAddAccount} style={{ ...St.addBtn, marginTop: 8 }}><Plus size={16} /> {TXT.addTransferAccount}</button>
+      </section>
     </div>
+  );
+}
+
+// Which household transfer account a fixed cost is paid from — or none.
+function TransferAccountPicker({ value, accounts, onChange, onCreate }) {
+  return (
+    <>
+      <select value={accounts.some((a) => a.id === value) ? value : ""} style={St.drawerInput}
+        onChange={(e) => (e.target.value === "__new" ? onCreate() : onChange(e.target.value))}>
+        <option value="">{TXT.transferNone}</option>
+        {accounts.map((a) => <option key={a.id} value={a.id}>{a.name || TXT.unnamed}</option>)}
+        <option value="__new">{TXT.transferNewAccount}</option>
+      </select>
+      <div style={{ ...St.drawerMuted, marginTop: 6 }}>{TXT.transferAccountPickerHint}</div>
+    </>
   );
 }
 
@@ -3665,6 +3732,7 @@ const St = {
   panelInputRow: { display: "flex", alignItems: "center", gap: 4 },
   mainAccountFields: { display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10 },
   accountPots: { color: C.muted, fontSize: 12 },
+  transferAccountRow: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 },
   transferHead: { display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", paddingBottom: 6, borderBottom: `1px solid ${C.line}` },
   transferFromLabel: { fontSize: 11.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: C.muted },
   transferPer: { fontSize: 12, color: C.muted, fontWeight: 500 },

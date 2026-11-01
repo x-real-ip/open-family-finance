@@ -193,3 +193,28 @@ test("lastRecorded tells entered balances from projected ones", () => {
   assert.equal(lastRecorded(acc, "2026-08"), null);
   assert.equal(lastRecorded({ kind: "deposit", termStart: "2026-10", depositAmount: "5", checkpoints: {} }, "2026-11"), "2026-10");
 });
+
+test("fixed costs linked to a transfer account become one summed transfer per account and payer", () => {
+  const accounts = [{ id: "vl", name: "KNAB Vaste lasten", iban: "NL01KNAB", day: "1" }];
+  const months = { "2026-11": fig({
+    expenses: [{ id: "e1", label: "Hypotheek", amount: "1000", transferAccountId: "vl" }, { id: "e2", label: "Verzekering", amount: "1200", period: "year", transferAccountId: "vl" }, { id: "e3", label: "Boodschappen", amount: "500" }],
+    personalExpenses: { a: [{ id: "x", label: "Sport", amount: "40", transferAccountId: "vl" }] },
+  }) };
+  const list = plannedTransfers(months, "2026-11", [], accounts).filter((x) => x.type === "fixedCosts");
+  assert.equal(list.length, 2);
+  const joint = list.find((x) => x.from.type === "joint");
+  close(joint.amount, 1100);
+  assert.deepEqual(joint.items.map((i) => i.label), ["Hypotheek", "Verzekering"]);
+  assert.equal(joint.day, "1"); assert.equal(joint.iban, "NL01KNAB");
+  const own = list.find((x) => x.from.type === "person");
+  assert.equal(own.from.personId, "a"); close(own.amount, 40);
+  assert.equal(plannedTransfers(months, "2026-11", [], []).filter((x) => x.type === "fixedCosts").length, 0, "unknown account ids are ignored");
+});
+
+test("normalize keeps transfer accounts, the joint account name and an entry's transfer account", () => {
+  const data = normalize({ selectedMonth: "2026-11", jointAccountName: "KNAB Inkomen", transferAccounts: [{ id: "vl", name: "KNAB Vaste lasten" }],
+    months: { "2026-11": { partners: [{ id: "a" }], expenses: [{ id: "e1", amount: "5", transferAccountId: "vl" }] } } });
+  assert.equal(data.jointAccountName, "KNAB Inkomen");
+  assert.equal(data.transferAccounts[0].name, "KNAB Vaste lasten");
+  assert.equal(data.months["2026-11"].expenses[0].transferAccountId, "vl");
+});
