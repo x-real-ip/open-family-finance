@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   computeTotals, normalize, migrateFig, monthlyContributionAt, projectSubAccountSeries,
   subAccountContribution, valueAt, transferTargetKey, setTransferAmountAt, FROM_START,
-  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd,
+  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd, isMonthKey,
 } from "./finance.js";
 
 const fig = (over = {}) => migrateFig({
@@ -150,4 +150,14 @@ test("a goal without its own balance keeps it empty — sub-account balances are
   const g = migrateGoal({ entryId: "s1", forwarded: true, checkpoints: {}, subAccounts: [{ id: "r", checkpoints: { "2026-11": "6000" } }] });
   assert.deepEqual(g.checkpoints, {});
   assert.deepEqual(g.subAccounts[0].checkpoints, { "2026-11": "6000" });
+});
+
+test("half-typed months never reach date math", () => {
+  for (const bad of ["2025-", "2025", "2025-1", "2025-13", "", undefined]) assert.equal(isMonthKey(bad), false, String(bad));
+  assert.equal(isMonthKey("2025-10"), true);
+  const dep = { id: "d", kind: "deposit", depositAmount: "1000", termStart: "2025-", termMonths: "12", interestRate: "3", checkpoints: {} };
+  assert.equal(depositEnd(dep), null);
+  assert.deepEqual(balanceAt({ "2026-11": fig() }, "s1", dep, "2026-11"), null);
+  const g = migrateGoal({ entryId: "s1", subAccounts: [{ id: "d", kind: "deposit", termStart: "2025-", checkpoints: {} }] });
+  assert.equal(g.subAccounts[0].termStart, "");
 });

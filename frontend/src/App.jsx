@@ -40,7 +40,7 @@ import {
   allSavingsOf, flip, pctOf, uid, clone, monthKey, keyToDate, shiftMonth,
   figuresFor, computeTotals, migrateFig, SORT_MODES, DEFAULT_LIST_SORT, listSortOf, migrateCheckpoints, migrateSubAccount,
   migrateGoal, freshData, normalize, monthlyContributionAt, subAccountContribution, projectSubAccountSeries,
-  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd,
+  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey,
 } from "./finance";
 
 /* ----------------------------------------------------------------
@@ -2415,7 +2415,9 @@ function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, cu
     const target = goal.targetAmount ? num(goal.targetAmount) : null;
     const groupPersonId = group.id === "joint" ? null : group.id;
     return goalAccounts(entry, goal, sel, goal.forwarded ? TXT.mainAccountLabel : TXT.unnamed).map((acc) => ({
-      acc, entry, goal, groupPersonId,
+      acc, entry, goal, groupPersonId, group,
+      // Who the money belongs to: one person, or shared ("" = the household).
+      ownerIds: Object.entries(accountOwnerShares(acc, groupPersonId, partners)).filter(([, share]) => share > 0).map(([id]) => id),
       name: acc.isMain ? (goal.mainBank || TXT.mainAccountLabel) : acc.isOwn ? TXT.ownAccountLabel : accountName(acc),
       balance: acc.virtual ? null : balanceAt(months, entry.id, acc, sel, target)?.balance ?? null,
       expected: balanceAt(months, entry.id, acc, sel, target, { without: true })?.balance ?? null,
@@ -2434,7 +2436,7 @@ function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, cu
         </label>
       </div>
       <SavingsSummary accounts={accounts} partners={partners} sel={sel} />
-      <BalanceUpdatePanel accounts={accounts} sel={sel}
+      <BalanceUpdatePanel accounts={accounts} partners={partners} sel={sel}
         onSet={({ acc, entry, goal }, value) => {
           const cps = { ...((acc.isMain || acc.isOwn) ? goal.checkpoints : acc.checkpoints) || {} };
           if (value) cps[sel] = value; else delete cps[sel];
@@ -2555,11 +2557,33 @@ function SavingsSummary({ accounts, partners, sel }) {
 }
 
 // One form for every account's actual balance this month, next to what
-// the projection expected — instead of a popover per account.
-function BalanceUpdatePanel({ accounts, sel, onSet }) {
+// the projection expected — instead of a popover per account. Grouped like
+// the page (joint pots, then each person's own), each row says whose money
+// it is and when its balance was last entered. Filling in is never
+// required: without a balance for this month the projection simply carries
+// on from the last one entered.
+function BalanceUpdatePanel({ accounts, partners, sel, onSet }) {
   const [open, setOpen] = useState(false);
+  const [onlyMissing, setOnlyMissing] = useState(false);
   if (!accounts.length) return null;
-  const filled = accounts.filter((a) => (a.acc.isMain || a.acc.isOwn ? a.goal.checkpoints : a.acc.checkpoints)?.[sel] !== undefined).length;
+  const cpsOf = (a) => ((a.acc.isMain || a.acc.isOwn) ? a.goal.checkpoints : a.acc.checkpoints) || {};
+  // For a deposit, its deposited amount counts as entered in its start month.
+  const lastEntered = (a) => {
+    const keys = Object.keys(cpsOf(a)).filter((k) => k < sel && cpsOf(a)[k] !== "");
+    if (isDeposit(a.acc) && isMonthKey(a.acc.termStart) && a.acc.depositAmount !== "" && a.acc.termStart < sel) keys.push(a.acc.termStart);
+    return keys.sort().pop() || null;
+  };
+  const isFilled = (a) => cpsOf(a)[sel] !== undefined && cpsOf(a)[sel] !== "";
+  const filled = accounts.filter(isFilled).length;
+  const personName = (id) => { const i = partners.findIndex((p) => p.id === id); return i < 0 ? "?" : (partners[i].name || t(LANG, "personName", { n: i + 1 })); };
+  const ownerLabel = (a) => (a.ownerIds.length === 1 ? t(LANG, "ownerOf", { name: personName(a.ownerIds[0]) }) : TXT.ownerJoint);
+  const shown = onlyMissing ? accounts.filter((a) => !isFilled(a)) : accounts;
+  const groups = [];
+  for (const a of shown) {
+    let g = groups.find((x) => x.id === a.group.id);
+    if (!g) groups.push(g = { id: a.group.id, title: a.group.id === "joint" ? TXT.savingsGroupJoint : t(LANG, "savingsGroupPerson", { name: a.group.title }), color: a.group.color, rows: [] });
+    g.rows.push(a);
+  }
   return (
     <section style={{ ...St.section, marginBottom: 12 }} className="fade">
       <div role="button" tabIndex={0} aria-expanded={open} onClick={() => setOpen((o) => !o)}
@@ -2567,36 +2591,52 @@ function BalanceUpdatePanel({ accounts, sel, onSet }) {
         <CalendarClock size={16} style={{ color: C.muted }} />
         <span style={St.savingsGoalName}>{t(LANG, "updateBalancesTitle", { month: monthLong(sel) })}</span>
         <span style={{ flex: 1 }} />
-        <span style={St.headTotal}>{t(LANG, "updateBalancesCount", { done: filled, count: accounts.length })}</span>
+        <span style={St.updateCount}>{t(LANG, "updateBalancesCount", { done: filled, count: accounts.length })}</span>
+        <span onClick={(e) => e.stopPropagation()}><InfoDot text={TXT.updateBalancesCountInfo} align="right" /></span>
         <ChevronDown size={18} style={{ color: C.muted, transform: open ? "rotate(180deg)" : "none", transition: "transform .2s", flexShrink: 0 }} />
       </div>
       {open && (
         <div style={{ marginTop: 8 }}>
           <div style={St.correspondentDocMuted}>{TXT.updateBalancesInfo}</div>
-          {accounts.map((a) => {
-            const cps = (a.acc.isMain || a.acc.isOwn) ? a.goal.checkpoints : a.acc.checkpoints;
-            const value = cps?.[sel] ?? "";
-            const diff = value !== "" && a.expected != null ? num(value) - a.expected : null;
-            return (
-              <div key={`${a.entry.id}-${a.acc.id}`} style={St.balanceRow}>
-                <span style={{ ...St.catDot, background: categoryColor(a.acc.isOwn ? a.entry.label : a.name) }} />
-                <span style={St.balanceName}>
-                  <span style={{ fontWeight: 600 }}>{a.acc.isOwn ? (a.entry.label || TXT.unnamed) : a.name}</span>
-                  {!a.acc.isOwn && <span style={St.accountPots}> · {a.entry.label || TXT.unnamed}</span>}
-                  <span style={St.balanceExpected}>
-                    {a.expected != null ? t(LANG, "balanceExpected", { amount: eur(a.expected) }) : TXT.balanceNoExpectation}
-                    {diff != null && Math.abs(diff) >= 0.5 && <span style={{ color: diff > 0 ? C.save : C.exp }}> · {diff > 0 ? "+" : "−"}{eur(Math.abs(diff))}</span>}
-                  </span>
-                </span>
-                <div style={St.money}>
-                  <span style={St.euro}>€</span>
-                  <input inputMode="decimal" value={value} placeholder={a.expected != null ? String(round2(a.expected)).replace(".", ",") : "0,00"}
-                    aria-label={t(LANG, "balanceFor", { name: a.name })}
-                    onChange={(e) => onSet(a, e.target.value.replace(/[^0-9.,]/g, ""))} style={{ ...St.moneyInput, width: 90 }} />
-                </div>
-              </div>
-            );
-          })}
+          <label style={{ ...St.goalForwardedToggle, marginTop: 8, fontWeight: 500 }}>
+            <input type="checkbox" checked={onlyMissing} onChange={(e) => setOnlyMissing(e.target.checked)} />
+            {t(LANG, "onlyMissing", { count: accounts.length - filled })}
+          </label>
+          {shown.length === 0 && <div style={{ ...St.copyEmpty, marginTop: 8 }}>{TXT.allUpdated}</div>}
+          {groups.map((g) => (
+            <React.Fragment key={g.id}>
+              <div style={{ ...St.savingsGroupHead, margin: "14px 0 2px" }}><span style={{ ...St.catDot, background: g.color }} />{g.title}</div>
+              {g.rows.map((a) => {
+                const value = cpsOf(a)[sel] ?? "";
+                const diff = value !== "" && a.expected != null ? num(value) - a.expected : null;
+                const last = lastEntered(a);
+                const name = a.acc.isOwn ? (a.entry.label || TXT.unnamed) : a.name;
+                return (
+                  <div key={`${a.entry.id}-${a.acc.id}`} style={St.balanceRow}>
+                    <span style={{ ...St.catDot, background: categoryColor(a.acc.isOwn ? a.entry.label : a.name) }} />
+                    <span style={St.balanceName}>
+                      <span style={{ fontWeight: 600 }}>{name}</span>
+                      {!a.acc.isOwn && <span style={St.accountPots}> · {a.entry.label || TXT.unnamed}</span>}
+                      <span style={St.ownerTag}>{ownerLabel(a)}</span>
+                      <span style={St.balanceExpected}>
+                        {isFilled(a)
+                          ? <span style={{ color: C.save }}>✓ {TXT.balanceUpdated}</span>
+                          : last ? t(LANG, "balanceLastEntered", { month: monthShortWithYear(last) }) : TXT.balanceNeverEntered}
+                        {a.expected != null && <> · {t(LANG, "balanceExpected", { amount: eur(a.expected) })}</>}
+                        {diff != null && Math.abs(diff) >= 0.5 && <span style={{ color: diff > 0 ? C.save : C.exp }}> · {diff > 0 ? "+" : "−"}{eur(Math.abs(diff))}</span>}
+                      </span>
+                    </span>
+                    <div style={St.money}>
+                      <span style={St.euro}>€</span>
+                      <input inputMode="decimal" value={value} placeholder={a.expected != null ? String(round2(a.expected)).replace(".", ",") : "0,00"}
+                        aria-label={t(LANG, "balanceFor", { name })}
+                        onChange={(e) => onSet(a, e.target.value.replace(/[^0-9.,]/g, ""))} style={{ ...St.moneyInput, width: 90 }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </React.Fragment>
+          ))}
         </div>
       )}
     </section>
@@ -2975,7 +3015,7 @@ function subAccountSummary(sub, entryMonthlyAmount, sel, balance) {
       sub.depositAmount ? eur(num(sub.depositAmount)) : null,
       num(sub.interestRate) > 0 ? t(LANG, "depositRate", { rate: String(sub.interestRate).replace(".", ",") }) : null,
       end ? (sel > end ? t(LANG, "depositEnded", { month: monthShortWithYear(end) }) : t(LANG, "depositRuns", { from: monthShortWithYear(sub.termStart), to: monthShortWithYear(end), months: Math.round(num(sub.termMonths)) })) : null,
-      balance != null && sel >= sub.termStart ? t(LANG, "subBalanceNow", { amount: eur(balance) }) : null,
+      balance != null && isMonthKey(sub.termStart) && sel >= sub.termStart ? t(LANG, "subBalanceNow", { amount: eur(balance) }) : null,
     ].filter(Boolean).join(" · ");
   }
   const amount = subAccountContribution(sub, entryMonthlyAmount, sel);
@@ -3004,6 +3044,21 @@ function AccountRow({ name, dotKey, lines, warning, selected, onOpen, children }
       </div>
       {children}
     </div>
+  );
+}
+
+// A month input that only passes on complete months ("YYYY-MM"). Browsers
+// without a native month picker (Firefox) show it as a plain text field, and
+// a half-typed value like "2025-" used to crash the page. What you type is
+// kept locally until it's a valid month; leaving the field with an invalid
+// value puts the last valid one back.
+function MonthField({ value, onChange, style }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  return (
+    <input type="month" value={draft} placeholder="JJJJ-MM" style={style}
+      onChange={(e) => { const v = e.target.value; setDraft(v); if (isMonthKey(v)) onChange(v); }}
+      onBlur={() => { if (!isMonthKey(draft)) setDraft(value); }} />
   );
 }
 
@@ -3116,7 +3171,7 @@ function AccountPanel({ entry, goal, sub, months, currentMonthData, sel, partner
             </div>
             <div style={St.drawerPair}>
               <PanelField label={TXT.depositStart} info={TXT.infoDepositStart}>
-                <input type="month" value={sub.termStart || ""} onChange={(e) => onUpdateSub({ termStart: e.target.value })} style={St.drawerInput} />
+                <MonthField value={sub.termStart || ""} onChange={(v) => onUpdateSub({ termStart: v })} style={St.drawerInput} />
               </PanelField>
               <PanelField label={TXT.depositTerm} info={TXT.infoDepositTerm} align="right">
                 <input inputMode="numeric" list="depositTerms" placeholder="12" value={sub.termMonths || ""} onChange={(e) => onUpdateSub({ termMonths: e.target.value.replace(/[^0-9]/g, "").slice(0, 3) })} style={St.drawerInput} />
@@ -3598,6 +3653,8 @@ const St = {
   panelInputRow: { display: "flex", alignItems: "center", gap: 4 },
   mainAccountFields: { display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10 },
   accountPots: { color: C.muted, fontSize: 12 },
+  ownerTag: { fontSize: 11.5, fontWeight: 600, color: C.muted, background: C.canvas, borderRadius: 999, padding: "1px 8px", marginLeft: 4 },
+  updateCount: { fontSize: 13, color: C.muted, fontWeight: 600, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" },
   balanceRow: { display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${C.line}` },
   balanceName: { flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 4, fontSize: 14 },
   balanceExpected: { flexBasis: "100%", fontSize: 12, color: C.muted, fontVariantNumeric: "tabular-nums" },

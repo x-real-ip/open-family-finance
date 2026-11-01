@@ -117,6 +117,9 @@ export const uid = () => Math.random().toString(36).slice(2, 9);
 export const clone = (o) => JSON.parse(JSON.stringify(o));
 export const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 export const keyToDate = (k) => { const [y, m] = k.split("-").map(Number); return new Date(y, m - 1, 1); };
+// A complete month key ("YYYY-MM"). Half-typed values ("2025-", "2025-1")
+// must never reach date math, which would turn them into an Invalid Date.
+export const isMonthKey = (k) => typeof k === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(k);
 export const shiftMonth = (k, delta) => { const d = keyToDate(k); d.setMonth(d.getMonth() + delta); return monthKey(d); };
 // Read-only figures for any month key, including ones never actually visited
 // (e.g. the rest of a year being printed) — same forward-fill rule goMonth
@@ -332,7 +335,7 @@ export function migrateSubAccount(s) {
     // one-off amount put away from termStart ("YYYY-MM") for termMonths at a
     // fixed rate — no monthly transfers, interest only during the term.
     kind: s.kind === "deposit" ? "deposit" : "savings",
-    depositAmount: s.depositAmount ?? "", termStart: s.termStart ?? "", termMonths: s.termMonths ?? "",
+    depositAmount: s.depositAmount ?? "", termStart: isMonthKey(s.termStart) ? s.termStart : "", termMonths: s.termMonths ?? "",
     // Each sub-account's own recorded balance, independent of the others and
     // of the goal's main-account balance — the combined total is the sum of
     // all of them, not a proportional split of one shared number.
@@ -433,10 +436,10 @@ export function monthlyContributionAt(months, entryId, key) {
 // is transferred on than comes in, so its projected balance shrinks.
 export const isDeposit = (sub) => sub?.kind === "deposit";
 // The month a deposit's term ends, or null when start or term is missing.
-export const depositEnd = (sub) => (isDeposit(sub) && sub.termStart && num(sub.termMonths) > 0 ? shiftMonth(sub.termStart, Math.round(num(sub.termMonths))) : null);
+export const depositEnd = (sub) => (isDeposit(sub) && isMonthKey(sub.termStart) && num(sub.termMonths) > 0 ? shiftMonth(sub.termStart, Math.round(num(sub.termMonths))) : null);
 // A deposit's recorded balances: the deposited amount counts as the balance
 // in its start month (a later correction you enter still wins from then on).
-const accountCheckpoints = (sub) => (isDeposit(sub) && sub.termStart && sub.depositAmount !== ""
+const accountCheckpoints = (sub) => (isDeposit(sub) && isMonthKey(sub.termStart) && sub.depositAmount !== ""
   ? { [sub.termStart]: sub.depositAmount, ...(sub.checkpoints || {}) }
   : (sub.checkpoints || {}));
 export function subAccountContribution(sub, monthly, key) {
