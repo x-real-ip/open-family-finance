@@ -26,7 +26,7 @@ import {
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, History, Link2,
   Copy, Sun, Moon,
   Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Printer,
-  MoreHorizontal, CalendarDays, Waypoints, ArrowLeftRight, ArrowRight, Search, X, Users, StickyNote,
+  MoreHorizontal, CalendarDays, Waypoints, ArrowLeftRight, ArrowRight, Search, X, Users, StickyNote, Table2,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
@@ -1319,7 +1319,7 @@ export default function App() {
           </div>
           <div style={St.navRow}>
             <div style={St.toggle} className="viewTabs" role="group" aria-label={TXT.viewToggleAria}>
-              {[["month", TXT.monthView], ["savings", TXT.savingsOverviewView], ["transfers", TXT.transfersView], ["cashflow", TXT.cashflowView], ["history", TXT.historyView]].map(([v, label]) => {
+              {[["month", TXT.monthView], ["savings", TXT.savingsOverviewView], ["transfers", TXT.transfersView], ["cashflow", TXT.cashflowView], ["sheet", TXT.sheetView], ["history", TXT.historyView]].map(([v, label]) => {
                 const on = v === "month" ? onMonthPage : view === v;
                 return <button key={v} type="button" aria-pressed={on} onClick={() => { if (!on) setView(v); }} style={{ ...St.toggleBtn, ...(on ? St.toggleOn : {}) }}>{label}</button>;
               })}
@@ -1409,6 +1409,8 @@ export default function App() {
             onUpdateAccount={updateTransferAccount} onRemoveAccount={removeTransferAccount} />
         ) : view === "cashflow" ? (
           <CashflowPage cur={cur} calc={calc} />
+        ) : view === "sheet" ? (
+          <SheetPage monthKey={sel} fig={cur} calc={calc} />
         ) : view === "history" ? (
           <div className="fade">
         {/* Statistics */}
@@ -1777,7 +1779,7 @@ export default function App() {
 
       {/* Phone-only bottom tab bar (hidden ≥641px, where the header tabs show). */}
       <nav className="bottomNav" aria-label={TXT.viewToggleAria}>
-        {[["month", CalendarDays, TXT.navMonth], ["savings", PiggyBank, TXT.navSavings], ["transfers", ArrowLeftRight, TXT.navTransfers], ["cashflow", Waypoints, TXT.navCashflow], ["history", History, TXT.navHistory]].map(([v, Icon, label]) => {
+        {[["month", CalendarDays, TXT.navMonth], ["savings", PiggyBank, TXT.navSavings], ["transfers", ArrowLeftRight, TXT.navTransfers], ["cashflow", Waypoints, TXT.navCashflow], ["sheet", Table2, TXT.navSheet], ["history", History, TXT.navHistory]].map(([v, Icon, label]) => {
           const on = v === "month" ? onMonthPage : view === v;
           return (
             <button key={v} type="button" onClick={() => { if (!on) setView(v); window.scrollTo({ top: 0 }); }} className={on ? "on" : undefined} aria-current={on ? "page" : undefined}>
@@ -1929,6 +1931,105 @@ const pr = {
   tdRightMuted: { padding: "3px 6px", borderBottom: "1px solid #ccc", textAlign: "right", whiteSpace: "nowrap", color: "#555", fontSize: 11 },
   tdTotal: { padding: "4px 6px", fontWeight: 700, borderTop: "1px solid #000" },
   empty: { fontSize: 12, color: "#555", fontStyle: "italic", margin: "4px 0" },
+};
+
+// The "Table" page: the selected month as one plain spreadsheet/invoice-like
+// grid (issue #94). Same numbers as the month page, but monochrome, no
+// charts, icons or editing — for people who just want to read it. Unlike
+// PrintDocument it is shown on screen, so it follows the light/dark theme
+// using only ink and card colors.
+function SheetPage({ monthKey: key, fig, calc }) {
+  const nameOf = (p, i) => p.name || t(LANG, "personName", { n: i + 1 });
+  const methodLabel = fig.method === "equal" ? TXT.equalMethod : fig.method === "custom" ? TXT.customMethod : TXT.incomeMethod;
+  const cols = 4;
+  const Head = ({ children }) => <tr><th colSpan={cols} style={sh.section}>{children}</th></tr>;
+  const Row = ({ label, category = "", monthly, sign = "", strong, indent }) => (
+    <tr style={strong ? sh.totalRow : undefined}>
+      <td style={{ ...sh.td, ...(indent ? { paddingLeft: 22 } : {}), ...(strong ? sh.strong : {}) }} className="sheetText">{label}</td>
+      <td style={{ ...sh.td, ...sh.cat }} className="sheetText">{category}</td>
+      <td style={{ ...sh.td, ...sh.num, ...(strong ? sh.strong : {}) }}>{sign}{eur(monthly)}</td>
+      <td style={{ ...sh.td, ...sh.num, ...(strong ? sh.strong : {}) }} className="sheetYear">{sign}{eur(monthly * 12)}</td>
+    </tr>
+  );
+  const Empty = () => <tr><td colSpan={cols} style={{ ...sh.td, ...sh.empty }}>{TXT.printNoEntries}</td></tr>;
+
+  return (
+    <div className="fade">
+      <div style={St.savingsPageHead}>
+        <ColTitle>{t(LANG, "sheetTitle", { month: monthLong(key) })}</ColTitle>
+      </div>
+      <p style={sh.hint}>{t(LANG, "sheetHint", { month: monthLong(key) })}</p>
+      <div style={sh.wrap}>
+        <table style={sh.table} className="sheetTable">
+          <colgroup><col /><col style={{ width: "22%" }} /><col style={{ width: "17%" }} /><col style={{ width: "17%" }} className="sheetYear" /></colgroup>
+          <thead>
+            <tr>
+              <th style={sh.th}>{TXT.sheetColLabel}</th>
+              <th style={sh.th}>{TXT.sheetColCategory}</th>
+              <th style={{ ...sh.th, ...sh.num }}>{TXT.sheetColMonth}</th>
+              <th style={{ ...sh.th, ...sh.num }} className="sheetYear">{TXT.sheetColYear}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <Head>{TXT.incomes}</Head>
+            {fig.partners.map((p, i) => <Row key={p.id} label={t(LANG, "sheetIncome", { name: nameOf(p, i) })} monthly={calc.people[i]?.income ?? 0} />)}
+            {fig.govIncome.map((g) => <Row key={g.id} label={g.label || TXT.unnamed} category={TXT.government} monthly={monthlyOf(g, fig)} />)}
+            <Row label={TXT.sheetIncomeTotal} monthly={calc.total + calc.govTotal} strong />
+
+            <Head>{TXT.expensesSection}</Head>
+            {fig.expenses.length === 0 ? <Empty /> : fig.expenses.map((e) => <Row key={e.id} label={e.label || TXT.unnamed} category={e.category || TXT.otherCategory} monthly={monthlyOf(e, fig)} />)}
+            <Row label={TXT.sheetExpensesTotal} monthly={calc.expensesTotal} strong />
+
+            <Head>{TXT.savingsSection}</Head>
+            {fig.savings.length === 0 ? <Empty /> : fig.savings.map((e) => <Row key={e.id} label={e.label || TXT.unnamed} monthly={monthlyOf(e, fig)} />)}
+            <Row label={TXT.sheetSavingsTotal} monthly={calc.savingsTotal} strong />
+
+            <Head>{TXT.sheetSummary} · {t(LANG, "sheetMethod", { method: methodLabel })}</Head>
+            <Row label={TXT.sheetPot} monthly={calc.potTotal} />
+            {calc.govTotal > 0 && <Row label={TXT.sheetGovLess} monthly={calc.govTotal} />}
+            <Row label={TXT.coupleFunds} monthly={calc.coupleFunds} strong />
+            {calc.buffer > 0.005 && <Row label={t(LANG, "buffer", { pct: fig.margePct || "0" })} monthly={calc.buffer} />}
+            {fig.partners.map((p, i) => (
+              <Row key={p.id} label={t(LANG, "sheetToJoint", { name: nameOf(p, i) })} category={pct(calc.contribShares[p.id] || 0)} monthly={calc.transfers[p.id] || 0} />
+            ))}
+            {fig.partners.map((p, i) => (
+              <Row key={p.id} label={t(LANG, "sheetKeeps", { name: nameOf(p, i) })} category={pct(calc.keeps[p.id] || 0)} monthly={calc.leftovers[p.id] || 0} />
+            ))}
+
+            {fig.partners.map((p, i) => {
+              const exp = listAt(fig, "personalExpenses", p.id), sav = listAt(fig, "personalSavings", p.id);
+              if (!exp.length && !sav.length) return null;
+              const own = personalTotals(fig, calc, p.id);
+              return (
+                <React.Fragment key={`own-${p.id}`}>
+                  <Head>{t(LANG, "printOwnSection", { name: nameOf(p, i) })}</Head>
+                  <Row label={TXT.keepsLeft} monthly={own.leftover} />
+                  {exp.map((e) => <Row key={e.id} label={e.label || TXT.unnamed} category={e.category || TXT.sheetOwnExpense} monthly={monthlyOf(e, fig)} sign="− " indent />)}
+                  {sav.map((e) => <Row key={e.id} label={e.label || TXT.unnamed} category={TXT.sheetOwnSaving} monthly={monthlyOf(e, fig)} sign="− " indent />)}
+                  <Row label={TXT.personalFree} monthly={own.free} strong />
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+const sheetGrid = `1px solid color-mix(in srgb, ${C.ink} 22%, transparent)`;
+const sh = {
+  hint: { fontSize: 13, color: C.muted, margin: "0 0 12px" },
+  wrap: { overflowX: "auto", background: C.card, border: `1px solid ${C.ink}`, borderRadius: 2 },
+  table: { width: "100%", minWidth: 520, borderCollapse: "collapse", fontSize: 13.5, color: C.ink, fontVariantNumeric: "tabular-nums", tableLayout: "fixed" },
+  th: { textAlign: "left", fontWeight: 700, padding: "8px 10px", borderBottom: `2px solid ${C.ink}`, borderRight: sheetGrid, whiteSpace: "nowrap" },
+  section: { textAlign: "left", fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, padding: "14px 10px 6px", borderBottom: `1px solid ${C.ink}` },
+  td: { padding: "6px 10px", borderBottom: sheetGrid, borderRight: sheetGrid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  cat: { color: C.muted },
+  num: { textAlign: "right" },
+  strong: { fontWeight: 700 },
+  totalRow: { borderTop: `1.5px solid ${C.ink}` },
+  empty: { fontStyle: "italic", color: C.muted },
 };
 
 /* ----------------------------------------------------------------
@@ -3985,6 +4086,9 @@ input:focus-visible, button:focus-visible, [role="button"]:focus-visible { outli
    Everything below is layout only; the same components render on every
    screen size. Inputs go to 16px so iOS Safari doesn't zoom on focus. */
 @media (max-width: 640px) {
+  .sheetTable { min-width: 0 !important; table-layout: auto !important; font-size: 13px !important; }
+  .sheetTable .sheetYear { display: none !important; }
+  .sheetTable .sheetText { white-space: normal !important; overflow-wrap: break-word; }
   html { -webkit-text-size-adjust: 100%; }
   body { overflow-x: hidden; }
   .page { padding: 8px 12px calc(84px + env(safe-area-inset-bottom)) !important; }
