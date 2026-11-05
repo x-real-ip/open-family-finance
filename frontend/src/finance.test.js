@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   computeTotals, normalize, migrateFig, monthlyContributionAt, projectSubAccountSeries,
   subAccountContribution, valueAt, transferTargetKey, setTransferAmountAt, FROM_START,
-  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd, isMonthKey, plannedTransfers, lastRecorded, contributionRoute,
+  goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd, isMonthKey, plannedTransfers, transferChanges, lastRecorded, contributionRoute,
 } from "./finance.js";
 
 const fig = (over = {}) => migrateFig({
@@ -237,4 +237,36 @@ test("contribution route: straight to the sub-accounts when the main account kee
   assert.equal(contributionRoute(half, 300, "2026-11"), "via");
   list = plannedTransfers(months, "2026-11", [{ ...half, route: "direct" }]).filter((x) => x.entryId === "vs");
   assert.deepEqual(list.map((x) => [x.type, x.from.type, Math.round(x.amount)]), [["savings", "person", 150], ["forward", "person", 150]]);
+});
+
+test("a direct transfer to a sub-account still knows which pot it belongs to", () => {
+  const months = { "2026-11": fig({ personalSavings: { a: [{ id: "vs", label: "Vrij spaargeld", amount: "300" }] } }) };
+  const goal = { entryId: "vs", forwarded: true, mainBank: "SNS Sparen", checkpoints: {},
+    subAccounts: [{ id: "d", bank: "Distingo Bank", transferMode: "percent", sharePercent: "100", checkpoints: {} }] };
+  const [tr] = plannedTransfers(months, "2026-11", [goal]).filter((x) => x.entryId === "vs");
+  assert.equal(tr.from.type, "person");
+  assert.equal(tr.potLabel, "Vrij spaargeld");
+  assert.equal(tr.fixed, false, "a percentage share has no transfer day");
+  assert.equal(tr.key, "forward|person:a|sub:d");
+});
+
+test("transfer changes: new, changed, unchanged and stopped since last month", () => {
+  const months = {
+    "2026-10": fig({ savings: [{ id: "s1", label: "Sparen", amount: "600" }, { id: "s2", label: "Oud", amount: "50" }] }),
+    "2026-11": fig({ savings: [{ id: "s1", label: "Sparen", amount: "700" }, { id: "s3", label: "Nieuw", amount: "20" }] }),
+  };
+  const { hasPrevious, current, status, stopped } = transferChanges(months, "2026-11", []);
+  assert.ok(hasPrevious);
+  const byPot = (id) => current.find((x) => x.entryId === id);
+  assert.equal(status[byPot("s1").key].kind, "changed"); close(status[byPot("s1").key].previous, 600);
+  assert.equal(status[byPot("s3").key].kind, "new");
+  assert.deepEqual(stopped.map((x) => x.entryId), ["s2"]);
+  assert.ok(current.filter((x) => x.type === "contribution").every((x) => status[x.key].kind === "changed"), "contributions follow the bigger total");
+  assert.equal(transferChanges(months, "2026-10", []).hasPrevious, false, "nothing to compare the first month with");
+});
+
+test("transfer ticks survive a reload", () => {
+  const data = normalize({ selectedMonth: "2026-11", months: { "2026-11": {} }, transferChecks: { "2026-11": { "savings|joint|pot:s1": 700 } } });
+  assert.equal(data.transferChecks["2026-11"]["savings|joint|pot:s1"], 700);
+  assert.deepEqual(normalize({ selectedMonth: "2026-11", months: { "2026-11": {} } }).transferChecks, {});
 });

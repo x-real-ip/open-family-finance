@@ -26,7 +26,7 @@ import {
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, History, Link2,
   Copy, Sun, Moon,
   Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Printer,
-  MoreHorizontal, CalendarDays, Waypoints, ArrowLeftRight, ArrowRight, Search, X, Users, StickyNote, Table2,
+  MoreHorizontal, CalendarDays, Waypoints, ArrowLeftRight, Search, X, Users, StickyNote, Table2,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
@@ -40,7 +40,7 @@ import {
   allSavingsOf, flip, pctOf, uid, clone, monthKey, keyToDate, shiftMonth,
   figuresFor, computeTotals, migrateFig, SORT_MODES, DEFAULT_LIST_SORT, listSortOf, migrateCheckpoints, migrateSubAccount,
   migrateGoal, freshData, normalize, monthlyContributionAt, subAccountContribution, projectSubAccountSeries,
-  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey, plannedTransfers, lastRecorded, migrateTransferAccount, contributionRoute,
+  valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey, plannedTransfers, transferChanges, lastRecorded, migrateTransferAccount, contributionRoute,
 } from "./finance";
 
 /* ----------------------------------------------------------------
@@ -994,6 +994,12 @@ export default function App() {
   // Household-level accounts that fixed costs are transferred to, plus the
   // joint account's own name — not month-scoped, like savings goals.
   const setJointAccountName = (name) => setData((d) => ({ ...d, jointAccountName: name }));
+  // Tick transfers off (amount) or untick them (null) for one month.
+  const setTransferChecks = (month, entries) => setData((d) => {
+    const m = { ...((d.transferChecks || {})[month] || {}) };
+    for (const [key, amount] of entries) { if (amount == null) delete m[key]; else m[key] = round2(amount); }
+    return { ...d, transferChecks: { ...(d.transferChecks || {}), [month]: m } };
+  });
   const addTransferAccount = (name = "") => {
     const account = migrateTransferAccount({ name });
     setData((d) => ({ ...d, transferAccounts: [...(d.transferAccounts || []), account] }));
@@ -1405,6 +1411,7 @@ export default function App() {
         ) : view === "transfers" ? (
           <TransfersPage months={data.months} sel={sel} goals={data.savingsGoals || []} partners={cur.partners}
             transferAccounts={data.transferAccounts || []} jointAccountName={data.jointAccountName || ""}
+            checks={(data.transferChecks || {})[sel] || {}} onCheck={setTransferChecks}
             onJointAccountName={setJointAccountName} onAddAccount={() => addTransferAccount("")}
             onUpdateAccount={updateTransferAccount} onRemoveAccount={removeTransferAccount} />
         ) : view === "cashflow" ? (
@@ -2626,8 +2633,14 @@ function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, cu
 // viewing — grouped by the account the money leaves, so it reads as a
 // to-do list for setting up (or checking) standing orders: from KNAB to
 // Raisin · Coen, € 200 on the 25th, IBAN …, description PLAN… (both copyable).
-function TransfersPage({ months, sel, goals, partners, transferAccounts, jointAccountName, onJointAccountName, onAddAccount, onUpdateAccount, onRemoveAccount }) {
-  const list = useMemo(() => plannedTransfers(months, sel, goals, transferAccounts), [months, sel, goals, transferAccounts]);
+// Each transfer can be ticked off per month; a tick remembers the amount, so
+// it lapses when the amount changes afterwards. Compared with the previous
+// month, each transfer is marked new / changed / unchanged, and transfers
+// that disappeared are listed under "Stop".
+function TransfersPage({ months, sel, goals, partners, transferAccounts, jointAccountName, checks, onCheck, onJointAccountName, onAddAccount, onUpdateAccount, onRemoveAccount }) {
+  const { hasPrevious, current: list, status, stopped } = useMemo(() => transferChanges(months, sel, goals, transferAccounts), [months, sel, goals, transferAccounts]);
+  const [onlyChanges, setOnlyChanges] = useState(false);
+  const prevMonth = monthLong(shiftMonth(sel, -1));
   const personName = (id) => { const i = partners.findIndex((p) => p.id === id); return i < 0 ? "?" : (partners[i].name || t(LANG, "personName", { n: i + 1 })); };
   const nameOf = (acc) => acc.type === "person" ? t(LANG, "transferOwnAccount", { name: personName(acc.personId) })
     : acc.type === "joint" ? (jointAccountName || TXT.transferJointAccount)
@@ -2635,34 +2648,115 @@ function TransfersPage({ months, sel, goals, partners, transferAccounts, jointAc
     : acc.type === "pot" ? (acc.bank || t(LANG, "transferPotAccount", { label: acc.label || TXT.unnamed }))
     : accountName(acc.sub);
   // Pots on the same bank (e.g. several pots on KNAB) share one "from" group.
-  const keyOf = (acc) => acc.type === "person" ? `person:${acc.personId}` : acc.type === "joint" ? "joint"
+  const groupKeyOf = (acc) => acc.type === "person" ? `person:${acc.personId}` : acc.type === "joint" ? "joint"
     : acc.type === "pot" ? (acc.bank ? `bank:${acc.bank.trim().toLowerCase()}` : `pot:${acc.entryId}`) : `sub:${acc.sub.id}`;
   const order = { person: 0, joint: 1, pot: 2, sub: 3 };
-  const groups = [];
-  for (const tr of list) {
-    const key = keyOf(tr.from);
-    let g = groups.find((x) => x.key === key);
-    if (!g) groups.push(g = { key, name: nameOf(tr.from), rank: order[tr.from.type], rows: [] });
-    g.rows.push(tr);
-  }
-  groups.sort((a, b) => a.rank - b.rank);
-  const potLabel = (tr) => (tr.to.type === "pot" ? tr.to.label : tr.from.type === "pot" ? tr.from.label : "");
+  const group = (rows) => {
+    const groups = [];
+    for (const tr of rows) {
+      const key = groupKeyOf(tr.from);
+      let g = groups.find((x) => x.key === key);
+      if (!g) groups.push(g = { key, name: nameOf(tr.from), rank: order[tr.from.type], rows: [] });
+      g.rows.push(tr);
+    }
+    return groups.sort((a, b) => a.rank - b.rank);
+  };
+  const potOf = (tr) => tr.potLabel || TXT.unnamed;
   const purpose = (tr) => {
-    const pot = potLabel(tr) || TXT.unnamed;
     if (tr.type === "contribution") return TXT.transferPurposeContribution;
-    if (tr.type === "fixedCosts") return [t(LANG, "transferPurposeFixedCosts", { items: tr.items.map((i) => `${i.label || TXT.unnamed} ${eur(i.amount)}`).join(", ") }), tr.day ? t(LANG, "transferOnDay", { day: tr.day }) : TXT.transferNoDay].join(" · ");
+    if (tr.type === "fixedCosts") return t(LANG, "transferPurposeFixedCosts", { items: tr.items.map((i) => `${i.label || TXT.unnamed} ${eur(i.amount)}`).join(", ") });
     // A pot without a bank is already named after itself — don't repeat it.
-    if (tr.type === "savings") return tr.to.bank ? t(LANG, "transferPurposePot", { pot }) : null;
-    if (tr.type === "forward") return [t(LANG, "transferPurposePot", { pot }), tr.day ? t(LANG, "transferOnDay", { day: tr.day }) : TXT.transferNoDay].join(" · ");
-    if (tr.type === "depositStart") return t(LANG, "transferDepositStart", { pot });
-    return t(LANG, "transferDepositEnd", { pot });
+    if (tr.type === "savings") return tr.to.bank ? t(LANG, "transferPurposePot", { pot: potOf(tr) }) : null;
+    if (tr.type === "forward") return t(LANG, "transferPurposePot", { pot: potOf(tr) });
+    if (tr.type === "depositStart") return t(LANG, "transferDepositStart", { pot: potOf(tr) });
+    return t(LANG, "transferDepositEnd", { pot: potOf(tr) });
   };
   const once = (tr) => tr.type === "depositStart" || tr.type === "depositEnd";
+  // A tick counts only while the amount is still the one that was ticked.
+  const tickOf = (tr) => checks[tr.key];
+  const isDone = (tr) => tickOf(tr) != null && Math.abs(num(tickOf(tr)) - tr.amount) < 0.005;
+  const stopKey = (tr) => `stop|${tr.key}`;
+  const needsAction = (tr) => !hasPrevious || status[tr.key]?.kind !== "same";
+  const changedCount = list.filter((tr) => hasPrevious && status[tr.key]?.kind !== "same").length + stopped.length;
+  const total = list.length + stopped.length;
+  const done = list.filter(isDone).length + stopped.filter((tr) => checks[stopKey(tr)] != null).length;
+  const sameOpen = hasPrevious ? list.filter((tr) => status[tr.key]?.kind === "same" && !isDone(tr)) : [];
+  const shown = onlyChanges ? list.filter((tr) => needsAction(tr) || (tickOf(tr) != null && !isDone(tr))) : list;
+  const groups = group(shown);
+
+  const badge = (tr) => {
+    if (!hasPrevious) return null;
+    const st = status[tr.key];
+    if (st?.kind === "new") return <span style={{ ...St.transferBadge, ...St.transferBadgeWarn }}>{TXT.transferStatusNew}</span>;
+    if (st?.kind === "changed") return <span style={{ ...St.transferBadge, ...St.transferBadgeWarn }}>{t(LANG, "transferStatusChanged", { amount: eur(st.previous) })}</span>;
+    return <span style={St.transferBadge}>{TXT.transferStatusSame}</span>;
+  };
+  const dayDetail = (tr) => {
+    if (tr.type === "fixedCosts") return <TransferDetail label={TXT.transferDayLabel} value={tr.day && t(LANG, "transferDayValue", { day: tr.day })} missing={TXT.transferDayMissingAccount} copy={false} />;
+    if (tr.type === "forward" && tr.fixed) return <TransferDetail label={TXT.transferDayLabel} value={tr.day && t(LANG, "transferDayValue", { day: tr.day })} missing={t(LANG, "transferDayMissingSub", { pot: potOf(tr), account: accountName(tr.to.sub) })} copy={false} />;
+    return null;
+  };
+  const row = (tr, i, { stop = false } = {}) => {
+    const key = stop ? stopKey(tr) : tr.key;
+    const ticked = stop ? checks[key] != null : isDone(tr);
+    const stale = !stop && tickOf(tr) != null && !ticked;
+    const toSub = tr.to.type === "sub" && tr.type !== "depositEnd";
+    const day = !stop && dayDetail(tr);
+    return (
+      <div key={i} style={{ ...St.transferRow, ...(ticked ? St.transferRowDone : {}) }}>
+        <button type="button" role="checkbox" aria-checked={ticked} aria-label={TXT.transferCheck} title={TXT.transferCheck}
+          onClick={() => onCheck(sel, [[key, ticked ? null : tr.amount]])}
+          style={{ ...St.transferCheckbox, ...(ticked ? St.transferCheckboxOn : {}) }}>
+          {ticked && <Check size={14} />}
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 600 }}>{nameOf(tr.to)}</span>
+            {!stop && badge(tr)}
+          </div>
+          {purpose(tr) && <div style={St.subSummary}>{purpose(tr)}</div>}
+          {stale && <div style={{ ...St.subSummary, color: C.warn }}><AlertTriangle size={12} style={{ verticalAlign: "-1px" }} /> {t(LANG, "transferStaleCheck", { amount: eur(num(tickOf(tr))) })}</div>}
+          {!ticked && !stop && (tr.type === "fixedCosts" || toSub) && (
+            <div style={St.transferDetails}>
+              <TransferDetail label={TXT.subAccountIban} value={tr.iban} missing={TXT.transferMissingIban} />
+              {tr.type === "fixedCosts"
+                ? tr.reference && <TransferDetail label={TXT.subAccountReference} value={tr.reference} />
+                : <TransferDetail label={TXT.subAccountReference} value={tr.reference} missing={TXT.transferMissingReference} />}
+              {toSub && tr.planId && <TransferDetail label={TXT.subAccountPlanId} value={tr.planId} />}
+              {day}
+            </div>
+          )}
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: tr.type === "depositEnd" ? C.save : C.ink, textDecoration: stop ? "line-through" : "none" }}>{eur(tr.amount)}</div>
+          <div style={St.transferPer}>{once(tr) ? TXT.transferOnce : TXT.periodMonthAbbr}</div>
+        </div>
+      </div>
+    );
+  };
   return (
     <div className="fade">
       <ColTitle>{TXT.transfersView}</ColTitle>
       <div style={St.correspondentDocMuted}>{t(LANG, "transfersHint", { month: monthLong(sel) })}</div>
-      {groups.length === 0 && <div style={{ ...St.emptyHist, marginTop: 12 }}><ArrowLeftRight size={18} style={{ color: C.muted }} /><span>{TXT.transfersEmpty}</span></div>}
+      {total === 0 && <div style={{ ...St.emptyHist, marginTop: 12 }}><ArrowLeftRight size={18} style={{ color: C.muted }} /><span>{TXT.transfersEmpty}</span></div>}
+
+      {total > 0 && (
+        <section style={{ ...St.section, marginTop: 12 }} className="fade">
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <span style={St.savingsGoalName}>{done === total ? <><Check size={16} style={{ color: C.save, verticalAlign: "-2px" }} /> {t(LANG, "transfersAllDone", { month: monthLong(sel) })}</> : t(LANG, "transfersProgress", { done, total })}</span>
+            <span style={{ flex: 1 }} />
+            {hasPrevious && <span style={{ ...St.transferPer, color: changedCount ? C.warn : C.muted }}>{changedCount ? t(LANG, "transfersChangedSummary", { n: changedCount, month: prevMonth }) : t(LANG, "transfersNoChanges", { month: prevMonth })}</span>}
+          </div>
+          <div style={St.transferProgress}><div style={{ ...St.transferProgressFill, width: `${(done / total) * 100}%` }} /></div>
+          {hasPrevious && (
+            <div style={{ ...St.chipRow, marginTop: 10 }}>
+              <button type="button" onClick={() => setOnlyChanges((v) => !v)} style={{ ...St.chip, ...(onlyChanges ? St.chipOn : {}) }}>{TXT.transfersOnlyChanges}</button>
+              {sameOpen.length > 0 && <button type="button" onClick={() => onCheck(sel, sameOpen.map((tr) => [tr.key, tr.amount]))} style={St.chip}><Check size={13} /> {t(LANG, "transfersCheckUnchanged", { n: sameOpen.length })}</button>}
+            </div>
+          )}
+        </section>
+      )}
+
       {groups.map((g) => {
         const monthlyTotal = g.rows.filter((r) => !once(r)).reduce((sum, r) => sum + r.amount, 0);
         return (
@@ -2670,41 +2764,27 @@ function TransfersPage({ months, sel, goals, partners, transferAccounts, jointAc
             <div style={St.transferHead}>
               <span style={St.transferFromLabel}>{TXT.transferFrom}</span>
               <span style={St.savingsGoalName}>{g.name}</span>
+              <span style={St.transferPer}>{g.rows.filter(isDone).length}/{g.rows.length}</span>
               <span style={{ flex: 1 }} />
-              {monthlyTotal > 0 && <span style={St.headTotal}>{eur(monthlyTotal)} <span style={St.transferPer}>{TXT.periodMonthAbbr}</span></span>}
+              {monthlyTotal > 0 && !onlyChanges && <span style={St.headTotal}>{eur(monthlyTotal)} <span style={St.transferPer}>{TXT.periodMonthAbbr}</span></span>}
             </div>
-            {g.rows.map((tr, i) => {
-              const toSub = tr.to.type === "sub" && tr.type !== "depositEnd";
-              return (
-                <div key={i} style={St.transferRow}>
-                  <ArrowRight size={16} style={{ color: tr.type === "depositEnd" ? C.save : C.muted, flexShrink: 0, marginTop: 3 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600 }}>{nameOf(tr.to)}</div>
-                    {purpose(tr) && <div style={St.subSummary}>{purpose(tr)}</div>}
-                    {tr.type === "fixedCosts" && (
-                      <div style={St.transferDetails}>
-                        <TransferDetail label={TXT.subAccountIban} value={tr.iban} missing={TXT.transferMissingIban} />
-                        {tr.reference && <TransferDetail label={TXT.subAccountReference} value={tr.reference} />}
-                      </div>
-                    )}
-                    {toSub && (
-                      <div style={St.transferDetails}>
-                        <TransferDetail label={TXT.subAccountIban} value={tr.iban} missing={TXT.transferMissingIban} />
-                        <TransferDetail label={TXT.subAccountReference} value={tr.reference} missing={TXT.transferMissingReference} />
-                        {tr.planId && <TransferDetail label={TXT.subAccountPlanId} value={tr.planId} />}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: tr.type === "depositEnd" ? C.save : C.ink }}>{eur(tr.amount)}</div>
-                    <div style={St.transferPer}>{once(tr) ? TXT.transferOnce : TXT.periodMonthAbbr}</div>
-                  </div>
-                </div>
-              );
-            })}
+            {g.rows.map((tr, i) => row(tr, i))}
           </section>
         );
       })}
+
+      {stopped.length > 0 && (
+        <section style={{ ...St.section, marginTop: 12, borderColor: C.warn }} className="fade">
+          <div style={St.transferHead}><span style={{ ...St.savingsGoalName, color: C.warn }}>{TXT.transfersStoppedTitle}</span></div>
+          <div style={{ ...St.subSummary, marginBottom: 4 }}>{t(LANG, "transfersStoppedHint", { month: prevMonth })}</div>
+          {stopped.map((tr, i) => (
+            <div key={i}>
+              <div style={{ ...St.transferFromLabel, marginTop: 8 }}>{TXT.transferFrom} {nameOf(tr.from)}</div>
+              {row(tr, i, { stop: true })}
+            </div>
+          ))}
+        </section>
+      )}
 
       {/* The accounts this page talks about that aren't savings accounts:
           the joint account's name, and accounts fixed costs go to. */}
@@ -2749,12 +2829,12 @@ function TransferAccountPicker({ value, accounts, onChange, onCreate }) {
 // One copyable transfer detail (IBAN, description, ID); says so when it's
 // missing, since a Raisin transfer without its PLAN description won't land
 // on the right savings account.
-function TransferDetail({ label, value, missing }) {
+function TransferDetail({ label, value, missing, copy = true }) {
   return (
     <div style={St.transferDetail}>
       <span style={St.transferDetailLabel}>{label}</span>
       {value
-        ? <><code style={St.transferCode}>{value}</code><CopyButton value={value} /></>
+        ? (copy ? <><code style={St.transferCode}>{value}</code><CopyButton value={value} /></> : <span>{value}</span>)
         : <span style={{ color: C.warn }}>{missing}</span>}
     </div>
   );
@@ -3859,6 +3939,13 @@ const St = {
   transferFromLabel: { fontSize: 11.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: C.muted },
   transferPer: { fontSize: 12, color: C.muted, fontWeight: 500 },
   transferRow: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0", borderBottom: `1px solid ${C.line}` },
+  transferRowDone: { opacity: 0.55 },
+  transferCheckbox: { width: 22, height: 22, flexShrink: 0, marginTop: 1, borderRadius: 6, border: `2px solid ${C.muted}`, background: "transparent", color: C.card, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 },
+  transferCheckboxOn: { background: C.save, borderColor: C.save },
+  transferBadge: { fontSize: 11.5, fontWeight: 600, color: C.muted, border: `1px solid ${C.line}`, borderRadius: 999, padding: "1px 8px" },
+  transferBadgeWarn: { color: C.warn, borderColor: C.warn, background: "var(--warn-soft)" },
+  transferProgress: { height: 6, borderRadius: 999, background: C.line, marginTop: 10, overflow: "hidden" },
+  transferProgressFill: { height: "100%", background: C.save, borderRadius: 999, transition: "width .2s" },
   transferDetails: { display: "flex", flexDirection: "column", gap: 2, marginTop: 6 },
   transferDetail: { display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, minWidth: 0, flexWrap: "wrap" },
   transferDetailLabel: { color: C.muted, minWidth: 92 },
