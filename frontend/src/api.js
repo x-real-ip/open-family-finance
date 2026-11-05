@@ -26,7 +26,10 @@ async function req(method, path, body) {
   });
   if (res.status === 404) return null;
   if (res.status === 204) return null;
-  if (!res.ok) throw new Error(`API ${method} ${path} -> ${res.status}`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.error || `API ${method} ${path} -> ${res.status}`);
+  }
   return res.json();
 }
 
@@ -105,5 +108,18 @@ export const paperless = {
       console.warn("paperless: could not load document", e);
       return null;
     }
+  },
+};
+
+// The monthly e-mail report (built and sent by the backend).
+export const report = {
+  status: () => req("GET", "/api/report/status"),
+  send: (month) => req("POST", "/api/report/send", { month }),
+  // The PDF as a blob URL (a plain link can't carry the bearer token).
+  async pdfUrl(month) {
+    const headers = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
+    const res = await fetch(`/api/report/pdf?month=${encodeURIComponent(month)}`, { headers });
+    if (!res.ok) throw new Error(`${res.status}`);
+    return URL.createObjectURL(await res.blob());
   },
 };

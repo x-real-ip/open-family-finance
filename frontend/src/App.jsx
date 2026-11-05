@@ -26,13 +26,13 @@ import {
   ChevronDown, TrendingUp, Landmark, PiggyBank, Wallet, Receipt, History, Link2,
   Copy, Sun, Moon,
   Calculator, Github, GripVertical, Building2, CalendarClock, AlertTriangle, Printer,
-  MoreHorizontal, CalendarDays, Waypoints, ArrowLeftRight, Search, X, Users, StickyNote, Table2,
+  MoreHorizontal, CalendarDays, Waypoints, ArrowLeftRight, Search, X, Users, StickyNote, Table2, Mail, FileText, Send,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, Sankey, Rectangle, Layer,
 } from "recharts";
-import { storage, paperless, PAPERLESS_ENABLED } from "./api";
+import { storage, paperless, report as reportApi, PAPERLESS_ENABLED } from "./api";
 import { LANG, TXT, t, getRuntimeCurrencyLocale, getRuntimeDateLocale, getRuntimeAppTitle } from "./i18n";
 import {
   DEFAULT_PERSON, DEFAULT_FIGURES, num, round2, clamp01, toMonthly, monthlyOf, monthlyInc,
@@ -301,6 +301,7 @@ function buildCashflow(cur, calc, detail) {
 ------------------------------------------------------------------- */
 export default function App() {
   const [data, setData] = useState(freshData);
+  const [reportOpen, setReportOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(true);
   const [view, setView] = useState("month");
@@ -994,6 +995,7 @@ export default function App() {
   // Household-level accounts that fixed costs are transferred to, plus the
   // joint account's own name — not month-scoped, like savings goals.
   const setJointAccountName = (name) => setData((d) => ({ ...d, jointAccountName: name }));
+  const updateReport = (patch) => setData((d) => ({ ...d, report: { ...d.report, ...patch } }));
   // Tick transfers off (amount) or untick them (null) for one month.
   const setTransferChecks = (month, entries) => setData((d) => {
     const m = { ...((d.transferChecks || {})[month] || {}) };
@@ -1369,6 +1371,7 @@ export default function App() {
           <MonthActions pastMonths={pastMonths} futureMonths={futureMonths} printing={Boolean(printJob)} canDelete={sortedMonths.length > 1}
             onCopy={(pk, fk) => copyMonth([...pk, ...fk])} onReset={resetMonth}
             onPrintMonth={() => setPrintJob({ type: "month", key: sel })} onPrintYear={() => setPrintJob({ type: "year", year: sel.slice(0, 4) })}
+            onReport={() => setReportOpen(true)}
             onDelete={() => deleteMonth(sel)} />
         </div>
 
@@ -1808,8 +1811,102 @@ export default function App() {
           onPick={confirmAmount} onCancel={() => confirmAmount(false)} />
       )}
       {renderDrawer()}
+      {reportOpen && <ReportPanel settings={data.report} sel={sel} onChange={updateReport} onClose={() => setReportOpen(false)}
+        flush={() => storage.set(KEY, JSON.stringify(data))} />}
       {printJob && <PrintDocument job={printJob} months={printMonths} appTitle={APP_TITLE} />}
     </div>
+  );
+}
+
+// Settings for the monthly report the backend e-mails as a PDF: on/off,
+// recipients and day, plus a preview and "send now" for the month you're
+// viewing. The backend reads the saved state, so both save first.
+const validEmails = (s) => String(s || "").split(/[,;\s]+/).filter((x) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+function ReportPanel({ settings, sel, onChange, onClose, flush }) {
+  const [server, setServer] = useState(null);
+  const [busy, setBusy] = useState(null); // null | "preview" | "send"
+  const [message, setMessage] = useState(null); // { ok, text }
+  const reload = () => reportApi.status().then(setServer).catch(() => setServer({ error: true }));
+  useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const recipients = validEmails(settings.recipients);
+  const smtp = Boolean(server?.smtpConfigured);
+  const status = server?.status || {};
+  const dayNum = Math.min(28, Math.max(1, Number(settings.day) || 1));
+  // When the next scheduled report goes out, from the server's "today".
+  const next = (() => {
+    if (!server?.today || !settings.enabled || !recipients.length || !smtp) return null;
+    const { month, day } = server.today;
+    const target = status.lastSentMonth === month ? shiftMonth(month, 1) : month;
+    const d = keyToDate(target); d.setDate(target === month && day > dayNum ? day : dayNum);
+    return new Intl.DateTimeFormat(getRuntimeDateLocale(), { day: "numeric", month: "long", year: "numeric" }).format(d);
+  })();
+  const fmt = (iso) => new Intl.DateTimeFormat(getRuntimeDateLocale(), { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
+  const preview = async () => {
+    const w = window.open("", "_blank"); // opened right away, or popup blockers step in
+    setBusy("preview"); setMessage(null);
+    try { await flush(); const url = await reportApi.pdfUrl(sel); if (w) w.location.href = url; else window.location.href = url; }
+    catch (e) { if (w) w.close(); setMessage({ ok: false, text: t(LANG, "reportFailed", { error: e.message }) }); }
+    finally { setBusy(null); }
+  };
+  const send = async () => {
+    setBusy("send"); setMessage(null);
+    try { await flush(); await reportApi.send(sel); setMessage({ ok: true, text: t(LANG, "reportSentNow", { to: recipients.join(", ") }) }); reload(); }
+    catch (e) { setMessage({ ok: false, text: t(LANG, "reportFailed", { error: e.message }) }); }
+    finally { setBusy(null); }
+  };
+  const section = (label, body) => <section style={St.drawerSection}><div style={St.drawerLabel}>{label}</div>{body}</section>;
+  return (
+    <>
+      <div className="drawerBackdrop" onClick={onClose} />
+      <aside className="drawer" role="dialog" aria-label={TXT.reportPanelTitle} style={St.drawer}>
+        <div style={St.drawerHead}>
+          <span style={St.drawerCrumb}><Mail size={13} style={{ verticalAlign: "-2px" }} /> {TXT.reportPanelTitle}</span>
+          <button type="button" onClick={onClose} style={St.iconBtn} aria-label={TXT.close}><X size={18} /></button>
+        </div>
+        <div style={{ ...St.drawerTitle, borderBottom: "none" }}>{TXT.reportPanelTitle}</div>
+        <div style={St.drawerMuted}>{TXT.reportPanelIntro}</div>
+        {server && !smtp && <div style={{ ...St.drawerMuted, color: C.warn, marginTop: 10 }}><AlertTriangle size={13} style={{ verticalAlign: "-2px" }} /> {TXT.reportSmtpMissing}</div>}
+
+        {section(TXT.reportEnabled, (
+          <>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, cursor: "pointer" }}>
+              <input type="checkbox" checked={settings.enabled} onChange={(e) => onChange({ enabled: e.target.checked })} />
+              {TXT.reportEnabled}
+            </label>
+            <PanelField label={TXT.reportRecipients} info={TXT.reportRecipientsInfo}>
+              <input type="text" inputMode="email" value={settings.recipients} placeholder={TXT.reportRecipientsPlaceholder}
+                onChange={(e) => onChange({ recipients: e.target.value })} style={St.drawerInput} />
+              {settings.recipients.trim() && !recipients.length && <div style={{ ...St.drawerMuted, color: C.warn, marginTop: 4 }}>{TXT.reportRecipientsInvalid}</div>}
+            </PanelField>
+            <PanelField label={TXT.reportDay} info={TXT.reportDayInfo}>
+              <input inputMode="numeric" value={settings.day} style={{ ...St.drawerInput, maxWidth: 90 }}
+                onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2); onChange({ day: v && Number(v) > 28 ? "28" : v }); }}
+                onBlur={() => onChange({ day: String(dayNum) })} />
+            </PanelField>
+            <div style={{ ...St.drawerMuted, marginTop: 10 }}>
+              {status.lastSentMonth ? t(LANG, "reportLastSent", { month: monthLong(status.lastSentMonth), date: fmt(status.lastSentAt) }) : TXT.reportNeverSent}
+              {next && <> · {t(LANG, "reportNextSend", { date: next })}</>}
+            </div>
+            {status.lastError && <div style={{ ...St.drawerMuted, color: C.exp, marginTop: 4 }}>{t(LANG, "reportLastError", { error: status.lastError })}</div>}
+          </>
+        ))}
+
+        {section(t(LANG, "reportForMonth", { month: monthLong(sel) }), (
+          <>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" onClick={preview} disabled={Boolean(busy)} style={St.ghostBtn}><FileText size={14} style={{ verticalAlign: "-2px" }} /> {busy === "preview" ? TXT.reportSending : TXT.reportPreview}</button>
+              <button type="button" onClick={send} disabled={Boolean(busy) || !smtp || !recipients.length} style={{ ...St.ghostBtn, ...(!smtp || !recipients.length ? { opacity: 0.5, cursor: "default" } : {}) }}><Send size={14} style={{ verticalAlign: "-2px" }} /> {busy === "send" ? TXT.reportSending : TXT.reportSendNow}</button>
+            </div>
+            {message && <div style={{ ...St.drawerMuted, marginTop: 8, color: message.ok ? C.save : C.exp }}>{message.text}</div>}
+          </>
+        ))}
+      </aside>
+    </>
   );
 }
 
@@ -2191,7 +2288,7 @@ function PersonTiles({ color, transfer, income, expTotal, savTotal, free }) {
 // month picker in the same popover. Both drop down from the bar, also on
 // phones: the bar is sticky there, so a fixed sheet would end up behind
 // the bottom navigation.
-function MonthActions({ pastMonths, futureMonths, printing, canDelete, onCopy, onReset, onPrintMonth, onPrintYear, onDelete }) {
+function MonthActions({ pastMonths, futureMonths, printing, canDelete, onCopy, onReset, onPrintMonth, onPrintYear, onReport, onDelete }) {
   const [mode, setMode] = useState(null); // null | "menu" | "copy"
   const rootRef = useRef(null);
   useClickOutside(rootRef, Boolean(mode), () => setMode(null));
@@ -2213,6 +2310,7 @@ function MonthActions({ pastMonths, futureMonths, printing, canDelete, onCopy, o
           <button type="button" role="menuitem" onClick={run(onReset)} style={St.menuItem}><RotateCcw size={15} /> {TXT.restoreThisMonth}</button>
           <button type="button" role="menuitem" disabled={printing} onClick={run(onPrintMonth)} style={St.menuItem}><Printer size={15} /> {TXT.printMonthBtn}</button>
           <button type="button" role="menuitem" disabled={printing} onClick={run(onPrintYear)} style={St.menuItem}><Printer size={15} /> {TXT.printYearBtn}</button>
+          <button type="button" role="menuitem" onClick={run(onReport)} style={St.menuItem}><Mail size={15} /> {TXT.reportMenu}</button>
           {canDelete && (<>
             <span style={St.menuDivider} />
             <button type="button" role="menuitem" onClick={run(onDelete)} style={{ ...St.menuItem, color: C.exp }}><Trash2 size={15} /> {TXT.deleteMonthMenu}</button>

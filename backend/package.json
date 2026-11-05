@@ -5,10 +5,13 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node --test \"report/*.test.js\""
   },
   "dependencies": {
     "express": "^4.19.2",
+    "nodemailer": "^7.0.10",
+    "pdfkit": "^0.17.2",
     "pg": "^8.12.0"
   }
 }

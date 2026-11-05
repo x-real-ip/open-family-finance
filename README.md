@@ -168,6 +168,13 @@ All configuration is done through environment variables — see
 | `PAPERLESS_PUBLIC_URL`| *(falls back to `PAPERLESS_URL`)* | Base URL used to build "open in paperless" links. Only set this if paperless is reachable at a different address from your browser than `PAPERLESS_URL` (e.g. `PAPERLESS_URL` is a cluster-internal address) |
 | `PAPERLESS_API_TOKEN` | —                        | paperless-ngx API token. Backend-only, never sent to the browser |
 | `PAPERLESS_DOCUMENT_TYPE_PRIORITY` | —           | Optional, comma-separated document type names in priority order (e.g. `Jaaropgave,Jaarafrekening,Factuur,Contract`). The linked document becomes the most recent one of the first type in this list the correspondent has, instead of just the most recent overall. Backend-only |
+| `SMTP_HOST`           | *(unset = no e-mail)*    | Mail server for the monthly report (see below). Backend-only |
+| `SMTP_PORT`           | `587`                    | Mail server port |
+| `SMTP_SECURE`         | `false`                  | `true` for TLS from the start (usually port 465); otherwise STARTTLS when offered |
+| `SMTP_USER` / `SMTP_PASS` | —                    | Mail server login, if needed |
+| `SMTP_FROM`           | *(`SMTP_USER`)*          | Sender address of the report |
+| `SMTP_TLS_REJECT_UNAUTHORIZED` | `true`          | `false` accepts a self-signed certificate (e.g. Proton Mail Bridge) |
+| `TZ`                  | `Europe/Amsterdam`       | Time zone for the report's send day and dates. Backend |
 
 `LANGUAGE`, `APP_TITLE` and `PAPERLESS_ENABLED` are read by the frontend at
 container start (not baked into the build), so the same image can be reused
@@ -201,6 +208,26 @@ The frontend never talks to paperless directly and never receives
 communication goes through the backend API. Leaving `PAPERLESS_ENABLED` unset
 (or `false`) hides the correspondent field entirely; nothing paperless-related
 is shown or fetched.
+
+## Monthly report by e-mail
+
+The backend can e-mail a PDF report every month, with everything from the
+app in plain tables: the new month next to the previous one, which amounts
+changed, the month's transfers as a checklist, the full month overview,
+savings balances, edits made in the app, and a look back at the previous
+month (including which transfers were ticked off).
+
+1. Set `SMTP_HOST` (and `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+   as needed) for the **backend** — see [Configuration](#configuration).
+   `LANGUAGE` and `APP_TITLE` are used for the report too, so set them on
+   the backend as well.
+2. In the app, open the menu next to the month › *Monthly report by e-mail…*,
+   fill in the recipients and the day of the month (1–28), and turn it on.
+3. On that day, that month's report goes out once. If the server was down,
+   it's sent as soon as it's back. *View PDF* and *Send now* work for the
+   month you're looking at; sending now doesn't replace the scheduled one.
+
+Without `SMTP_HOST` nothing is sent, but the PDF can still be viewed.
 
 ## Data & privacy
 
