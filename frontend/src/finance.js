@@ -405,7 +405,7 @@ export function migrateGoal(g) {
     subAccounts,
   };
 }
-export function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [], transferAccounts: [], jointAccountName: "" }; }
+export function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [], transferAccounts: [], jointAccountName: "", transferChecks: {} }; }
 // Accounts that fixed costs get transferred to (e.g. "KNAB Vaste lasten"),
 // defined once for the household and picked per fixed-cost entry.
 export const migrateTransferAccount = (a) => ({ id: a.id || uid(), name: a.name || "", iban: a.iban || "", day: a.day || "", reference: a.reference || "" });
@@ -420,6 +420,8 @@ export function normalize(raw) {
       transferAccounts: (raw.transferAccounts || []).map(migrateTransferAccount),
       // What the household calls its joint account (e.g. "KNAB Inkomen"); "" = the generic name.
       jointAccountName: raw.jointAccountName || "",
+      // Transfers ticked off on the transfers page: { month: { transferKey: amount when ticked } }.
+      transferChecks: raw.transferChecks && typeof raw.transferChecks === "object" ? raw.transferChecks : {},
     };
   }
   if (raw.partners) { const mk = monthKey(new Date()); return { ...freshData(), selectedMonth: mk, months: { [mk]: migrateFig(raw) } }; }
@@ -615,7 +617,15 @@ export function contributionRoute(goal, monthly, sel) {
 // "comes back" notice in their end month.
 // Accounts are plain descriptors ({ type: "person" | "joint" | "pot" | "sub", … });
 // naming them is left to the UI.
+// A stable id for one end of a transfer, so the same transfer can be found
+// again in another month (to tick it off, or to compare it with last month).
+const endKey = (x) => x.type === "person" ? `person:${x.personId}` : x.type === "joint" ? "joint"
+  : x.type === "pot" ? `pot:${x.entryId}` : x.type === "account" ? `account:${x.account.id}` : `sub:${x.sub.id}`;
+export const transferKey = (tr) => `${tr.type}|${endKey(tr.from)}|${endKey(tr.to)}`;
 export function plannedTransfers(months, sel, goals, transferAccounts = []) {
+  return plannedTransferList(months, sel, goals, transferAccounts).map((tr) => ({ ...tr, key: transferKey(tr) }));
+}
+function plannedTransferList(months, sel, goals, transferAccounts) {
   const fig = figuresFor(months, sel);
   const calc = computeTotals(fig);
   const out = [];
@@ -652,17 +662,17 @@ export function plannedTransfers(months, sel, goals, transferAccounts = []) {
     const pot = { type: "pot", entryId: e.id, label: e.label || "", bank: goal?.mainBank || "" };
     const payer = personId ? { type: "person", personId } : { type: "joint" };
     if (!goal?.forwarded) {
-      if (amount > 0.005) out.push({ type: "savings", from: payer, to: pot, amount, entryId: e.id, personId });
+      if (amount > 0.005) out.push({ type: "savings", from: payer, to: pot, amount, entryId: e.id, potLabel: pot.label, personId });
       continue;
     }
     const direct = contributionRoute(goal, amount, sel) === "direct";
     const forwardedTotal = (goal.subAccounts || []).reduce((sum, s) => sum + subAccountContribution(s, amount, sel), 0);
     // Direct: the payer only sends the main account what stays there.
     const toMain = direct ? amount - forwardedTotal : amount;
-    if (toMain > 0.005) out.push({ type: "savings", from: payer, to: pot, amount: toMain, entryId: e.id, personId });
+    if (toMain > 0.005) out.push({ type: "savings", from: payer, to: pot, amount: toMain, entryId: e.id, potLabel: pot.label, personId });
     for (const sub of goal.subAccounts || []) {
       const to = { type: "sub", sub };
-      const details = { iban: sub.iban || "", reference: sub.referenceId || "", planId: sub.planId || "", entryId: e.id, personId };
+      const details = { iban: sub.iban || "", reference: sub.referenceId || "", planId: sub.planId || "", entryId: e.id, potLabel: pot.label, personId };
       if (isDeposit(sub)) {
         if (sub.termStart === sel && num(sub.depositAmount) > 0) out.push({ type: "depositStart", from: pot, to, amount: num(sub.depositAmount), ...details });
         const end = depositEnd(sub);
@@ -670,10 +680,32 @@ export function plannedTransfers(months, sel, goals, transferAccounts = []) {
         continue;
       }
       const c = subAccountContribution(sub, amount, sel);
-      if (c > 0.005) out.push({ type: "forward", from: direct ? payer : pot, to, amount: c, day: sub.transferMode === "amount" ? (sub.transferDay || "") : "", ...details });
+      // A day only applies to a fixed standing order; a percentage share has none.
+      if (c > 0.005) out.push({ type: "forward", from: direct ? payer : pot, to, amount: c, fixed: sub.transferMode === "amount", day: sub.transferMode === "amount" ? (sub.transferDay || "") : "", ...details });
     }
   }
   return out;
+}
+// What changed since the previous month, per transfer: "new", "changed"
+// (with the old amount) or "same"; plus the transfers that stopped. One-off
+// deposit moves are always "new". Without an earlier month to compare with,
+// there's nothing to report (`hasPrevious: false`).
+export function transferChanges(months, sel, goals, transferAccounts = []) {
+  const prevKey = shiftMonth(sel, -1);
+  const hasPrevious = Object.keys(months).some((k) => k <= prevKey);
+  const current = plannedTransfers(months, sel, goals, transferAccounts);
+  const status = {};
+  if (!hasPrevious) return { hasPrevious, current, status, stopped: [] };
+  const previous = plannedTransfers(months, prevKey, goals, transferAccounts).filter((tr) => tr.type !== "depositStart" && tr.type !== "depositEnd");
+  const prevByKey = new Map(previous.map((tr) => [tr.key, tr]));
+  for (const tr of current) {
+    const before = prevByKey.get(tr.key);
+    if (tr.type === "depositStart" || tr.type === "depositEnd" || !before) status[tr.key] = { kind: "new" };
+    else if (Math.abs(before.amount - tr.amount) > 0.005) status[tr.key] = { kind: "changed", previous: before.amount };
+    else status[tr.key] = { kind: "same" };
+  }
+  const now = new Set(current.map((tr) => tr.key));
+  return { hasPrevious, current, status, stopped: previous.filter((tr) => !now.has(tr.key)) };
 }
 // The most recent month (at or before `sel`) an account has a recorded
 // balance for — a deposit's start counts — or null: tells a balance you
