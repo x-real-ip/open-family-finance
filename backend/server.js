@@ -17,6 +17,12 @@
  *   GET  /api/paperless/documents?correspondentId=&query=         -> [{ id, title, created, documentType, url }] | 404 when disabled
  *   GET  /api/paperless/documents/:id                             -> { id, title, created, documentType, url } | null | 404 when disabled
  *
+ * Monthly report (see report/): a PDF of the month, e-mailed on a set day
+ * when SMTP_HOST is configured; recipients and day are set in the app.
+ *   GET  /api/report/status              -> { smtpConfigured, today, status }
+ *   GET  /api/report/pdf?month=YYYY-MM    -> application/pdf (from the saved state)
+ *   POST /api/report/send { month }       -> status | 400/503
+ *
  * Optional bearer auth: set API_TOKEN and send "Authorization: Bearer <token>".
  * Startup retries the database connection, so boot order does not matter.
  */
@@ -26,6 +32,9 @@ import {
   paperlessEnabled, listCorrespondents, ensureCorrespondent, listDocumentTypes, listTags,
   latestDocumentForCorrespondent, searchDocuments, getDocument,
 } from "./paperless.js";
+import { smtpConfigured, readStatus, loadState, reportPdf, reportFileName, sendNow, startSchedule, today } from "./report/mail.js";
+
+const isMonth = (k) => typeof k === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(k);
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
@@ -163,6 +172,42 @@ app.get("/api/paperless/documents/:id", async (req, res) => {
   }
 });
 
+app.get("/api/report/status", async (_req, res) => {
+  try {
+    res.json({ smtpConfigured, today: today(), status: await readStatus() });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+app.get("/api/report/pdf", async (req, res) => {
+  const month = req.query.month || today().month;
+  if (!isMonth(month)) return res.status(400).json({ error: "month must be YYYY-MM" });
+  try {
+    const data = await loadState();
+    if (!data) return res.status(404).json({ error: "no data saved yet" });
+    const pdf = await reportPdf(data, month);
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${reportFileName(month)}"` });
+    res.send(pdf);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+app.post("/api/report/send", async (req, res) => {
+  const month = req.body?.month || today().month;
+  if (!isMonth(month)) return res.status(400).json({ error: "month must be YYYY-MM" });
+  if (!smtpConfigured) return res.status(503).json({ error: "smtp not configured" });
+  try {
+    res.json(await sendNow(month));
+  } catch (e) {
+    console.error(e);
+    res.status(502).json({ error: e.message });
+  }
+});
+
 // Try to initialize the database, retrying while it is still starting up.
 // This makes the API resilient to startup ordering (Compose, Kubernetes, ...).
 async function start() {
@@ -171,6 +216,7 @@ async function start() {
     try {
       await initDb();
       app.listen(PORT, () => console.log(`Open Family Finance API listening on port ${PORT}`));
+      startSchedule();
       return;
     } catch (e) {
       console.error(`Database not ready (attempt ${attempt}/${maxAttempts}): ${e.message}`);

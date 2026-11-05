@@ -405,7 +405,9 @@ export function migrateGoal(g) {
     subAccounts,
   };
 }
-export function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [], transferAccounts: [], jointAccountName: "", transferChecks: {} }; }
+export function freshData() { const mk = monthKey(new Date()); return { selectedMonth: mk, months: { [mk]: clone(DEFAULT_FIGURES) }, log: [], listSort: { ...DEFAULT_LIST_SORT }, savingsGoals: [], transferAccounts: [], jointAccountName: "", transferChecks: {}, report: migrateReport() }; }
+// Settings for the monthly e-mail report (sent by the backend).
+export const migrateReport = (r = {}) => ({ enabled: Boolean(r.enabled), recipients: String(r.recipients || ""), day: String(r.day || "1") });
 // Accounts that fixed costs get transferred to (e.g. "KNAB Vaste lasten"),
 // defined once for the household and picked per fixed-cost entry.
 export const migrateTransferAccount = (a) => ({ id: a.id || uid(), name: a.name || "", iban: a.iban || "", day: a.day || "", reference: a.reference || "" });
@@ -422,6 +424,7 @@ export function normalize(raw) {
       jointAccountName: raw.jointAccountName || "",
       // Transfers ticked off on the transfers page: { month: { transferKey: amount when ticked } }.
       transferChecks: raw.transferChecks && typeof raw.transferChecks === "object" ? raw.transferChecks : {},
+      report: migrateReport(raw.report || {}),
     };
   }
   if (raw.partners) { const mk = monthKey(new Date()); return { ...freshData(), selectedMonth: mk, months: { [mk]: migrateFig(raw) } }; }

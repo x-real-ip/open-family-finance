@@ -27,8 +27,11 @@ jobs:
         include:
           - name: web
             context: ./frontend
+            file: ./frontend/Dockerfile
+          # Built from the repository root: the monthly report reuses frontend/src/finance.js.
           - name: api
-            context: ./backend
+            context: .
+            file: ./backend/Dockerfile
 
     steps:
       - name: Checkout
@@ -70,6 +73,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

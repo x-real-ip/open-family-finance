@@ -16,7 +16,10 @@ services:
       retries: 10
 
   api:
-    build: ./backend
+    # Built from the repository root: the monthly report reuses frontend/src/finance.js.
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       API_TOKEN: ${API_TOKEN}
@@ -26,6 +29,16 @@ services:
       PAPERLESS_PUBLIC_URL: ${PAPERLESS_PUBLIC_URL:-}
       PAPERLESS_API_TOKEN: ${PAPERLESS_API_TOKEN:-}
       PAPERLESS_DOCUMENT_TYPE_PRIORITY: ${PAPERLESS_DOCUMENT_TYPE_PRIORITY:-}
+      LANGUAGE: ${LANGUAGE:-nl}
+      APP_TITLE: ${APP_TITLE:-}
+      TZ: ${TZ:-Europe/Amsterdam}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-true}
     depends_on:
       db:
         condition: service_healthy

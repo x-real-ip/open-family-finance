@@ -173,6 +173,13 @@ gebruikt:
 | `PAPERLESS_PUBLIC_URL`  | *(valt terug op `PAPERLESS_URL`)* | Basis-URL waarmee "open in paperless"-links worden opgebouwd. Alleen nodig als paperless voor je browser op een ander adres bereikbaar is dan `PAPERLESS_URL` (bijv. als `PAPERLESS_URL` een cluster-interne URL is) |
 | `PAPERLESS_API_TOKEN`   | —                          | paperless-ngx API-token. Alleen backend, komt nooit in de browser terecht |
 | `PAPERLESS_DOCUMENT_TYPE_PRIORITY` | —              | Optionele, kommagescheiden lijst van documenttype-namen in prioriteitsvolgorde (bijv. `Jaaropgave,Jaarafrekening,Factuur,Contract`). Het gekoppelde document wordt het meest recente document van het eerste type uit deze lijst dat de correspondent heeft, in plaats van gewoon het meest recente document. Alleen backend |
+| `SMTP_HOST`             | *(leeg = geen e-mail)*    | Mailserver voor het maandrapport (zie hieronder). Alleen backend |
+| `SMTP_PORT`             | `587`                      | Poort van de mailserver |
+| `SMTP_SECURE`           | `false`                    | `true` voor TLS vanaf het begin (meestal poort 465); anders STARTTLS als de server dat aanbiedt |
+| `SMTP_USER` / `SMTP_PASS` | —                        | Inlog voor de mailserver, als die nodig is |
+| `SMTP_FROM`             | *(`SMTP_USER`)*            | Afzender van het rapport |
+| `SMTP_TLS_REJECT_UNAUTHORIZED` | `true`              | `false` accepteert een zelfondertekend certificaat (bijv. Proton Mail Bridge) |
+| `TZ`                    | `Europe/Amsterdam`         | Tijdzone voor de verzenddag en de datums in het rapport. Backend |
 
 `LANGUAGE`, `APP_TITLE` en `PAPERLESS_ENABLED` worden door de frontend bij het
 opstarten van de container ingelezen (niet vast gebakken in de build), zodat
@@ -207,6 +214,27 @@ De frontend praat nooit rechtstreeks met paperless en krijgt `PAPERLESS_URL`,
 communicatie loopt via de backend-API. Laat je `PAPERLESS_ENABLED` leeg (of
 op `false`), dan is het
 correspondent-veld nergens te zien en wordt er niets opgehaald.
+
+## Maandrapport per e-mail
+
+De backend kan elke maand een PDF-rapport mailen met alles uit de app in
+eenvoudige tabellen: de nieuwe maand naast de vorige, welke bedragen zijn
+veranderd, de overboekingen van de maand als afvinklijst, het volledige
+maandoverzicht, de spaarsaldo's, aanpassingen in de app en een terugblik op
+de vorige maand (inclusief welke overboekingen zijn afgevinkt).
+
+1. Stel `SMTP_HOST` in (en waar nodig `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
+   `SMTP_FROM`) voor de **backend**; zie [Configuratie](#configuratie).
+   `LANGUAGE` en `APP_TITLE` gelden ook voor het rapport, dus zet die ook op
+   de backend.
+2. Open in de app het menu naast de maand › *Maandrapport per e-mail…*, vul
+   de ontvangers en de dag van de maand (1–28) in en zet het aan.
+3. Op die dag gaat het rapport van die maand één keer de deur uit. Stond de
+   server uit, dan gaat het alsnog zodra hij weer draait. *PDF bekijken* en
+   *Nu versturen* werken voor de maand die je bekijkt; nu versturen vervangt
+   de geplande verzending niet.
+
+Zonder `SMTP_HOST` wordt er niets verstuurd, maar de PDF bekijken kan wel.
 
 ## Data & privacy
 
