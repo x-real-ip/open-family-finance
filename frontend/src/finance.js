@@ -529,6 +529,29 @@ export function projectSubAccountSeries(months, entryId, subAccount, keys, targe
   return out;
 }
 
+// Forecast for a goal's target: the first month in which the combined
+// projected balance of all its accounts reaches `target`, searched from the
+// earliest recorded balance up to `maxMonths` ahead — independent of the
+// overview's chosen horizon, so a target years away still gets a date.
+// Returns null without a target, without any recorded balance, or when the
+// target isn't reached within `maxMonths` (e.g. nothing is being added).
+export function targetReachMonth(months, entryId, accounts, target, maxMonths = 1200) {
+  if (target == null || !(target > 0)) return null;
+  const starts = accounts.flatMap((a) => {
+    const c = accountCheckpoints(a);
+    return Object.keys(c).filter((k) => c[k] !== "" && c[k] != null);
+  }).sort();
+  if (!starts.length) return null;
+  const keys = [starts[0]];
+  for (let i = 0; i < maxMonths; i++) keys.push(shiftMonth(keys[keys.length - 1], 1));
+  const series = accounts.map((a) => projectSubAccountSeries(months, entryId, a, keys, target));
+  return keys.find((k) => series.reduce((sum, s) => sum + (s[k]?.balance ?? 0), 0) >= target) || null;
+}
+// Whole months from `from` to `to` (both "YYYY-MM"); negative if `to` is earlier.
+export const monthsBetween = (from, to) => {
+  const [fy, fm] = from.split("-").map(Number), [ty, tm] = to.split("-").map(Number);
+  return (ty - fy) * 12 + (tm - fm);
+};
 
 // ── Savings overview helpers ──
 // Every account a goal's money is on, in the shape projectSubAccountSeries
