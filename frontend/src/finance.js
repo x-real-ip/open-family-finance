@@ -68,13 +68,19 @@ export const findEntryById = (monthData, id) => {
   }
   return null;
 };
+// A formula starts either from another entry (`sourceId`, taken as its
+// monthly amount; the result is converted to the entry's own period) or —
+// without a source — from a fixed amount you type (`base`), already in the
+// entry's own period, e.g. "1500 × 12" on a yearly entry is € 18.000 /jr.
+export const isFixedFormula = (formula) => Boolean(formula) && !formula.sourceId && formula.base != null;
 export const computeFormulaAmount = (entry, monthData) => {
   if (!entry?.formula || !monthData) return null;
-  const source = findEntryById(monthData, entry.formula.sourceId);
+  const fixed = isFixedFormula(entry.formula);
+  const source = fixed ? null : findEntryById(monthData, entry.formula.sourceId);
   const sourceMonthly = source ? monthlyOf(source, monthData, new Set([entry.id])) : 0;
   // Support a sequential list of operations (`ops`) or fall back to the legacy single op/factor
   const ops = entry.formula.ops ?? (entry.formula.op ? [{ op: entry.formula.op, factor: entry.formula.factor }] : []);
-  let result = sourceMonthly;
+  let result = fixed ? num(entry.formula.base) : sourceMonthly;
   if (ops.length === 0) {
     // No operations specified — return the source amount
     result = sourceMonthly;
@@ -88,7 +94,7 @@ export const computeFormulaAmount = (entry, monthData) => {
       else if (op === "plus") result = result + factor;
     }
   }
-  return entry.period === "year" ? result * 12 : result;
+  return !fixed && entry.period === "year" ? result * 12 : result;
 };
 export const entryAmount = (entry, monthData) => {
   const formulaAmount = computeFormulaAmount(entry, monthData);
