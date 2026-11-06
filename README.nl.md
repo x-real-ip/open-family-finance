@@ -70,7 +70,8 @@ cijfers zich over tijd ontwikkelen.
 - **Spaardoelen met een bijgehouden saldo** — een grafiek van de verwachte
   opbouw per doel, een werkelijk maandsaldo dat je op elk moment kunt
   corrigeren (eerdere maanden blijven precies zoals vastgelegd), een optioneel
-  streefbedrag waarbij de projectie stopt zodra het bereikt is, en een
+  streefbedrag waarbij de projectie stopt zodra het bereikt is (met een
+  prognose van de maand waarin je het bereikt en hoeveel er nog te gaan is), en een
   optionele verdeling over meerdere rekeningen bij verschillende banken, elk
   met een eigen saldo en rentepercentage.
 - **Geldstromen-diagram** — een sankey-diagram dat het geld volgt van salaris

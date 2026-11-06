@@ -41,6 +41,7 @@ import {
   figuresFor, computeTotals, migrateFig, SORT_MODES, DEFAULT_LIST_SORT, listSortOf, migrateCheckpoints, migrateSubAccount,
   migrateGoal, freshData, normalize, monthlyContributionAt, subAccountContribution, projectSubAccountSeries,
   valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey, plannedTransfers, transferChanges, lastRecorded, migrateTransferAccount, contributionRoute,
+  targetReachMonth, monthsBetween,
 } from "./finance";
 
 /* ----------------------------------------------------------------
@@ -2642,6 +2643,8 @@ function DurationEditor({ entry, onChange }) {
 // be a very long dropdown for no extra precision anyone needs.
 const HORIZON_OPTIONS = [3, 6, 12, 24, 36, 48, 60, 72, 84, 96, 108, 120];
 const horizonLabel = (n) => n < 12 ? t(LANG, "months", { count: n }) : t(LANG, "yearsShort", { count: n / 12 });
+// "2 jr 5 mnd" — a duration of whole months, years first.
+const durationLabel = (n) => [Math.floor(n / 12) && t(LANG, "yearsShort", { count: Math.floor(n / 12) }), n % 12 && t(LANG, "months", { count: n % 12 })].filter(Boolean).join(" ");
 
 function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, currentMonthData, sel, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
   const [horizon, setHorizon] = useState(12);
@@ -3165,19 +3168,25 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
     return map;
   }, [effectiveSubAccounts, months, entry.id, keys, target]);
   // The first month (if any) whose projected total actually crosses the
-  // target — not just "reached somewhere within the horizon". "Reached" is
+  // target — not just "reached somewhere within the horizon". It's searched
+  // well beyond the chosen horizon (see targetReachMonth), so the forecast
+  // below can name a date for a target that's years away. "Reached" is
   // only true once the month you're currently viewing (sel) is at or after
   // that month, so the badge doesn't show up while browsing months that are
   // still short of it, just because a later projected month gets there.
-  const reachedMonth = useMemo(() => {
-    if (target == null) return null;
-    for (const k of keys) {
-      const total = effectiveSubAccounts.reduce((sum, s) => sum + (seriesBySub[s.id][k]?.balance ?? 0), 0);
-      if (total >= target) return k;
-    }
-    return null;
-  }, [keys, seriesBySub, effectiveSubAccounts, target]);
+  const reachedMonth = useMemo(
+    () => targetReachMonth(months, entry.id, effectiveSubAccounts, target),
+    [months, entry.id, effectiveSubAccounts, target]);
   const reached = reachedMonth != null && sel >= reachedMonth;
+  // Forecast while the target is still ahead: when it's expected to be
+  // reached, how long that is from the viewed month, and what's still to go.
+  // Needs a starting point: a recorded balance, or this month for a pot
+  // that's never had one (see goalAccounts).
+  const forecast = target != null && target > 0 && !reached && earliest ? {
+    month: reachedMonth,
+    inMonths: reachedMonth ? monthsBetween(sel, reachedMonth) : null,
+    remaining: Math.max(0, target - effectiveSubAccounts.reduce((sum, s) => sum + (balanceAt(months, entry.id, s, sel, target)?.balance ?? 0), 0)),
+  } : null;
   const tip = interestTip(forwarded ? (seriesBySub[mainId]?.[sel]?.balance ?? null) : null, goal);
   const hasInterest = effectiveSubAccounts.some((s) => num(s.interestRate) > 0);
   const chartData = useMemo(() => keys.map((k) => {
@@ -3206,6 +3215,8 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
         {/* Read-only here on purpose — this is the same monthly entry shown
             in the monthly view, and it should only be editable there. */}
         {forwarded && <span style={St.goalForwardedTag}>{t(LANG, "goalAccountsCount", { count: subAccounts.length + 1 })}</span>}
+        {forecast?.month && <span style={St.goalForwardedTag} title={t(LANG, "targetForecast", { month: monthLong(forecast.month), duration: durationLabel(forecast.inMonths) })}>{t(LANG, "targetForecastShort", { month: monthShortWithYear(forecast.month) })}</span>}
+        {reached && <span style={{ ...St.goalForwardedTag, color: C.save }}>{TXT.targetReached}</span>}
         <span style={St.savingsGoalAmount} title={TXT.savingsGoalAmountInfo}>{eur(entryDisplayAmount)} {entryPeriodSuffix}</span>
         <ChevronDown size={18} style={{ color: C.muted, transform: open ? "rotate(180deg)" : "none", transition: "transform .2s", flexShrink: 0 }} />
       </div>
@@ -3242,6 +3253,14 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
             onChange={(e) => onUpdate({ targetAmount: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 100 }} />
         </label>
       </div>
+      {forecast && (
+        <div style={St.savingsForecast}>
+          <CalendarDays size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>{forecast.month
+            ? t(LANG, "targetForecastLine", { remaining: eur(forecast.remaining), month: monthLong(forecast.month), duration: durationLabel(forecast.inMonths) })
+            : t(LANG, "targetForecastNever", { remaining: eur(forecast.remaining) })}</span>
+        </div>
+      )}
 
       {forwarded && (
         <>
@@ -4216,6 +4235,7 @@ const St = {
   savingsTd: { textAlign: "right", padding: "5px 10px", color: C.ink, fontVariantNumeric: "tabular-nums", borderBottom: `1px solid ${C.line}` },
   savingsTdSub: { fontSize: 10.5, fontWeight: 500, color: C.muted },
   savingsTrReached: { background: `color-mix(in srgb, ${C.save} 10%, transparent)` },
+  savingsForecast: { display: "flex", gap: 6, alignItems: "flex-start", marginTop: 2, marginBottom: 6, fontSize: 12.5, color: C.muted, lineHeight: 1.45 },
   savingsTargetReached: { marginTop: 10, fontSize: 12.5, fontWeight: 600, color: C.save },
 };
 
