@@ -781,36 +781,28 @@ export default function App() {
     return { ...d, log: [entry, ...(d.log || [])].slice(0, 300) };
   });
 
-  // Copy one entry's value from the selected month to an explicit, individually
-  // picked set of past and/or future months. Only that entry's amount (or
-  // formula) is changed in months where it already exists; in months where it
-  // doesn't exist yet it is added with just the amount/period (and formula, if
-  // any) — never with the entry's note, link, correspondent/document, or
-  // contract dates, so copying an amount never silently drags contract
-  // metadata along for the ride.
+  // Copy one entry from the selected month to an explicit, individually
+  // picked set of past and/or future months. The entry is copied whole —
+  // amount/period or formula, but also its name, category, note, link,
+  // correspondent and paperless document, and contract dates — so the target
+  // months end up with exactly the same entry. Where the entry already exists
+  // it is replaced in place (keeping its position in the list); elsewhere it
+  // is appended.
   // Note: copying overwrites manual overrides in the target months on purpose —
   // it is an explicit action — but does not mark the targets as overridden.
-  const copyEntryRange = (kind, id, pastKeys, futureKeys) => setData((d) => {
+  const copyEntryRange = (kind, id, pastKeys, futureKeys, personId = null) => setData((d) => {
     const s = d.selectedMonth;
-    const item = (d.months[s][kind] || []).find((x) => x.id === id);
+    const item = listAt(d.months[s], kind, personId).find((x) => x.id === id);
     if (!item) return d;
-    const field = kind === "partners" ? "income" : "amount";
     const targets = new Set([...(pastKeys || []), ...(futureKeys || [])]);
     const months = { ...d.months };
     for (const k of targets) {
       if (k === s || !months[k]) continue;
-      const list = months[k][kind] || [];
-      const exists = list.some((x) => x.id === id);
-      if (kind !== "partners" && item.formula) {
-        months[k] = { ...months[k], [kind]: exists
-          ? list.map((x) => x.id === id ? { ...x, formula: clone(item.formula), period: item.period } : x)
-          : [...list, clone(item)] };
-      } else if (exists) {
-        months[k] = { ...months[k], [kind]: list.map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x) };
-      } else {
-        const bare = { ...clone(item), note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" };
-        months[k] = { ...months[k], [kind]: [...list, bare] };
-      }
+      const list = listAt(months[k], kind, personId);
+      const next = list.some((x) => x.id === id)
+        ? list.map((x) => (x.id === id ? clone(item) : x))
+        : [...list, clone(item)];
+      months[k] = withList(months[k], kind, personId, next);
     }
     return { ...d, months };
   });
@@ -951,32 +943,6 @@ export default function App() {
     const id = uid();
     editForward((f) => withList(f, "personalSavings", personId, [...listAt(f, "personalSavings", personId), { id, label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" }]), id);
   };
-  const copyPersonalEntryRange = (kind, personId, id, pastKeys, futureKeys) => setData((d) => {
-    const s = d.selectedMonth;
-    const item = listAt(d.months[s], kind, personId).find((x) => x.id === id);
-    if (!item) return d;
-    const targets = new Set([...(pastKeys || []), ...(futureKeys || [])]);
-    const months = { ...d.months };
-    for (const k of targets) {
-      if (k === s || !months[k]) continue;
-      const list = listAt(months[k], kind, personId);
-      const exists = list.some((x) => x.id === id);
-      let nextList;
-      if (item.formula) {
-        nextList = exists
-          ? list.map((x) => x.id === id ? { ...x, formula: clone(item.formula), period: item.period } : x)
-          : [...list, clone(item)];
-      } else if (exists) {
-        nextList = list.map((x) => x.id === id ? { ...x, amount: item.amount, period: item.period } : x);
-      } else {
-        const bare = { ...clone(item), note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" };
-        nextList = [...list, bare];
-      }
-      months[k] = withList(months[k], kind, personId, nextList);
-    }
-    return { ...d, months };
-  });
-
   // Savings goals aren't month-scoped, so they're mutated directly rather
   // than through editForward/forward-propagation.
   // Goals are keyed by the monthly savings entry they belong to (see
@@ -1122,7 +1088,7 @@ export default function App() {
       togglePeriod: kind === "partners" ? (id) => togglePartnerPeriod(id)
         : personId ? (id) => togglePersonalItemPeriod(kind, personId, id)
         : (id) => toggleItemPeriod(kind, id),
-      copyRange: personId ? (id, pk, fk) => copyPersonalEntryRange(kind, personId, id, pk, fk) : (id, pk, fk) => copyEntryRange(kind, id, pk, fk),
+      copyRange: (id, pk, fk) => copyEntryRange(kind, id, pk, fk, personId),
     };
   };
   const hasCategory = (kind) => kind === "expenses" || kind === "personalExpenses";
