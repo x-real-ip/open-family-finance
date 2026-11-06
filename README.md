@@ -44,8 +44,9 @@ numbers evolve over time.
   items with a category (expenses), an optional note, and an optional link
   (e.g. to a bill or contract).
 - **Linked/formula entries** — derive one entry's amount from another (e.g.
-  "gross salary minus pension contribution"), with a chain of operations
-  (plus / minus / times / divide).
+  "gross salary minus pension contribution") or from a fixed amount you type
+  (e.g. "1500 times 12"), with a chain of operations (plus / minus / times /
+  divide).
 - **Trend indicators & history sparkline** per entry, comparing the current
   month to the most recent earlier month with a value.
 - **Copy tools** — copy a single entry (amount, note, link, correspondent,

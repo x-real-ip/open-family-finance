@@ -41,7 +41,7 @@ import {
   figuresFor, computeTotals, migrateFig, SORT_MODES, DEFAULT_LIST_SORT, listSortOf, migrateCheckpoints, migrateSubAccount,
   migrateGoal, freshData, normalize, monthlyContributionAt, subAccountContribution, projectSubAccountSeries,
   valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey, plannedTransfers, transferChanges, lastRecorded, migrateTransferAccount, contributionRoute,
-  targetReachMonth, monthsBetween,
+  targetReachMonth, monthsBetween, isFixedFormula,
 } from "./finance";
 
 /* ----------------------------------------------------------------
@@ -1182,7 +1182,7 @@ export default function App() {
             {section(TXT.note, <NoteEditor value={e.note || ""} onChange={(v) => ops.set(e.id, { note: v })} />)}
             {section(TXT.link, <LinkEditor value={e.url || ""} onChange={(v) => ops.set(e.id, { url: v })} />)}
             {PAPERLESS_ENABLED && section(TXT.correspondent, <CorrespondentEditor key={`${kind}:${personId || ""}:${e.id}`} entry={e} onChange={(patch) => ops.set(e.id, patch)} onCreate={createCorrespondent} correspondents={paperlessCorrespondents} knownNames={correspondents} labels={paperlessLabels} />)}
-            {!isPerson && section(TXT.sourceRule, <FormulaEditor entry={e} monthData={cur} onChange={(patch) => ops.set(e.id, patch)} />)}
+            {!isPerson && section(TXT.sourceRule, <FormulaEditor key={`${kind}:${personId || ""}:${e.id}`} entry={e} monthData={cur} onChange={(patch) => ops.set(e.id, patch)} />)}
             {section(TXT.copyAmount, <CopyPicker pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => ops.copyRange(e.id, pk, fk)} emptyText={TXT.noMonthsToCopy} />)}
             {canDelete && (
               <button type="button" onClick={() => (isPerson ? removePerson(e.id) : requestDelete(kind, e, personId))} style={St.drawerDelete}>
@@ -3914,8 +3914,13 @@ function LinkEditor({ value, onChange }) {
   );
 }
 
+// The calculation of an entry: start from another entry ("source row") or
+// from a fixed amount you type, then apply a chain of operations. Choosing
+// "— none —" again removes the calculation, so the amount is editable again.
+const FIXED_SOURCE = "__fixed";
 function FormulaEditor({ entry, monthData, onChange }) {
-  const [sourceId, setSourceId] = useState(entry.formula?.sourceId || "");
+  const [sourceId, setSourceId] = useState(isFixedFormula(entry.formula) ? FIXED_SOURCE : (entry.formula?.sourceId || ""));
+  const [base, setBase] = useState(entry.formula?.base ?? "");
   // ops: sequential operations [{op: 'minus'|'times'|'divide'|'plus', factor: '12'}]
   const [ops, setOps] = useState(() => {
     if (entry.formula?.ops) return entry.formula.ops.map((s) => ({ op: s.op, factor: String(s.factor ?? "0") }));
@@ -3923,6 +3928,7 @@ function FormulaEditor({ entry, monthData, onChange }) {
     return [];
   });
   const has = Boolean(entry.formula);
+  const fixed = sourceId === FIXED_SOURCE;
   const entries = [];
   for (const kind of entryKinds) {
     for (const item of monthData[kind] || []) {
@@ -3934,23 +3940,42 @@ function FormulaEditor({ entry, monthData, onChange }) {
       entries.push({ id: item.id, label, kind });
     }
   }
-  const preview = computeFormulaAmount({ ...entry, formula: { sourceId, ops } }, monthData);
+  const formulaOf = (src, b, o) => (src === FIXED_SOURCE ? { sourceId: "", base: b, ops: o } : { sourceId: src, ops: o });
+  const save = (src, b, o) => onChange({ formula: src ? formulaOf(src, b, o) : undefined });
+  const preview = sourceId ? computeFormulaAmount({ ...entry, formula: formulaOf(sourceId, base, ops) }, monthData) : null;
   const onRemove = () => {
-    setSourceId(""); setOps([]); onChange({ formula: undefined });
+    setSourceId(""); setBase(""); setOps([]); onChange({ formula: undefined });
   };
-  const updateSource = (value) => { setSourceId(value); onChange({ formula: { sourceId: value, ops } }); };
-  const updateOpAt = (idx, newOp) => { const n = ops.slice(); n[idx] = { ...n[idx], op: newOp }; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
-  const updateFactorAt = (idx, newFactor) => { const n = ops.slice(); n[idx] = { ...n[idx], factor: newFactor }; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
-  const addOp = () => { const n = [...ops, { op: "minus", factor: "0" }]; setOps(n); onChange({ formula: { sourceId, ops: n } }); };
-  const removeOpAt = (idx) => { const n = ops.slice(); n.splice(idx, 1); setOps(n); onChange({ formula: { sourceId, ops: n } }); };
+  const updateSource = (value) => {
+    // Starting a fixed calculation from the amount already entered saves retyping it.
+    const b = value === FIXED_SOURCE && base === "" ? String(entry.amount || "") : base;
+    setSourceId(value); setBase(b); save(value, b, ops);
+  };
+  const updateBase = (value) => { setBase(value); save(sourceId, value, ops); };
+  const updateOpAt = (idx, newOp) => { const n = ops.slice(); n[idx] = { ...n[idx], op: newOp }; setOps(n); save(sourceId, base, n); };
+  const updateFactorAt = (idx, newFactor) => { const n = ops.slice(); n[idx] = { ...n[idx], factor: newFactor }; setOps(n); save(sourceId, base, n); };
+  const addOp = () => { const n = [...ops, { op: fixed ? "times" : "minus", factor: "0" }]; setOps(n); save(sourceId, base, n); };
+  const removeOpAt = (idx) => { const n = ops.slice(); n.splice(idx, 1); setOps(n); save(sourceId, base, n); };
   return (
     <>
       <select value={sourceId} onChange={(e) => updateSource(e.target.value)} style={{ ...St.drawerInput, marginBottom: 8 }} aria-label={TXT.sourceRule}>
         <option value="">— {TXT.selectSource} —</option>
-        {entries.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        <option value={FIXED_SOURCE}>{TXT.fixedAmountSource}</option>
+        {entries.length > 0 && (
+          <optgroup label={TXT.sourceRows}>
+            {entries.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </optgroup>
+        )}
       </select>
       {sourceId && (
         <>
+          {fixed && (
+            <label style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, fontSize: 13, color: C.muted }}>
+              <span style={{ flex: "0 0 auto" }}>{TXT.fixedAmountLabel}</span>
+              <input value={base} onChange={(e) => updateBase(e.target.value.replace(/[^0-9.,-]/g, ""))} placeholder="0,00"
+                style={{ ...St.drawerInput, width: 120 }} inputMode="decimal" aria-label={TXT.fixedAmountLabel} />
+            </label>
+          )}
           {ops.map((step, idx) => (
             <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
               <select value={step.op} onChange={(e) => updateOpAt(idx, e.target.value)} style={{ ...St.drawerInput, width: "auto" }}>
@@ -3965,7 +3990,7 @@ function FormulaEditor({ entry, monthData, onChange }) {
           ))}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 4 }}>
             <button type="button" onClick={addOp} style={St.ghostBtn}><Plus size={13} style={{ verticalAlign: "-2px" }} /> {TXT.addOperation}</button>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>{TXT.preview}: {preview != null ? eur(preview) : "—"}</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{TXT.preview}: {preview != null ? `${eur(preview)} ${entry.period === "year" ? TXT.periodYearAbbr : TXT.periodMonthAbbr}` : "—"}</span>
           </div>
           {has && <button type="button" onClick={onRemove} style={{ ...St.ghostBtn, color: C.exp, marginTop: 10 }}>{TXT.delete}</button>}
         </>

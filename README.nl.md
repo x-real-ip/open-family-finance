@@ -45,8 +45,9 @@ cijfers zich over tijd ontwikkelen.
   regels met een categorie (bij uitgaven), een optionele notitie en een
   optionele link (bijv. naar een factuur of contract).
 - **Gekoppelde/formule-posten** — leid het bedrag van de ene post af van een
-  andere (bijv. "bruto salaris min pensioenpremie"), met een reeks
-  bewerkingen (plus / min / keer / gedeeld door).
+  andere (bijv. "bruto salaris min pensioenpremie") of van een vast bedrag dat
+  je zelf invult (bijv. "1500 keer 12"), met een reeks bewerkingen (plus / min
+  / keer / gedeeld door).
 - **Trendindicatoren & verloop-sparkline** per post, die de huidige maand
   vergelijkt met de meest recente eerdere maand met een ingevuld bedrag.
 - **Kopieer-functies** — kopieer één post (bedrag, notitie, link,

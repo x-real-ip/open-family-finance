@@ -6,7 +6,7 @@ import {
   computeTotals, normalize, migrateFig, monthlyContributionAt, projectSubAccountSeries,
   subAccountContribution, valueAt, transferTargetKey, setTransferAmountAt, FROM_START,
   goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd, isMonthKey, plannedTransfers, transferChanges, lastRecorded, contributionRoute,
-  targetReachMonth, monthsBetween,
+  targetReachMonth, monthsBetween, computeFormulaAmount, isFixedFormula,
 } from "./finance.js";
 
 const fig = (over = {}) => migrateFig({
@@ -270,6 +270,21 @@ test("transfer ticks survive a reload", () => {
   const data = normalize({ selectedMonth: "2026-11", months: { "2026-11": {} }, transferChecks: { "2026-11": { "savings|joint|pot:s1": 700 } } });
   assert.equal(data.transferChecks["2026-11"]["savings|joint|pot:s1"], 700);
   assert.deepEqual(normalize({ selectedMonth: "2026-11", months: { "2026-11": {} } }).transferChecks, {});
+});
+
+test("a calculation can start from a fixed amount instead of a source row", () => {
+  const month = fig();
+  const fixedYear = { id: "x", period: "year", formula: { sourceId: "", base: "1500", ops: [{ op: "times", factor: "12" }] } };
+  assert.ok(isFixedFormula(fixedYear.formula));
+  // The fixed amount is in the entry's own period: no extra × 12.
+  close(computeFormulaAmount(fixedYear, month), 18000);
+  close(computeTotals({ ...month, expenses: [fixedYear] }).expensesTotal, 1500);
+  const fixedMonth = { id: "y", period: "month", formula: { sourceId: "", base: "1000,50", ops: [{ op: "minus", factor: "0,50" }, { op: "divide", factor: "4" }] } };
+  close(computeFormulaAmount(fixedMonth, month), 250);
+  // A source row still wins and behaves as before (monthly, then × 12 for /jr).
+  const sourced = { id: "z", period: "year", formula: { sourceId: "s1", ops: [{ op: "times", factor: "0.5" }] } };
+  assert.ok(!isFixedFormula(sourced.formula));
+  close(computeFormulaAmount(sourced, month), 3600);
 });
 
 test("targetReachMonth finds the month the combined balance reaches the target, beyond any horizon", () => {
