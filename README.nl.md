@@ -49,8 +49,9 @@ cijfers zich over tijd ontwikkelen.
   bewerkingen (plus / min / keer / gedeeld door).
 - **Trendindicatoren & verloop-sparkline** per post, die de huidige maand
   vergelijkt met de meest recente eerdere maand met een ingevuld bedrag.
-- **Kopieer-functies** — kopieer het bedrag van één post naar andere maanden,
-  of kopieer de cijfers van een hele maand naar eerdere maanden.
+- **Kopieer-functies** — kopieer één post (bedrag, notitie, link,
+  correspondent, paperless-document en contractdata) naar andere maanden, of
+  kopieer de cijfers van een hele maand naar andere maanden.
 - **Logboek** — elke wijziging wordt vastgelegd met datum, tijd, oude en
   nieuwe waarde.
 - **Statistieken** — staafdiagram van de inleg per persoon per maand, een

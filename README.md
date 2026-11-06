@@ -48,8 +48,9 @@ numbers evolve over time.
   (plus / minus / times / divide).
 - **Trend indicators & history sparkline** per entry, comparing the current
   month to the most recent earlier month with a value.
-- **Copy tools** — copy a single entry's amount to other months, or copy an
-  entire month's figures to earlier months.
+- **Copy tools** — copy a single entry (amount, note, link, correspondent,
+  paperless document and contract dates) to other months, or copy an entire
+  month's figures to other months.
 - **Change log** — every edit is recorded with date, time, old and new value.
 - **Statistics** — bar chart of each person's monthly contribution, a bar
   chart of income / government support / expenses / savings per month, and a
