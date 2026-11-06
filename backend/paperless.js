@@ -107,19 +107,21 @@ export async function latestDocumentForCorrespondent(correspondentId, label) {
   return doc ? toDocumentResult(doc, null) : null;
 }
 
-// Free-text search (paperless's own full-text search) scoped to one correspondent,
-// for manually picking a specific document instead of relying on the automatic pick.
-// paperless's `query` search runs through its own search index rather than the
-// regular queryset filters, so it doesn't reliably combine with correspondent__id
-// in the same request — fetch a larger candidate set and filter by correspondent
-// ourselves instead of trusting paperless to scope both together.
-export async function searchDocuments(correspondentId, query, limit = 10) {
+// A correspondent's documents, newest first, for manually picking one
+// instead of relying on the automatic pick. Without a query this lists the
+// most recent ones; with a query it narrows them to documents whose title or
+// content contains it (paperless's `title_content` filter). That filter is a
+// regular queryset filter, so — unlike the full-text `query` search, which
+// runs through paperless's search index — it combines reliably with
+// correspondent__id and also matches partial words while typing.
+export async function searchDocuments(correspondentId, query, limit = 25) {
+  const q = String(query || "").trim();
+  const filter = `correspondent__id=${encodeURIComponent(correspondentId)}${q ? `&title_content=${encodeURIComponent(q)}` : ""}`;
   const [page, types] = await Promise.all([
-    paperlessFetch(`/api/documents/?query=${encodeURIComponent(query)}&page_size=100`),
+    paperlessFetch(`/api/documents/?${filter}&ordering=-created&page_size=${limit}`),
     listDocumentTypes(),
   ]);
-  const matches = (page.results || []).filter((doc) => String(doc.correspondent) === String(correspondentId));
-  return matches.slice(0, limit).map((doc) => toDocumentResult(doc, types.find((t) => t.id === doc.document_type)?.name || null));
+  return (page.results || []).map((doc) => toDocumentResult(doc, types.find((t) => t.id === doc.document_type)?.name || null));
 }
 
 // A single document by id, for displaying one that was manually pinned to an
