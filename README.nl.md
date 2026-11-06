@@ -50,8 +50,9 @@ cijfers zich over tijd ontwikkelen.
   / keer / gedeeld door).
 - **Trendindicatoren & verloop-sparkline** per post, die de huidige maand
   vergelijkt met de meest recente eerdere maand met een ingevuld bedrag.
-- **Kopieer-functies** — kopieer het bedrag van één post naar andere maanden,
-  of kopieer de cijfers van een hele maand naar eerdere maanden.
+- **Kopieer-functies** — kopieer één post (bedrag, notitie, link,
+  correspondent, paperless-document en contractdata) naar andere maanden, of
+  kopieer de cijfers van een hele maand naar andere maanden.
 - **Logboek** — elke wijziging wordt vastgelegd met datum, tijd, oude en
   nieuwe waarde.
 - **Statistieken** — staafdiagram van de inleg per persoon per maand, een
@@ -71,7 +72,8 @@ cijfers zich over tijd ontwikkelen.
 - **Spaardoelen met een bijgehouden saldo** — een grafiek van de verwachte
   opbouw per doel, een werkelijk maandsaldo dat je op elk moment kunt
   corrigeren (eerdere maanden blijven precies zoals vastgelegd), een optioneel
-  streefbedrag waarbij de projectie stopt zodra het bereikt is, en een
+  streefbedrag waarbij de projectie stopt zodra het bereikt is (met een
+  prognose van de maand waarin je het bereikt en hoeveel er nog te gaan is), en een
   optionele verdeling over meerdere rekeningen bij verschillende banken, elk
   met een eigen saldo en rentepercentage.
 - **Geldstromen-diagram** — een sankey-diagram dat het geld volgt van salaris

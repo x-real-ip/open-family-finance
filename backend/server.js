@@ -14,7 +14,7 @@
  *   GET  /api/paperless/labels                                   -> { types: [{id,name}], tags: [{id,name}] } | 404 when disabled
  *   GET  /api/paperless/correspondents/:id/latest-document
  *        [?labelKind=type|tag&labelId=]                          -> { id, title, created, documentType, url } | null | 404 when disabled
- *   GET  /api/paperless/documents?correspondentId=&query=         -> [{ id, title, created, documentType, url }] | 404 when disabled
+ *   GET  /api/paperless/documents?correspondentId=[&query=]       -> [{ id, title, created, documentType, url }] | 404 when disabled
  *   GET  /api/paperless/documents/:id                             -> { id, title, created, documentType, url } | null | 404 when disabled
  *
  * Monthly report (see report/): a PDF of the month, e-mailed on a set day
@@ -148,11 +148,12 @@ app.get("/api/paperless/correspondents/:id/latest-document", async (req, res) =>
   }
 });
 
-// Search a correspondent's documents by free text, for manually picking one.
+// A correspondent's documents (newest first), optionally narrowed by text,
+// for manually picking one.
 app.get("/api/paperless/documents", async (req, res) => {
   if (!paperlessEnabled) return res.status(404).json({ error: "paperless integration disabled" });
   const { correspondentId, query } = req.query;
-  if (!correspondentId || !String(query || "").trim()) return res.json([]);
+  if (!correspondentId) return res.json([]);
   try {
     res.json(await searchDocuments(correspondentId, query));
   } catch (e) {

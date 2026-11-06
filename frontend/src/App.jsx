@@ -41,7 +41,7 @@ import {
   figuresFor, computeTotals, migrateFig, SORT_MODES, DEFAULT_LIST_SORT, listSortOf, migrateCheckpoints, migrateSubAccount,
   migrateGoal, freshData, normalize, monthlyContributionAt, subAccountContribution, projectSubAccountSeries,
   valueAt, transferAmountAt, setTransferAmountAt, transferTargetKey, FROM_START, goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, isDeposit, depositEnd, isMonthKey, plannedTransfers, transferChanges, lastRecorded, migrateTransferAccount, contributionRoute,
-  isFixedFormula,
+  targetReachMonth, monthsBetween, isFixedFormula,
 } from "./finance";
 
 /* ----------------------------------------------------------------
@@ -594,14 +594,13 @@ export default function App() {
     }
     return [...set].sort();
   }, [data.months, paperlessCorrespondents]);
-  // Best-effort: mirrors a newly typed correspondent into paperless on blur,
-  // skipped for names paperless already knows about.
-  const syncCorrespondent = (name) => {
-    if (!PAPERLESS_ENABLED || !name) return;
-    if (paperlessCorrespondents.some((c) => c.name.toLowerCase() === name.toLowerCase())) return;
-    paperless.ensureCorrespondent(name).then((created) => {
-      if (created) setPaperlessCorrespondents((list) => [...list, created]);
-    });
+  // Creates a typed correspondent in paperless on request (the "create"
+  // button in CorrespondentEditor); resolves to it, or null when that failed.
+  const createCorrespondent = async (name) => {
+    if (!PAPERLESS_ENABLED || !name) return null;
+    const created = await paperless.ensureCorrespondent(name);
+    if (created) setPaperlessCorrespondents((list) => (list.some((c) => c.id === created.id) ? list : [...list, created]));
+    return created;
   };
 
   // Document types + tags, for the per-entry "preferred label" picker.
@@ -782,36 +781,28 @@ export default function App() {
     return { ...d, log: [entry, ...(d.log || [])].slice(0, 300) };
   });
 
-  // Copy one entry's value from the selected month to an explicit, individually
-  // picked set of past and/or future months. Only that entry's amount (or
-  // formula) is changed in months where it already exists; in months where it
-  // doesn't exist yet it is added with just the amount/period (and formula, if
-  // any) — never with the entry's note, link, correspondent/document, or
-  // contract dates, so copying an amount never silently drags contract
-  // metadata along for the ride.
+  // Copy one entry from the selected month to an explicit, individually
+  // picked set of past and/or future months. The entry is copied whole —
+  // amount/period or formula, but also its name, category, note, link,
+  // correspondent and paperless document, and contract dates — so the target
+  // months end up with exactly the same entry. Where the entry already exists
+  // it is replaced in place (keeping its position in the list); elsewhere it
+  // is appended.
   // Note: copying overwrites manual overrides in the target months on purpose —
   // it is an explicit action — but does not mark the targets as overridden.
-  const copyEntryRange = (kind, id, pastKeys, futureKeys) => setData((d) => {
+  const copyEntryRange = (kind, id, pastKeys, futureKeys, personId = null) => setData((d) => {
     const s = d.selectedMonth;
-    const item = (d.months[s][kind] || []).find((x) => x.id === id);
+    const item = listAt(d.months[s], kind, personId).find((x) => x.id === id);
     if (!item) return d;
-    const field = kind === "partners" ? "income" : "amount";
     const targets = new Set([...(pastKeys || []), ...(futureKeys || [])]);
     const months = { ...d.months };
     for (const k of targets) {
       if (k === s || !months[k]) continue;
-      const list = months[k][kind] || [];
-      const exists = list.some((x) => x.id === id);
-      if (kind !== "partners" && item.formula) {
-        months[k] = { ...months[k], [kind]: exists
-          ? list.map((x) => x.id === id ? { ...x, formula: clone(item.formula), period: item.period } : x)
-          : [...list, clone(item)] };
-      } else if (exists) {
-        months[k] = { ...months[k], [kind]: list.map((x) => x.id === id ? { ...x, [field]: item[field], period: item.period } : x) };
-      } else {
-        const bare = { ...clone(item), note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" };
-        months[k] = { ...months[k], [kind]: [...list, bare] };
-      }
+      const list = listAt(months[k], kind, personId);
+      const next = list.some((x) => x.id === id)
+        ? list.map((x) => (x.id === id ? clone(item) : x))
+        : [...list, clone(item)];
+      months[k] = withList(months[k], kind, personId, next);
     }
     return { ...d, months };
   });
@@ -952,32 +943,6 @@ export default function App() {
     const id = uid();
     editForward((f) => withList(f, "personalSavings", personId, [...listAt(f, "personalSavings", personId), { id, label: "", amount: "", period: "month", note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" }]), id);
   };
-  const copyPersonalEntryRange = (kind, personId, id, pastKeys, futureKeys) => setData((d) => {
-    const s = d.selectedMonth;
-    const item = listAt(d.months[s], kind, personId).find((x) => x.id === id);
-    if (!item) return d;
-    const targets = new Set([...(pastKeys || []), ...(futureKeys || [])]);
-    const months = { ...d.months };
-    for (const k of targets) {
-      if (k === s || !months[k]) continue;
-      const list = listAt(months[k], kind, personId);
-      const exists = list.some((x) => x.id === id);
-      let nextList;
-      if (item.formula) {
-        nextList = exists
-          ? list.map((x) => x.id === id ? { ...x, formula: clone(item.formula), period: item.period } : x)
-          : [...list, clone(item)];
-      } else if (exists) {
-        nextList = list.map((x) => x.id === id ? { ...x, amount: item.amount, period: item.period } : x);
-      } else {
-        const bare = { ...clone(item), note: "", url: "", correspondent: "", documentMode: "auto", documentLabel: null, documentId: null, startDate: "", endDate: "", warningDays: "" };
-        nextList = [...list, bare];
-      }
-      months[k] = withList(months[k], kind, personId, nextList);
-    }
-    return { ...d, months };
-  });
-
   // Savings goals aren't month-scoped, so they're mutated directly rather
   // than through editForward/forward-propagation.
   // Goals are keyed by the monthly savings entry they belong to (see
@@ -1123,7 +1088,7 @@ export default function App() {
       togglePeriod: kind === "partners" ? (id) => togglePartnerPeriod(id)
         : personId ? (id) => togglePersonalItemPeriod(kind, personId, id)
         : (id) => toggleItemPeriod(kind, id),
-      copyRange: personId ? (id, pk, fk) => copyPersonalEntryRange(kind, personId, id, pk, fk) : (id, pk, fk) => copyEntryRange(kind, id, pk, fk),
+      copyRange: (id, pk, fk) => copyEntryRange(kind, id, pk, fk, personId),
     };
   };
   const hasCategory = (kind) => kind === "expenses" || kind === "personalExpenses";
@@ -1216,7 +1181,7 @@ export default function App() {
             ))}
             {section(TXT.note, <NoteEditor value={e.note || ""} onChange={(v) => ops.set(e.id, { note: v })} />)}
             {section(TXT.link, <LinkEditor value={e.url || ""} onChange={(v) => ops.set(e.id, { url: v })} />)}
-            {PAPERLESS_ENABLED && section(TXT.correspondent, <CorrespondentEditor entry={e} onChange={(patch) => ops.set(e.id, patch)} onSync={syncCorrespondent} correspondents={paperlessCorrespondents} labels={paperlessLabels} />)}
+            {PAPERLESS_ENABLED && section(TXT.correspondent, <CorrespondentEditor key={`${kind}:${personId || ""}:${e.id}`} entry={e} onChange={(patch) => ops.set(e.id, patch)} onCreate={createCorrespondent} correspondents={paperlessCorrespondents} knownNames={correspondents} labels={paperlessLabels} />)}
             {!isPerson && section(TXT.sourceRule, <FormulaEditor key={`${kind}:${personId || ""}:${e.id}`} entry={e} monthData={cur} onChange={(patch) => ops.set(e.id, patch)} />)}
             {section(TXT.copyAmount, <CopyPicker pastMonths={pastMonths} futureMonths={futureMonths} onCopy={(pk, fk) => ops.copyRange(e.id, pk, fk)} emptyText={TXT.noMonthsToCopy} />)}
             {canDelete && (
@@ -1293,7 +1258,6 @@ export default function App() {
     <div style={St.page} className="page">
       <style>{CSS}</style>
       <datalist id="cats">{categories.map((c) => <option key={c} value={c} />)}</datalist>
-      {PAPERLESS_ENABLED && <datalist id="correspondents">{correspondents.map((c) => <option key={c} value={c} />)}</datalist>}
       <datalist id="banks">{banks.map((b) => <option key={b} value={b} />)}</datalist>
 
       <div style={St.shell} className="shell">
@@ -2476,49 +2440,81 @@ function DragHandle({ active, ...dragProps }) {
   return <span {...dragProps} style={St.dragHandle} aria-label={TXT.dragHandle} title={TXT.dragHandle}><GripVertical size={14} /></span>;
 }
 
-// Correspondent, shown in the entry detail panel. Free-text with
-// paperless-ngx suggestions (see the #correspondents datalist); when the
-// typed value matches a known paperless correspondent, also looks up (and
-// links to) the most recent document paperless has for it. Renders nothing
-// when the integration is off, per PAPERLESS_ENABLED.
-function CorrespondentEditor({ entry, onChange, onSync, correspondents, labels }) {
+// Correspondent, shown in the entry detail panel. Typing shows matching
+// suggestions as a tappable list right under the field — paperless-ngx's
+// correspondents first, then names used elsewhere in the app — rather than a
+// <datalist>, which mobile browsers show poorly or not at all. Once the value
+// matches a paperless correspondent, the most recent document is looked up
+// (automatic) or one can be picked from that correspondent's documents
+// (manual). A name paperless doesn't know is only created there when you ask
+// for it, never on blur: on a phone the field loses focus mid-typing (or when
+// a suggestion is tapped), which used to create half-typed correspondents.
+// Renders nothing when the integration is off, per PAPERLESS_ENABLED.
+function CorrespondentEditor({ entry, onChange, onCreate, correspondents, knownNames, labels }) {
   const [doc, setDoc] = useState(null);
   const [docLoading, setDocLoading] = useState(false);
-  const [docKey, setDocKey] = useState(null);
+  const [focused, setFocused] = useState(false);
+  const blurTimer = useRef(null);
+  useEffect(() => () => clearTimeout(blurTimer.current), []);
+  const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState([]);
+  const [results, setResults] = useState(null); // null = not loaded yet
   const [searching, setSearching] = useState(false);
 
   const value = entry.correspondent || "";
   const mode = entry.documentMode || "auto";
-  const has = value.trim().length > 0;
-  const match = has ? correspondents.find((c) => c.name.toLowerCase() === value.trim().toLowerCase()) : null;
+  const typed = value.trim().toLowerCase();
+  const match = typed ? correspondents.find((c) => c.name.toLowerCase() === typed) : null;
 
-  // Auto mode: (re)fetch whenever the correspondent resolves or the entry's preferred label changes.
+  // Suggestions: names containing what's typed (all of them for an empty
+  // field), paperless ones first. Hidden once the value is an exact match.
+  const suggestions = useMemo(() => {
+    if (!focused || match) return [];
+    const paperlessNames = correspondents.map((c) => c.name);
+    const seen = new Set(paperlessNames.map((n) => n.toLowerCase()));
+    const names = [...paperlessNames, ...knownNames.filter((n) => !seen.has(n.toLowerCase()))];
+    return names.filter((n) => n.toLowerCase().includes(typed)).slice(0, 8)
+      .map((name) => ({ name, inPaperless: seen.has(name.toLowerCase()) }));
+  }, [focused, match, correspondents, knownNames, typed]);
+
+  // Automatic: the most recent document (of the preferred label, if any).
+  // The cleanup drops a response that arrives after the inputs changed again.
   useEffect(() => {
-    if (!PAPERLESS_ENABLED || mode !== "auto" || !match) return;
-    const key = `auto:${match.id}:${entry.documentLabel?.kind || ""}:${entry.documentLabel?.id || ""}`;
-    if (docKey === key) return;
+    if (mode !== "auto" || !match) { setDoc(null); return; }
+    let active = true;
     setDocLoading(true);
-    paperless.latestDocument(match.id, entry.documentLabel).then((d) => { setDoc(d); setDocKey(key); setDocLoading(false); });
+    paperless.latestDocument(match.id, entry.documentLabel).then((d) => { if (active) { setDoc(d); setDocLoading(false); } });
+    return () => { active = false; };
   }, [mode, match?.id, entry.documentLabel?.kind, entry.documentLabel?.id]);
 
-  // Manual mode: fetch the pinned document's details whenever the pin changes.
+  // Manual: details of the pinned document.
   useEffect(() => {
-    if (!PAPERLESS_ENABLED || mode !== "manual" || !entry.documentId) return;
-    const key = `manual:${entry.documentId}`;
-    if (docKey === key) return;
+    if (mode !== "manual" || !entry.documentId) { if (mode === "manual") setDoc(null); return; }
+    let active = true;
     setDocLoading(true);
-    paperless.getDocument(entry.documentId).then((d) => { setDoc(d); setDocKey(key); setDocLoading(false); });
+    paperless.getDocument(entry.documentId).then((d) => { if (active) { setDoc(d); setDocLoading(false); } });
+    return () => { active = false; };
   }, [mode, entry.documentId]);
 
-  const runSearch = (q) => {
-    setQuery(q);
-    if (!match || !q.trim()) { setResults([]); return; }
+  // Manual: the correspondent's documents, newest first, narrowed by the
+  // search text (debounced, so a request isn't fired for every keystroke).
+  useEffect(() => {
+    if (mode !== "manual" || !match) { setResults(null); return; }
+    let active = true;
     setSearching(true);
-    paperless.searchDocuments(match.id, q.trim()).then((r) => { setResults(r); setSearching(false); });
+    const timer = setTimeout(() => {
+      paperless.searchDocuments(match.id, query.trim()).then((r) => { if (active) { setResults(r); setSearching(false); } });
+    }, query ? 300 : 0);
+    return () => { active = false; clearTimeout(timer); };
+  }, [mode, match?.id, query]);
+
+  const pickName = (name) => { clearTimeout(blurTimer.current); onChange({ correspondent: name }); setFocused(false); };
+  const create = async () => {
+    setCreating(true);
+    const created = await onCreate(value.trim());
+    setCreating(false);
+    if (created) onChange({ correspondent: created.name });
   };
-  const pickDocument = (id) => { onChange({ documentId: id }); setResults([]); setQuery(""); setDocKey(null); };
   const changeLabel = (raw) => {
     if (!raw) return onChange({ documentLabel: null });
     const [kind, idStr] = raw.split(":");
@@ -2527,23 +2523,59 @@ function CorrespondentEditor({ entry, onChange, onSync, correspondents, labels }
   };
   if (!PAPERLESS_ENABLED) return null;
 
-  const docBlock = docLoading ? (
-    <span style={St.correspondentDocMuted}><Loader2 size={13} className="spin" /> {TXT.searchingDocument}</span>
-  ) : doc ? (
-    <a href={doc.url} target="_blank" rel="noopener noreferrer" style={St.correspondentDocLink}>{doc.documentType ? `${doc.documentType} · ` : ""}{doc.title} — {TXT.openInPaperless}</a>
-  ) : (
-    <span style={St.correspondentDocMuted}>{TXT.noDocumentFound}</span>
+  const docLink = (d) => (
+    <a href={d.url} target="_blank" rel="noopener noreferrer" style={St.correspondentDocLink}>
+      <FileText size={14} style={{ flexShrink: 0 }} />
+      <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{d.documentType ? `${d.documentType} · ` : ""}{d.title} — {TXT.openInPaperless}</span>
+    </a>
   );
+  const docBlock = docLoading
+    ? <span style={St.correspondentDocMuted}><Loader2 size={13} className="spin" /> {TXT.searchingDocument}</span>
+    : doc ? docLink(doc) : <span style={St.correspondentDocMuted}>{TXT.noDocumentFound}</span>;
 
   return (
     <>
-      <input list="correspondents" value={value} placeholder={TXT.correspondentPlaceholder}
-        onChange={(e) => onChange({ correspondent: e.target.value })}
-        onBlur={(e) => onSync(e.target.value)}
-        style={St.drawerInput} aria-label={TXT.correspondent} />
+      <div style={{ position: "relative" }}>
+        <input value={value} placeholder={TXT.correspondentPlaceholder}
+          autoComplete="off" autoCorrect="off" spellCheck={false} enterKeyHint="done"
+          onChange={(e) => onChange({ correspondent: e.target.value })}
+          onFocus={() => { clearTimeout(blurTimer.current); setFocused(true); }}
+          // Hidden a moment after blur: on touch screens the blur can come
+          // before the tap on a suggestion, which would otherwise be lost.
+          onBlur={() => { blurTimer.current = setTimeout(() => setFocused(false), 200); }}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur(); }}
+          style={{ ...St.drawerInput, paddingRight: value ? 38 : 10 }} aria-label={TXT.correspondent} aria-autocomplete="list" />
+        {value && (
+          <button type="button" aria-label={TXT.clearCorrespondent} title={TXT.clearCorrespondent} style={St.correspondentClear}
+            onMouseDown={(e) => e.preventDefault()} onClick={() => onChange({ correspondent: "", documentId: null })}>
+            <X size={15} />
+          </button>
+        )}
+      </div>
+      {suggestions.length > 0 && (
+        <div style={St.correspondentResults} role="listbox">
+          {/* preventDefault on mousedown keeps the input focused, so the tap
+              lands on the suggestion instead of the list disappearing first. */}
+          {suggestions.map((s) => (
+            <button key={s.name} type="button" role="option" aria-selected={false}
+              onMouseDown={(e) => e.preventDefault()} onClick={() => pickName(s.name)} style={St.correspondentResult}>
+              <Building2 size={13} style={{ flexShrink: 0, color: s.inPaperless ? C.b : C.muted }} />
+              <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{s.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {typed && !match && !focused && (
+        <div style={{ ...St.correspondentDoc, flexWrap: "wrap" }}>
+          <span style={St.correspondentDocMuted}>{TXT.correspondentUnknown}</span>
+          <button type="button" onClick={create} disabled={creating} style={St.correspondentAction}>
+            {creating ? <Loader2 size={13} className="spin" /> : <Plus size={13} />} {t(LANG, "createCorrespondent", { name: value.trim() })}
+          </button>
+        </div>
+      )}
       {match && (
         <>
-          <div style={St.correspondentModeRow}>
+          <div style={{ ...St.correspondentModeRow, marginTop: 8 }}>
             <button type="button" onClick={() => onChange({ documentMode: "auto" })} style={{ ...St.toggleBtn, ...(mode === "auto" ? St.toggleOn : {}) }}>{TXT.documentModeAuto}</button>
             <button type="button" onClick={() => onChange({ documentMode: "manual" })} style={{ ...St.toggleBtn, ...(mode === "manual" ? St.toggleOn : {}) }}>{TXT.documentModeManual}</button>
           </div>
@@ -2552,36 +2584,42 @@ function CorrespondentEditor({ entry, onChange, onSync, correspondents, labels }
               <select
                 value={entry.documentLabel ? `${entry.documentLabel.kind}:${entry.documentLabel.id}` : ""}
                 onChange={(e) => changeLabel(e.target.value)}
-                style={{ ...St.drawerInput, marginBottom: 8 }}>
+                style={{ ...St.drawerInput, marginBottom: 8 }} aria-label={TXT.documentTypes}>
                 <option value="">{TXT.noLabelPreference}</option>
                 <optgroup label={TXT.documentTypes}>
-                  {labels.types.map((t) => <option key={`type:${t.id}`} value={`type:${t.id}`}>{t.name}</option>)}
+                  {labels.types.map((l) => <option key={`type:${l.id}`} value={`type:${l.id}`}>{l.name}</option>)}
                 </optgroup>
                 <optgroup label={TXT.documentTags}>
-                  {labels.tags.map((t) => <option key={`tag:${t.id}`} value={`tag:${t.id}`}>{t.name}</option>)}
+                  {labels.tags.map((l) => <option key={`tag:${l.id}`} value={`tag:${l.id}`}>{l.name}</option>)}
                 </optgroup>
               </select>
               <div style={St.correspondentDoc}>{docBlock}</div>
             </>
           ) : (
             <>
-              <input value={query} placeholder={TXT.searchDocumentsPlaceholder}
-                onChange={(e) => runSearch(e.target.value)}
-                style={St.drawerInput} aria-label={TXT.searchDocumentsPlaceholder} />
-              {searching && <span style={St.correspondentDocMuted}><Loader2 size={13} className="spin" /> {TXT.searchingDocument}</span>}
-              {!searching && results.length > 0 && (
-                <div style={St.correspondentResults}>
-                  {results.map((r) => (
-                    <button key={r.id} type="button" onClick={() => pickDocument(r.id)} style={St.correspondentResult}>
-                      {r.documentType ? `${r.documentType} · ` : ""}{r.title}
-                    </button>
-                  ))}
+              {entry.documentId && (
+                <div style={{ ...St.correspondentDoc, marginTop: 0, paddingTop: 0, borderTop: "none", marginBottom: 8 }}>
+                  {docBlock}
+                  <button type="button" onClick={() => onChange({ documentId: null })} style={St.correspondentUnlink}>{TXT.clearPinnedDocument}</button>
                 </div>
               )}
-              {entry.documentId && (
-                <div style={St.correspondentDoc}>
-                  {docBlock}
-                  <button type="button" onClick={() => { onChange({ documentId: null }); setDocKey(null); }} style={St.correspondentUnlink}>{TXT.clearPinnedDocument}</button>
+              <input type="search" value={query} placeholder={TXT.searchDocumentsPlaceholder} enterKeyHint="search"
+                onChange={(e) => setQuery(e.target.value)}
+                style={St.drawerInput} aria-label={TXT.searchDocumentsPlaceholder} />
+              {searching && <div style={{ ...St.correspondentDocMuted, marginTop: 6 }}><Loader2 size={13} className="spin" /> {TXT.searchingDocument}</div>}
+              {!searching && results && results.length === 0 && <div style={{ ...St.correspondentDocMuted, marginTop: 6 }}>{TXT.noDocumentFound}</div>}
+              {!searching && results && results.length > 0 && (
+                <div style={St.correspondentResults}>
+                  {results.map((r) => (
+                    <button key={r.id} type="button" onClick={() => onChange({ documentId: r.id })}
+                      style={{ ...St.correspondentResult, ...(String(r.id) === String(entry.documentId) ? St.correspondentResultOn : {}) }}>
+                      {String(r.id) === String(entry.documentId) ? <Check size={13} style={{ flexShrink: 0, color: C.save }} /> : <FileText size={13} style={{ flexShrink: 0, color: C.muted }} />}
+                      <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                        {r.documentType ? `${r.documentType} · ` : ""}{r.title}
+                        {r.created && <span style={{ color: C.muted }}> · {new Intl.DateTimeFormat(getRuntimeDateLocale(), { dateStyle: "medium" }).format(new Date(r.created))}</span>}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               )}
             </>
@@ -2643,6 +2681,8 @@ function DurationEditor({ entry, onChange }) {
 // be a very long dropdown for no extra precision anyone needs.
 const HORIZON_OPTIONS = [3, 6, 12, 24, 36, 48, 60, 72, 84, 96, 108, 120];
 const horizonLabel = (n) => n < 12 ? t(LANG, "months", { count: n }) : t(LANG, "yearsShort", { count: n / 12 });
+// "2 jr 5 mnd" — a duration of whole months, years first.
+const durationLabel = (n) => [Math.floor(n / 12) && t(LANG, "yearsShort", { count: Math.floor(n / 12) }), n % 12 && t(LANG, "months", { count: n % 12 })].filter(Boolean).join(" ");
 
 function SavingsOverviewPage({ savingsGoals, months, savingsGroups, partners, currentMonthData, sel, onUpdateGoal, onAddSubAccount, onRemoveSubAccount, onUpdateSubAccount }) {
   const [horizon, setHorizon] = useState(12);
@@ -3166,19 +3206,25 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
     return map;
   }, [effectiveSubAccounts, months, entry.id, keys, target]);
   // The first month (if any) whose projected total actually crosses the
-  // target — not just "reached somewhere within the horizon". "Reached" is
+  // target — not just "reached somewhere within the horizon". It's searched
+  // well beyond the chosen horizon (see targetReachMonth), so the forecast
+  // below can name a date for a target that's years away. "Reached" is
   // only true once the month you're currently viewing (sel) is at or after
   // that month, so the badge doesn't show up while browsing months that are
   // still short of it, just because a later projected month gets there.
-  const reachedMonth = useMemo(() => {
-    if (target == null) return null;
-    for (const k of keys) {
-      const total = effectiveSubAccounts.reduce((sum, s) => sum + (seriesBySub[s.id][k]?.balance ?? 0), 0);
-      if (total >= target) return k;
-    }
-    return null;
-  }, [keys, seriesBySub, effectiveSubAccounts, target]);
+  const reachedMonth = useMemo(
+    () => targetReachMonth(months, entry.id, effectiveSubAccounts, target),
+    [months, entry.id, effectiveSubAccounts, target]);
   const reached = reachedMonth != null && sel >= reachedMonth;
+  // Forecast while the target is still ahead: when it's expected to be
+  // reached, how long that is from the viewed month, and what's still to go.
+  // Needs a starting point: a recorded balance, or this month for a pot
+  // that's never had one (see goalAccounts).
+  const forecast = target != null && target > 0 && !reached && earliest ? {
+    month: reachedMonth,
+    inMonths: reachedMonth ? monthsBetween(sel, reachedMonth) : null,
+    remaining: Math.max(0, target - effectiveSubAccounts.reduce((sum, s) => sum + (balanceAt(months, entry.id, s, sel, target)?.balance ?? 0), 0)),
+  } : null;
   const tip = interestTip(forwarded ? (seriesBySub[mainId]?.[sel]?.balance ?? null) : null, goal);
   const hasInterest = effectiveSubAccounts.some((s) => num(s.interestRate) > 0);
   const chartData = useMemo(() => keys.map((k) => {
@@ -3207,6 +3253,8 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
         {/* Read-only here on purpose — this is the same monthly entry shown
             in the monthly view, and it should only be editable there. */}
         {forwarded && <span style={St.goalForwardedTag}>{t(LANG, "goalAccountsCount", { count: subAccounts.length + 1 })}</span>}
+        {forecast?.month && <span style={St.goalForwardedTag} title={t(LANG, "targetForecast", { month: monthLong(forecast.month), duration: durationLabel(forecast.inMonths) })}>{t(LANG, "targetForecastShort", { month: monthShortWithYear(forecast.month) })}</span>}
+        {reached && <span style={{ ...St.goalForwardedTag, color: C.save }}>{TXT.targetReached}</span>}
         <span style={St.savingsGoalAmount} title={TXT.savingsGoalAmountInfo}>{eur(entryDisplayAmount)} {entryPeriodSuffix}</span>
         <ChevronDown size={18} style={{ color: C.muted, transform: open ? "rotate(180deg)" : "none", transition: "transform .2s", flexShrink: 0 }} />
       </div>
@@ -3243,6 +3291,14 @@ function SavingsGoalCard({ entry, goal, months, currentMonthData, sel, horizon, 
             onChange={(e) => onUpdate({ targetAmount: e.target.value.replace(/[^0-9.,]/g, "") })} style={{ ...St.copySel, width: 100 }} />
         </label>
       </div>
+      {forecast && (
+        <div style={St.savingsForecast}>
+          <CalendarDays size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>{forecast.month
+            ? t(LANG, "targetForecastLine", { remaining: eur(forecast.remaining), month: monthLong(forecast.month), duration: durationLabel(forecast.inMonths) })
+            : t(LANG, "targetForecastNever", { remaining: eur(forecast.remaining) })}</span>
+        </div>
+      )}
 
       {forwarded && (
         <>
@@ -4171,9 +4227,12 @@ const St = {
   correspondentModeRow: { display: "flex", marginBottom: 8 },
   correspondentDoc: { marginTop: 8, paddingTop: 7, borderTop: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 },
   correspondentDocMuted: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.muted },
-  correspondentDocLink: { color: C.b, fontWeight: 600, textDecoration: "none", fontSize: 12.5 },
-  correspondentResults: { maxHeight: 160, overflowY: "auto", marginTop: 6, display: "flex", flexDirection: "column", gap: 2 },
-  correspondentResult: { textAlign: "left", border: "none", background: "transparent", color: C.ink, fontSize: 12.5, padding: "6px 4px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" },
+  correspondentDocLink: { display: "inline-flex", alignItems: "flex-start", gap: 6, minWidth: 0, color: C.b, fontWeight: 600, textDecoration: "none", fontSize: 13, padding: "4px 0" },
+  correspondentResults: { maxHeight: 240, overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", marginTop: 6, display: "flex", flexDirection: "column", border: `1px solid ${C.line}`, borderRadius: 10, background: C.card },
+  correspondentResult: { display: "flex", alignItems: "center", gap: 8, minHeight: 42, textAlign: "left", border: "none", borderBottom: `1px solid ${C.line}`, background: "transparent", color: C.ink, fontSize: 13.5, padding: "8px 10px", cursor: "pointer", fontFamily: "inherit" },
+  correspondentResultOn: { background: C.softB, fontWeight: 600 },
+  correspondentClear: { position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)", width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", color: C.muted, cursor: "pointer", borderRadius: 8 },
+  correspondentAction: { display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, background: C.card, color: C.b, fontSize: 13, fontWeight: 600, padding: "8px 12px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit" },
   correspondentUnlink: { border: "none", background: "transparent", color: C.exp, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 },
   progressTrack: { marginTop: 10, height: 6, borderRadius: 999, background: C.canvas, overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: 999, transition: "width .2s" },
@@ -4242,6 +4301,7 @@ const St = {
   savingsTd: { textAlign: "right", padding: "5px 10px", color: C.ink, fontVariantNumeric: "tabular-nums", borderBottom: `1px solid ${C.line}` },
   savingsTdSub: { fontSize: 10.5, fontWeight: 500, color: C.muted },
   savingsTrReached: { background: `color-mix(in srgb, ${C.save} 10%, transparent)` },
+  savingsForecast: { display: "flex", gap: 6, alignItems: "flex-start", marginTop: 2, marginBottom: 6, fontSize: 12.5, color: C.muted, lineHeight: 1.45 },
   savingsTargetReached: { marginTop: 10, fontSize: 12.5, fontWeight: 600, color: C.save },
 };
 

@@ -6,7 +6,7 @@ import {
   computeTotals, normalize, migrateFig, monthlyContributionAt, projectSubAccountSeries,
   subAccountContribution, valueAt, transferTargetKey, setTransferAmountAt, FROM_START,
   goalAccounts, balanceAt, accountOwnerShares, interestTip, personalTotals, migrateGoal, depositEnd, isMonthKey, plannedTransfers, transferChanges, lastRecorded, contributionRoute,
-  computeFormulaAmount, isFixedFormula,
+  targetReachMonth, monthsBetween, computeFormulaAmount, isFixedFormula,
 } from "./finance.js";
 
 const fig = (over = {}) => migrateFig({
@@ -285,4 +285,22 @@ test("a calculation can start from a fixed amount instead of a source row", () =
   const sourced = { id: "z", period: "year", formula: { sourceId: "s1", ops: [{ op: "times", factor: "0.5" }] } };
   assert.ok(!isFixedFormula(sourced.formula));
   close(computeFormulaAmount(sourced, month), 3600);
+});
+
+test("targetReachMonth finds the month the combined balance reaches the target, beyond any horizon", () => {
+  const months = { "2026-11": fig() }; // € 600 a month into s1
+  const acc = { id: "x", sharePercent: "100", checkpoints: { "2026-11": "1000" } };
+  // 1000 + 600 × 15 = 10000 → reached 15 months later.
+  assert.equal(targetReachMonth(months, "s1", [acc], 10000), "2028-02");
+  assert.equal(monthsBetween("2026-11", "2028-02"), 15);
+  // Already there at the first balance.
+  assert.equal(targetReachMonth(months, "s1", [acc], 500), "2026-11");
+  // Two accounts count together: 2 × (1000 + 300 n) ≥ 5000 → n = 5.
+  const half = (id) => ({ id, sharePercent: "50", checkpoints: { "2026-11": "1000" } });
+  assert.equal(targetReachMonth(months, "s1", [half("a"), half("b")], 5000), "2027-04");
+  // Nothing added → never; no target or no balance → null too.
+  const none = { "2026-11": fig({ savings: [{ id: "s1", amount: "0" }] }) };
+  assert.equal(targetReachMonth(none, "s1", [acc], 10000), null);
+  assert.equal(targetReachMonth(months, "s1", [acc], null), null);
+  assert.equal(targetReachMonth(months, "s1", [{ id: "y", checkpoints: {} }], 10000), null);
 });

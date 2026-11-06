@@ -49,8 +49,9 @@ numbers evolve over time.
   divide).
 - **Trend indicators & history sparkline** per entry, comparing the current
   month to the most recent earlier month with a value.
-- **Copy tools** — copy a single entry's amount to other months, or copy an
-  entire month's figures to earlier months.
+- **Copy tools** — copy a single entry (amount, note, link, correspondent,
+  paperless document and contract dates) to other months, or copy an entire
+  month's figures to other months.
 - **Change log** — every edit is recorded with date, time, old and new value.
 - **Statistics** — bar chart of each person's monthly contribution, a bar
   chart of income / government support / expenses / savings per month, and a
@@ -68,7 +69,8 @@ numbers evolve over time.
 - **Savings goals with a running balance** — a projected-growth chart per
   goal, an actual monthly balance you can correct at any point (earlier
   months stay exactly as recorded), an optional target amount that caps the
-  projection once reached, and an optional split across several sub-accounts
+  projection once reached (with a forecast of the month you'll get there and
+  how much is still to go), and an optional split across several sub-accounts
   at different banks, each with its own balance and interest rate.
 - **Cashflow diagram** — a Sankey diagram tracing money from salary to its
   last known destination, for whichever month you're viewing, with three
